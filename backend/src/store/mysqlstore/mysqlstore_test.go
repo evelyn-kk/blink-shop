@@ -2,13 +2,18 @@ package mysqlstore_test
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
 	"testing/fstest"
 
+	"github.com/go-sql-driver/mysql"
+
 	"github.com/evelyn-kk/blink-shop/backend/migrations"
+	"github.com/evelyn-kk/blink-shop/backend/src/domain"
 	"github.com/evelyn-kk/blink-shop/backend/src/store"
 	"github.com/evelyn-kk/blink-shop/backend/src/store/mysqlstore"
 	"github.com/evelyn-kk/blink-shop/backend/src/store/mysqlstore/mysqltest"
@@ -47,7 +52,7 @@ func TestMigrateEmptyThenAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(applied, []string{"0001_init.sql"}) {
+	if !reflect.DeepEqual(applied, []string{"0001_init.sql", "0002_promotion_discount_rate_check.sql"}) {
 		t.Fatalf("first run applied %v", applied)
 	}
 	applied, err = s.Migrate(ctx, migrations.FS)
@@ -55,7 +60,7 @@ func TestMigrateEmptyThenAgain(t *testing.T) {
 		t.Fatalf("second run applied %v, err %v; want nothing", applied, err)
 	}
 	var count int
-	if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil || count != 1 {
+	if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil || count != 2 {
 		t.Fatalf("schema_migrations rows = %d, %v", count, err)
 	}
 }
@@ -302,5 +307,93 @@ func TestTimesStoredInUTC(t *testing.T) {
 	}
 	if want := acc.CreatedAt.Format("2006-01-02T15:04:05.000000"); created != want {
 		t.Fatalf("stored created_at = %s, want UTC %s", created, want)
+	}
+}
+
+// TestDiscountRateRange 覆盖 REV-003：折扣率在 MySQL 的写入、读出和约束三层都限定在 [0, 1]。
+func TestDiscountRateRange(t *testing.T) {
+	ctx := context.Background()
+	s := migrated(t)
+	if _, err := s.ApplySeed(ctx, storetest.DevSeed(t)); err != nil {
+		t.Fatal(err)
+	}
+	db := s.DB()
+	readRate := func() (domain.Rate, error) {
+		var r domain.Rate
+		err := db.QueryRowContext(ctx, "SELECT discount_rate FROM promotion_rules WHERE promotion_id = 'promo_seed_earbuds'").Scan(&r)
+		return r, err
+	}
+
+	// 往返：0.95 写入后读回仍是 0.9500。
+	if r, err := readRate(); err != nil || r.String() != "0.9500" {
+		t.Fatalf("round trip = %s, %v", r, err)
+	}
+
+	// 约束存在。
+	var clause string
+	if err := db.QueryRowContext(ctx, `SELECT CHECK_CLAUSE FROM information_schema.CHECK_CONSTRAINTS
+		WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME = 'chk_promotion_rules_discount_rate'`).Scan(&clause); err != nil {
+		t.Fatalf("check constraint missing: %v", err)
+	}
+
+	// 绕过应用的越界写入被数据库拒绝（错误 3819），原值不变；边界值 0 和 1 允许。
+	for _, bad := range []string{"1.5", "1.0001", "-0.1", "9.9999"} {
+		_, err := db.ExecContext(ctx, "UPDATE promotion_rules SET discount_rate = ? WHERE promotion_id = 'promo_seed_earbuds'", bad)
+		var myErr *mysql.MySQLError
+		if !errors.As(err, &myErr) || myErr.Number != 3819 {
+			t.Errorf("UPDATE discount_rate = %s: err = %v, want check constraint violation 3819", bad, err)
+		}
+	}
+	if r, _ := readRate(); r.String() != "0.9500" {
+		t.Fatalf("value changed after rejected updates: %s", r)
+	}
+	for _, edge := range []string{"0", "1"} {
+		if _, err := db.ExecContext(ctx, "UPDATE promotion_rules SET discount_rate = ? WHERE promotion_id = 'promo_seed_earbuds'", edge); err != nil {
+			t.Errorf("UPDATE discount_rate = %s should succeed: %v", edge, err)
+		}
+	}
+
+	// 通过 Store 写入越界值：在 Value()/ValidatePromotion 处被拒绝，不会到达数据库。
+	promo := storetest.DevSeed(t).Promotions[2]
+	promo.PromotionID, promo.DiscountRate = "promo_store_bad", 15000
+	if _, err := s.ApplySeed(ctx, store.SeedData{Promotions: []domain.PromotionRule{promo}}); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("ApplySeed with rate 1.5: err = %v, want ErrInvalid", err)
+	}
+
+	// 读出防线独立生效：即使约束被删掉、库里出现 1.5，读取也会报错而不是得到越界的 Rate。
+	if _, err := db.ExecContext(ctx, "ALTER TABLE promotion_rules DROP CHECK chk_promotion_rules_discount_rate"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE promotion_rules SET discount_rate = 1.5 WHERE promotion_id = 'promo_seed_earbuds'"); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := readRate(); err == nil {
+		t.Fatalf("scanning 1.5 should fail, got %s", r)
+	}
+}
+
+// 已在 0001 上并写入了数据的库，升级时只执行新增的 0002，原有数据不受影响。
+func TestMigrateUpgradeFrom0001(t *testing.T) {
+	ctx := context.Background()
+	s := freshDB(t)
+	init, err := fs.ReadFile(migrations.FS, "0001_init.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Migrate(ctx, fstest.MapFS{"0001_init.sql": {Data: init}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplySeed(ctx, storetest.DevSeed(t)); err != nil {
+		t.Fatal(err)
+	}
+	applied, err := s.Migrate(ctx, migrations.FS)
+	if err != nil || !reflect.DeepEqual(applied, []string{"0002_promotion_discount_rate_check.sql"}) {
+		t.Fatalf("upgrade applied %v, %v", applied, err)
+	}
+	if p, err := s.GetProduct(ctx, "p_seed_nova"); err != nil || p.Price.String() != "2999.00" {
+		t.Fatalf("data after upgrade: %+v, %v", p, err)
+	}
+	if n, err := s.PendingMigrations(ctx, migrations.FS); err != nil || n != 0 {
+		t.Fatalf("pending after upgrade = %d, %v", n, err)
 	}
 }

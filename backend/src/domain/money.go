@@ -69,14 +69,30 @@ func (m *Money) Scan(src any) error {
 }
 
 // Rate 是 4 位小数的比例（如折扣率 0.9500），对应 MySQL DECIMAL(5,4)。
+// 合法范围是 [0, 1]：解析、JSON 读入、数据库读出、写入数据库四个入口都用 Validate 校验，
+// 数据库层另有 CHECK 约束（0002 迁移）兜底。
 type Rate int64
 
-const rateScale = 4
+const (
+	rateScale = 4
+	rateOne   = Rate(10000) // 1.0000
+)
+
+// Validate 检查比例是否在 [0, 1] 内。
+func (r Rate) Validate() error {
+	if r < 0 || r > rateOne {
+		return fmt.Errorf("比例 %s 必须在 0 到 1 之间", r)
+	}
+	return nil
+}
 
 func ParseRate(s string) (Rate, error) {
 	v, err := parseFixed(s, rateScale)
-	if err != nil || v < 0 || v > 10000 {
-		return 0, fmt.Errorf("比例 %q 必须在 0 到 1 之间且最多 4 位小数", s)
+	if err != nil {
+		return 0, fmt.Errorf("比例 %q 不合法: %w", s, err)
+	}
+	if err := Rate(v).Validate(); err != nil {
+		return 0, err
 	}
 	return Rate(v), nil
 }
@@ -89,14 +105,35 @@ func MustRate(s string) Rate {
 	return r
 }
 
-func (r Rate) String() string                { return formatFixed(int64(r), rateScale) }
-func (r Rate) MarshalJSON() ([]byte, error)  { return json.Marshal(r.String()) }
-func (r Rate) Value() (driver.Value, error)  { return r.String(), nil }
-func (r *Rate) UnmarshalJSON(b []byte) error { return unmarshalFixed(b, rateScale, (*int64)(r)) }
+func (r Rate) String() string               { return formatFixed(int64(r), rateScale) }
+func (r Rate) MarshalJSON() ([]byte, error) { return json.Marshal(r.String()) }
+
+// Value 写库前校验，越界的比例不会被写入。
+func (r Rate) Value() (driver.Value, error) {
+	if err := r.Validate(); err != nil {
+		return nil, err
+	}
+	return r.String(), nil
+}
+
+func (r *Rate) UnmarshalJSON(b []byte) error {
+	var v int64
+	if err := unmarshalFixed(b, rateScale, &v); err != nil {
+		return err
+	}
+	if err := Rate(v).Validate(); err != nil {
+		return err
+	}
+	*r = Rate(v)
+	return nil
+}
 
 func (r *Rate) Scan(src any) error {
 	v, err := scanFixed(src, rateScale)
 	if err != nil {
+		return fmt.Errorf("scan rate: %w", err)
+	}
+	if err := Rate(v).Validate(); err != nil {
 		return fmt.Errorf("scan rate: %w", err)
 	}
 	*r = Rate(v)

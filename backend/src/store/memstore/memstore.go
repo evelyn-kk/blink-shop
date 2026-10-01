@@ -303,6 +303,9 @@ func (s *Store) ApplySeed(ctx context.Context, data store.SeedData) (store.SeedR
 		}
 		for _, p := range data.Promotions {
 			ins.row("promotion_rules", has(s.data.promotions, p.PromotionID), func() error {
+				if err := store.ValidatePromotion(p); err != nil {
+					return err
+				}
 				p.CreatedAt, p.UpdatedAt = s.orNow(p.CreatedAt), s.orNow(p.UpdatedAt)
 				s.data.promotions[p.PromotionID] = p
 				return nil

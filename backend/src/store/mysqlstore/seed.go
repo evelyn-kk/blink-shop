@@ -166,6 +166,9 @@ func (s *Store) insertChunk(ctx context.Context, c domain.KnowledgeChunk) error 
 }
 
 func (s *Store) insertPromotion(ctx context.Context, p domain.PromotionRule) error {
+	if err := store.ValidatePromotion(p); err != nil {
+		return err
+	}
 	_, err := s.q(ctx).ExecContext(ctx, `INSERT INTO promotion_rules
 		(promotion_id, name, scope, merchant_id, product_id, category_id, type, threshold_amount, discount_amount,
 		 discount_rate, stackable, start_at, end_at, status, created_at, updated_at)

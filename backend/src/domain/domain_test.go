@@ -92,18 +92,65 @@ func TestMoneyJSONAndScan(t *testing.T) {
 	}
 }
 
-func TestRate(t *testing.T) {
-	if r := MustRate("0.95"); r.String() != "0.9500" {
-		t.Fatalf("rate = %s", r)
+// TestRateRangeOnEveryEntry 确认 [0, 1] 的约束在解析、JSON 读入、数据库读出、写入数据库四个入口一致生效。
+func TestRateRangeOnEveryEntry(t *testing.T) {
+	tests := []struct {
+		in    string
+		ok    bool
+		canon string
+	}{
+		{"0", true, "0.0000"},
+		{"0.95", true, "0.9500"},
+		{"0.0001", true, "0.0001"},
+		{"1", true, "1.0000"},
+		{"1.0000", true, "1.0000"},
+		{"1.0001", false, ""},
+		{"1.5", false, ""},
+		{"9.9999", false, ""}, // DECIMAL(5,4) 的上限也必须被拒绝
+		{"-0.1", false, ""},
+		{"-0.0001", false, ""},
+		{"0.12345", false, ""}, // 超过 4 位小数
 	}
-	for _, bad := range []string{"1.5", "-0.1", "0.12345"} {
-		if _, err := ParseRate(bad); err == nil {
-			t.Fatalf("ParseRate(%q) should fail", bad)
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			check := func(entry string, got Rate, err error) {
+				t.Helper()
+				if tt.ok && (err != nil || got.String() != tt.canon) {
+					t.Errorf("%s(%q) = %s, %v; want %s", entry, tt.in, got, err, tt.canon)
+				}
+				if !tt.ok && err == nil {
+					t.Errorf("%s(%q) = %s; want error", entry, tt.in, got)
+				}
+			}
+
+			r, err := ParseRate(tt.in)
+			check("ParseRate", r, err)
+
+			for _, raw := range []string{`"` + tt.in + `"`, tt.in} {
+				var j Rate
+				check("UnmarshalJSON "+raw, j, json.Unmarshal([]byte(raw), &j))
+				if !tt.ok && j != 0 {
+					t.Errorf("failed UnmarshalJSON(%s) must not modify the value, got %s", raw, j)
+				}
+			}
+
+			var sc Rate
+			check("Scan", sc, sc.Scan([]byte(tt.in)))
+		})
+	}
+
+	// 写库前校验：越界值即使绕过解析直接构造，也写不进数据库。
+	for _, r := range []Rate{-1, 10001, 99999} {
+		if _, err := r.Value(); err == nil {
+			t.Errorf("Rate(%d).Value() should fail", int64(r))
 		}
 	}
-	var r Rate
-	if err := r.Scan([]byte("0.8800")); err != nil || r.String() != "0.8800" {
-		t.Fatalf("scan rate = %s, %v", r, err)
+	if v, err := MustRate("0.88").Value(); err != nil || v != "0.8800" {
+		t.Errorf("Value = %v, %v", v, err)
+	}
+	b, _ := json.Marshal(MustRate("0.95"))
+	if string(b) != `"0.9500"` {
+		t.Errorf("marshal = %s", b)
 	}
 }
 

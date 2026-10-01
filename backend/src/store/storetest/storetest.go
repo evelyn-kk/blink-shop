@@ -4,6 +4,7 @@ package storetest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -59,6 +60,7 @@ func Run(t *testing.T, newStore Factory) {
 		{"SeedConflictRollsBackEverything", testSeedConflict},
 		{"SoftDeletedAccountHidden", testSoftDeleted},
 		{"UniqueKeysReportedByName", testUniqueKeyNames},
+		{"OutOfRangeDiscountRateRejected", testOutOfRangeRate},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) { c.fn(t, newStore(t)) })
@@ -452,6 +454,35 @@ func testUniqueKeyNames(t *testing.T, s store.Store) {
 		var conflict *store.ConflictError
 		if !errors.As(err, &conflict) || conflict.Key != c.key {
 			t.Errorf("%s: err = %v, want conflict on %s", c.name, err, c.key)
+		}
+	}
+}
+
+// testOutOfRangeRate 确认越界折扣率在写入前被拒绝（ErrInvalid），且同一份种子整体回滚。
+func testOutOfRangeRate(t *testing.T, s store.Store) {
+	ctx := context.Background()
+	base := DevSeed(t)
+	for _, bad := range []domain.Rate{10001, 15000, -1} {
+		promo := base.Promotions[2]
+		promo.PromotionID = "promo_bad_rate"
+		promo.DiscountRate = bad // 绕过 ParseRate 直接构造
+		data := store.SeedData{
+			Accounts:   base.Accounts[:1],
+			Promotions: []domain.PromotionRule{promo},
+		}
+		if _, err := s.ApplySeed(ctx, data); !errors.Is(err, store.ErrInvalid) {
+			t.Errorf("rate %s: err = %v, want ErrInvalid", bad, err)
+		}
+		_, _, err := s.GetAccountByUsername(ctx, base.Accounts[0].Username)
+		expectNotFound(t, err, "account in rejected seed")
+	}
+	// 边界值 0 和 1 可以写入。
+	for i, ok := range []domain.Rate{0, 10000} {
+		promo := base.Promotions[2]
+		promo.PromotionID = fmt.Sprintf("promo_edge_%d", i)
+		promo.DiscountRate = ok
+		if _, err := s.ApplySeed(ctx, store.SeedData{Promotions: []domain.PromotionRule{promo}}); err != nil {
+			t.Errorf("rate %s should be accepted: %v", ok, err)
 		}
 	}
 }

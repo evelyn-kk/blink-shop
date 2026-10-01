@@ -119,3 +119,11 @@ func ValidateNewAccount(in NewAccount) error {
 	}
 	return nil
 }
+
+// ValidatePromotion 是两种实现写入促销规则前共用的校验：折扣率必须在 [0, 1]。
+func ValidatePromotion(p domain.PromotionRule) error {
+	if err := p.DiscountRate.Validate(); err != nil {
+		return fmt.Errorf("%w: 促销 %s: %v", ErrInvalid, p.PromotionID, err)
+	}
+	return nil
+}

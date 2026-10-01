@@ -23,12 +23,14 @@
 | 版本 | 文件 | 内容 |
 | --- | --- | --- |
 | 0001 | `0001_init.sql` | 初始 24 张表：身份、目录、文件与知识、交易、营销与评价、导购会话、治理 |
+| 0002 | `0002_promotion_discount_rate_check.sql` | `promotion_rules.discount_rate` 加 CHECK 约束，限定在 [0, 1]（REV-003） |
 
 ## 约定
 
 - 主键为带前缀的字符串 ID（`acct_`、`p_`、`o_` 等，见 `src/domain/id.go`）。
 - 时间列 `DATETIME(3)`，连接时强制会话时区 `+00:00`，全部按 UTC 存取。
-- 金额 `DECIMAL(10,2)`，比例 `DECIMAL(5,4)`；应用层使用 `domain.Money` / `domain.Rate` 定点类型，不经过 float。
+- 金额 `DECIMAL(10,2)`，比例 `DECIMAL(5,4)`；应用层使用 `domain.Money` / `domain.Rate` 定点类型，不经过 float。比例的取值范围 [0, 1] 在解析、JSON 读入、数据库读出、写入数据库四个入口统一校验，数据库另有 CHECK 约束兜底。
+- 无法写成 `IF NOT EXISTS` 的 `ALTER TABLE`，每个迁移文件只放一条，保证中途失败时不会只改了一半、也能直接重跑。
 - JSON 列（标签、属性、附件、块等）读取后按目标结构解析，结构不符时返回带列名的错误。
 - 不建外键（与上游一致，方便软删和分表）；引用完整性由业务事务和种子数据测试保证。
 
