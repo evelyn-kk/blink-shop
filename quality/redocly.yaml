@@ -1,0 +1,6 @@
+extends:
+  - recommended
+rules:
+  # 健康检查等公开接口显式 security: []，其余默认 bearer。
+  security-defined: error
+  operation-4xx-response: off

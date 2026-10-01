@@ -1,0 +1,142 @@
+# Blink Shop 本地开发依赖。只用于开发：端口全部绑定 127.0.0.1，凭据是开发默认值。
+# 启动：docker compose -f deployments/docker-compose.yml up -d
+# 覆盖端口或凭据：在仓库根目录 .env 中设置同名变量，并加 --env-file .env。
+name: blink_shop
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${BLINK_MYSQL_ROOT_PASSWORD:-blink_dev_root}
+      MYSQL_DATABASE: ${BLINK_MYSQL_DATABASE:-blink_shop}
+      MYSQL_USER: ${BLINK_MYSQL_USER:-blink}
+      MYSQL_PASSWORD: ${BLINK_MYSQL_PASSWORD:-blink_dev_password}
+      TZ: Asia/Shanghai
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
+    ports:
+      - "127.0.0.1:${BLINK_MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${BLINK_REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  nacos:
+    image: nacos/nacos-server:v2.5.1
+    environment:
+      MODE: standalone
+      NACOS_AUTH_ENABLE: "false"
+      # 2.4+ 镜像启动要求以下三项非空；仅开发用，生产必须替换并开启鉴权。
+      NACOS_AUTH_TOKEN: ${BLINK_NACOS_AUTH_TOKEN:-YmxpbmtfZGV2X25hY29zX3Rva2VuX2F0X2xlYXN0XzMyX2J5dGVz}
+      NACOS_AUTH_IDENTITY_KEY: ${BLINK_NACOS_AUTH_IDENTITY_KEY:-blink_dev}
+      NACOS_AUTH_IDENTITY_VALUE: ${BLINK_NACOS_AUTH_IDENTITY_VALUE:-blink_dev}
+      JVM_XMS: 256m
+      JVM_XMX: 512m
+      JVM_XMN: 128m
+    ports:
+      - "127.0.0.1:${BLINK_NACOS_PORT:-8848}:8848"
+      - "127.0.0.1:${BLINK_NACOS_GRPC_PORT:-9848}:9848"
+    volumes:
+      - nacos_data:/home/nacos/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8848/nacos/v1/console/health/readiness >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    restart: unless-stopped
+
+  # 官方 minio/minio 镜像已停止公开发布，这里用 Bitnami 归档的同版本镜像（MinIO RELEASE.2025-04-22）。
+  minio:
+    image: bitnamilegacy/minio:2025.4.22
+    environment:
+      MINIO_ROOT_USER: ${BLINK_MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${BLINK_MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_API_PORT_NUMBER: "9000"
+      MINIO_CONSOLE_PORT_NUMBER: "9001"
+    ports:
+      - "127.0.0.1:${BLINK_MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${BLINK_MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/bitnami/minio/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # etcd 只供 Milvus 使用，不对宿主机暴露端口。
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.18
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command:
+      - etcd
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --data-dir=/etcd
+    volumes:
+      - etcd_data:/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  milvus:
+    image: milvusdb/milvus:v2.5.10
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: ${BLINK_MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_ACCESS_KEY: ${BLINK_MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "127.0.0.1:${BLINK_MILVUS_PORT:-19530}:19530"
+    volumes:
+      - milvus_data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9091/healthz"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  redis_data:
+  nacos_data:
+  minio_data:
+  etcd_data:
+  milvus_data:

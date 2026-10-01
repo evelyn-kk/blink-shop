@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Blink Shop</string>
+    <string name="api_base_label">接口地址：%1$s</string>
+</resources>

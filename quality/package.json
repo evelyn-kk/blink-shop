@@ -1,0 +1,15 @@
+{
+  "name": "blink-shop-quality",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "openapi:lint": "redocly lint --config redocly.yaml ../backend/openapi.yaml"
+  },
+  "devDependencies": {
+    "@redocly/cli": "2.57.0"
+  }
+}

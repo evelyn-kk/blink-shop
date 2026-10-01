@@ -1,0 +1,45 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.blink.shop'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.blink.shop'
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName '0.1.0'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    buildTypes {
+        debug {
+            // 10.0.2.2 是模拟器访问宿主机的地址；真机调试时改成宿主机局域网 IP。
+            buildConfigField 'String', 'DEFAULT_API_BASE', '"http://10.0.2.2:8080/api/v1"'
+        }
+        release {
+            buildConfigField 'String', 'DEFAULT_API_BASE', '"https://api.blink-shop.invalid/api/v1"'
+            minifyEnabled false
+        }
+    }
+
+    lint {
+        abortOnError true
+        warningsAsErrors false
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}

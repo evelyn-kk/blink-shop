@@ -1,0 +1,186 @@
+openapi: 3.1.0
+info:
+  title: Blink Shop API
+  version: 0.1.0
+  description: |
+    Blink Shop 的单一接口契约。约定：
+    - 所有路径前缀为 `/api/v1`，JSON 字段使用 snake_case。
+    - 成功响应直接返回业务对象，不包 `data` 外层。
+    - 失败响应统一为 `Error`；状态码含义见 `docs/03-api-contract.md`。
+    - 分页参数 `page` 从 1 开始，`page_size` 默认 10、最大 100；列表响应使用 `Page` 结构。
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+servers:
+  - url: /api/v1
+    description: 与当前访问地址同源（本地开发为 http://localhost:8080）
+security:
+  - bearerAuth: []
+tags:
+  - name: health
+    description: 进程存活与就绪检查
+paths:
+  /health:
+    get:
+      tags: [health]
+      operationId: getHealth
+      summary: 进程存活检查
+      description: 只表示进程存活，不检查数据库等依赖。
+      security: []
+      responses:
+        "200":
+          description: 进程存活
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: ok
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: 登录后获得的不透明 token。
+  parameters:
+    Page:
+      name: page
+      in: query
+      required: false
+      description: 页码，从 1 开始。
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: page_size
+      in: query
+      required: false
+      description: 每页条数，默认 10，最大 100。
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 10
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ok
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: 机器可读错误码，例如 `invalid_argument`、`unauthorized`、`forbidden`、`not_found`、`conflict`、`payload_too_large`、`rate_limited`、`internal_error`。
+          examples: [not_found]
+        message:
+          type: string
+          description: 可直接展示给用户的中文说明。
+          examples: [接口不存在]
+        request_id:
+          type: string
+          description: 请求追踪 ID，与响应头 `X-Request-ID` 一致。
+    PageMeta:
+      type: object
+      required: [page, page_size, total]
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 100
+        total:
+          type: integer
+          minimum: 0
+    Page:
+      description: 列表响应基础结构；具体接口用 allOf 合并并约束 `items` 的元素类型。
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: {}
+  responses:
+    BadRequest:
+      description: 参数错误
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: invalid_argument
+            message: 请求参数不正确
+    Unauthorized:
+      description: 未登录或登录已失效
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: unauthorized
+            message: 请先登录
+    Forbidden:
+      description: 无权访问该资源
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: forbidden
+            message: 没有权限
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: not_found
+            message: 资源不存在
+    Conflict:
+      description: 幂等、状态或库存冲突
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: conflict
+            message: 当前状态不允许该操作
+    PayloadTooLarge:
+      description: 请求体或文件过大
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: payload_too_large
+            message: 文件过大
+    TooManyRequests:
+      description: 触发限流
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: rate_limited
+            message: 请求过于频繁，请稍后再试
+    InternalError:
+      description: 服务内部错误
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: internal_error
+            message: 服务暂时不可用
