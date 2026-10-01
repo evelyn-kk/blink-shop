@@ -1,0 +1,89 @@
+{
+  "product_id": "p_seed_nova",
+  "merchant_id": "m_seed_digital",
+  "category_id": "c_phone",
+  "name": "Blink Nova 12",
+  "brand": "Blink",
+  "image_url": "https://picsum.photos/seed/blink-p_seed_nova/640/640",
+  "image_urls": [
+    "https://picsum.photos/seed/blink-p_seed_nova/640/640",
+    "https://picsum.photos/seed/blink-p_seed_nova-2/640/640"
+  ],
+  "price": "2999.00",
+  "market_price": "3299.00",
+  "stock_quantity": 80,
+  "stock_status": "in_stock",
+  "tags": [
+    "拍照",
+    "轻薄",
+    "长续航"
+  ],
+  "selling_points": [
+    "5000 万像素主摄",
+    "5000mAh 电池",
+    "6.5 英寸 OLED"
+  ],
+  "recommend_reason": "拍照和续航均衡，2999 元起。",
+  "risk_notes": [],
+  "attributes": [
+    {
+      "key": "屏幕",
+      "value": "6.5 英寸 OLED"
+    },
+    {
+      "key": "重量",
+      "value": "186",
+      "unit": "g"
+    },
+    {
+      "key": "电池",
+      "value": "5000",
+      "unit": "mAh"
+    }
+  ],
+  "suitable_for": [
+    "日常拍照",
+    "学生",
+    "预算三千左右"
+  ],
+  "not_suitable_for": [
+    "重度手游"
+  ],
+  "description": "面向日常拍照和长续航需求的轻薄手机。",
+  "status": "active",
+  "sort_order": 10,
+  "skus": [
+    {
+      "sku_id": "sku_seed_nova_128",
+      "product_id": "p_seed_nova",
+      "sku_name": "Blink Nova 12 8+128G",
+      "price": "2999.00",
+      "stock_quantity": 50,
+      "stock_status": "in_stock",
+      "specs": {
+        "存储": "128GB",
+        "颜色": "曜石黑"
+      },
+      "is_default": true,
+      "created_at": "2026-09-20T02:00:00Z",
+      "updated_at": "2026-09-20T02:00:00Z"
+    },
+    {
+      "sku_id": "sku_seed_nova_256",
+      "product_id": "p_seed_nova",
+      "sku_name": "Blink Nova 12 8+256G",
+      "price": "3299.00",
+      "stock_quantity": 30,
+      "stock_status": "in_stock",
+      "specs": {
+        "存储": "256GB",
+        "颜色": "曜石黑"
+      },
+      "is_default": false,
+      "created_at": "2026-09-20T02:00:00Z",
+      "updated_at": "2026-09-20T02:00:00Z"
+    }
+  ],
+  "created_at": "2026-09-20T02:00:00Z",
+  "updated_at": "2026-09-20T02:00:00Z"
+}

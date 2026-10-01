@@ -1,0 +1,8 @@
+{
+  "category_id": "c_phone",
+  "parent_id": "c_digital",
+  "name": "手机",
+  "sort_order": 10,
+  "created_at": "2026-09-20T02:00:00Z",
+  "updated_at": "2026-09-20T02:00:00Z"
+}

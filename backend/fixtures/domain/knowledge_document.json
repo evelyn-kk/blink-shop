@@ -1,0 +1,15 @@
+{
+  "document_id": "doc_seed_nova",
+  "merchant_id": "m_seed_digital",
+  "title": "Blink Nova 12 商品说明",
+  "doc_type": "product_detail",
+  "content": "Blink Nova 12 采用 5000 万像素主摄，支持人像和夜景模式，128GB 版本售价 2999 元。\nBlink Nova 12 内置 5000mAh 电池，支持 33W 快充，正常使用可坚持一天半。\n",
+  "status": "indexed",
+  "chunk_count": 2,
+  "content_hash": "1e57c44218e982ac5ab8b0f6c18d95ee081075bbb1224d7c0353922d94427c5a",
+  "metadata": {
+    "seed": true
+  },
+  "created_at": "2026-09-20T02:00:00Z",
+  "updated_at": "2026-09-20T02:00:00Z"
+}

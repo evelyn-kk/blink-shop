@@ -1,0 +1,9 @@
+{
+  "user_coupon_id": "uc_seed_user_platform_used",
+  "coupon_id": "coupon_seed_platform",
+  "account_id": "acct_seed_user",
+  "status": "used",
+  "order_id": "o_seed_paid",
+  "claimed_at": "2026-09-19T02:00:00Z",
+  "used_at": "2026-09-21T02:00:00Z"
+}

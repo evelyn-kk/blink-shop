@@ -4,9 +4,54 @@ Go 1.24 标准库 `net/http` API。接口契约见 [openapi.yaml](openapi.yaml)�
 
 ```bash
 set -a && source ../.env && set +a   # 可选：加载根目录 .env
+go run ./cmd/seed                    # 迁移 + 写入演示数据（可重复执行）
 go run ./cmd/api                     # http://localhost:8080/api/v1/health
 gofmt -l . && go vet ./... && go test ./...
+
+# MySQL 集成测试（每个用例自建临时库并删除；需要建库权限）
+BLINK_TEST_MYSQL_DSN='root:blink_dev_root@tcp(127.0.0.1:3306)/' go test ./...
 ```
+
+未设置 `BLINK_TEST_MYSQL_DSN` 时，本地会跳过 MySQL 集成测试（内存实现的同一套契约测试照常运行）；CI 中会启动 MySQL 服务并强制运行。
+
+## 数据层
+
+| 位置 | 内容 |
+| --- | --- |
+| `src/domain` | 领域类型、状态机（`CanTransitionTo`）、定点金额 `Money`/比例 `Rate`、ID 生成。不依赖任何基础设施 |
+| `migrations/` | 版本化 SQL 迁移、迁移规则、唯一约束清单和实体关系图，见 [migrations/README.md](migrations/README.md) |
+| `src/store` | `Store` 接口与可识别错误：`ErrNotFound`、`ErrConflict`（`ConflictError.Key` 为唯一键名）、`ErrInvalid` |
+| `src/store/mysqlstore` | MySQL 实现与迁移执行器；所有 SQL 参数化 |
+| `src/store/memstore` | 内存实现，供上层单测使用；实现同样的唯一约束和事务回滚 |
+| `src/store/storetest` | 两种实现共用的契约测试 |
+| `src/seed`、`cmd/seed` | 开发演示数据与写入命令 |
+| `fixtures/domain/` | 领域对象 JSON 序列化样例；改了领域类型后用 `go test ./src/seed -update` 更新 |
+
+事务通过 context 传递：
+
+```go
+err := st.WithTx(ctx, func(ctx context.Context) error {
+    // 用同一个 ctx 调用的 Store 方法都在这个事务里；返回 error 或 panic 都会整体回滚。
+    // 嵌套 WithTx 复用外层事务。
+    return nil
+})
+```
+
+`Store` 目前只包含本节点需要的方法（账户、分类、商品读取、事务、种子）；其余方法随各功能节点加入，并同步补充契约测试。
+
+## 演示数据
+
+`go run ./cmd/seed` 先执行迁移，再按固定 ID 写入演示数据：主键已存在的记录跳过，不覆盖本地修改，所以可以重复执行；遇到其他唯一键冲突时整份种子回滚。`APP_ENV=production` 时拒绝运行。
+
+| 账号 | 角色 | 说明 |
+| --- | --- | --- |
+| `blink_admin` | admin | 平台管理员 |
+| `blink_merchant` | merchant | Blink 数码旗舰店 |
+| `blink_merchant2` | merchant | Blink 家居生活馆（用于越权测试） |
+| `blink_user` | user | 有覆盖全部状态的订单、已用优惠券和评价 |
+| `blink_user2` | user | 有一张未使用的优惠券（用于越权测试） |
+
+初始密码均为 `BlinkDev#2026`（仅限本地），数据库只保存 bcrypt 哈希。数据还包括两级分类、9 个商品（可售、库存紧张、无货、下架、风控、已删除）、知识文档与分块、促销规则和优惠券。
 
 ## 启动流程
 
@@ -14,7 +59,7 @@ gofmt -l . && go vet ./... && go test ./...
 
 1. 读取配置并解析所有 HTTP 配置；任何格式错误直接退出，并一次列出全部问题。
 2. `APP_ENV=production` 时做危险配置检查（见下文），不通过则在监听端口前退出（exit 1）。
-3. 连接 MySQL。连不上只记 warn，进程照常启动：`/health` 仍为 200，`/ready` 返回 503，MySQL 恢复后自动变回就绪。
+3. 连接 MySQL。连不上只记 warn，进程照常启动：`/health` 仍为 200，`/ready` 返回 503，MySQL 恢复后自动变回就绪。`RUN_MIGRATIONS` 开启时在后台执行迁移（失败每 5 秒重试）；只要还有未执行的迁移，`/ready` 就是 503。
 4. 监听 `API_ADDR`；收到 SIGINT/SIGTERM 后最多等 10 秒处理完在途请求再退出。
 
 ## 中间件链
@@ -62,9 +107,9 @@ gofmt -l . && go vet ./... && go test ./...
 | --- | --- | --- | --- |
 | `APP_ENV` | — | `development` | `development` / `test` / `production`（`prod`） |
 | `API_ADDR` | — | `:8080` | 监听地址 |
-| `RUN_MIGRATIONS` | — | 非生产 `true`，生产 `false` | 启动时执行迁移（1.1 实现） |
+| `RUN_MIGRATIONS` | — | 非生产 `true`，生产 `false` | 启动时在后台执行数据库迁移 |
 | `BOOTSTRAP_VECTOR_INDEX` | — | 非生产 `true`，生产 `false` | 启动时初始化向量索引（8.x 实现） |
-| `MYSQL_DSN` | — | 与 Compose 开发库一致 | 密钥类，日志中整体掩码 |
+| `MYSQL_DSN` | — | 与 Compose 开发库一致 | 密钥类，日志中整体掩码。连接时强制 UTC 时区、`parseTime`、utf8mb4 |
 | `CORS_ALLOWED_ORIGINS` | `http.cors.allowed_origins` | `*` | 逗号分隔；生产环境始终忽略 `*` |
 | `TRUSTED_PROXY_CIDRS` | `http.trusted_proxy_cidrs` | 空 | 逗号分隔的 CIDR 或 IP |
 | `TRUST_ALL_PROXIES` | `http.trust_all_proxies` | `false` | 仅本地调试；生产始终视为 `false` |
@@ -108,7 +153,7 @@ gofmt -l . && go vet ./... && go test ./...
 | `user_agent` | 请求的 User-Agent |
 | `account_id` | 已登录时出现（1.2 起） |
 
-其他事件：`config loaded`、`api listening`、`mysql unavailable at startup`、`readiness check failed`、`panic recovered`（含 `stack`）、`mysql driver`、`api shutdown completed`。
+其他事件：`config loaded`、`api listening`、`mysql unavailable at startup`、`readiness check failed`、`panic recovered`（含 `stack`）、`mysql driver`、`database migrated`、`database migration failed, will retry`、`api shutdown completed`。
 
 ### 脱敏规则
 

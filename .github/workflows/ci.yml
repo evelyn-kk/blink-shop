@@ -20,6 +20,20 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    # MySQL 集成测试用的临时库；镜像与 deployments/docker-compose.yml 锁定的版本一致。
+    services:
+      mysql:
+        image: mysql:8.4.11@sha256:6ea90827b1100f8f2ae306a539f86d2c264a26ed435a2a9f75551dd5c3aeb242
+        env:
+          MYSQL_ROOT_PASSWORD: blink_ci_root
+          MYSQL_DATABASE: blink_shop
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pblink_ci_root --silent"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+    env:
+      BLINK_TEST_MYSQL_DSN: root:blink_ci_root@tcp(127.0.0.1:3306)/
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -30,8 +44,18 @@ jobs:
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - name: go vet
         run: go vet ./...
-      - name: go test (race)
+      - name: go test (race, with MySQL)
         run: go test -race ./...
+      - name: seed twice on empty database
+        shell: bash # 开启 pipefail，seed 失败不会被 tee 吞掉
+        env:
+          MYSQL_DSN: root:blink_ci_root@tcp(127.0.0.1:3306)/blink_shop
+        run: |
+          go run ./cmd/seed | tee first.txt
+          go run ./cmd/seed | tee second.txt
+          grep -q "本次执行 1 个" first.txt
+          grep -q "本次执行 0 个" second.txt
+          grep -q "本次新增 0 行" second.txt
 
   web:
     name: Web (React)

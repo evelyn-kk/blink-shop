@@ -25,7 +25,8 @@
 cp .env.example .env                                    # 按需修改；.env 不提交
 docker compose -f deployments/docker-compose.yml up -d  # MySQL/Redis/Nacos/MinIO/etcd/Milvus
 set -a && source .env && set +a                         # 后端读取环境变量；不加载则用内置开发默认值
-cd backend && go run ./cmd/api                          # /api/v1/health 存活，/api/v1/ready 检查 MySQL
+cd backend && go run ./cmd/seed                         # 迁移并写入演示数据（账号见 backend/README.md）
+cd backend && go run ./cmd/api                          # /api/v1/health 存活，/api/v1/ready 检查 MySQL 和迁移
 cd frontend && npm ci && npm run dev -- --port 5173     # /api 代理到 :8080
 cd android-native && ./gradlew :app:assembleDebug       # 模拟器默认访问 http://10.0.2.2:8080/api/v1
 ```
@@ -33,7 +34,7 @@ cd android-native && ./gradlew :app:assembleDebug       # 模拟器默认访问 
 ## 本地检查（与 CI 一致）
 
 ```bash
-cd backend && gofmt -l . && go vet ./... && go test ./...
+cd backend && gofmt -l . && go vet ./... && go test ./...   # 加 BLINK_TEST_MYSQL_DSN 运行 MySQL 集成测试
 cd frontend && npm ci && npm run lint && npm run build
 cd android-native && ./gradlew test lint assembleDebug
 cd quality && npm ci && npm run openapi:lint

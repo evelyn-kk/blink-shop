@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/evelyn-kk/blink-shop/backend/src/store/mysqlstore/mysqltest"
 )
 
 func envOf(m map[string]string) func(string) string {
@@ -94,6 +96,46 @@ func TestRunWithMySQLDown(t *testing.T) {
 	}
 	if strings.Contains(out, "blink:pw@") {
 		t.Fatalf("DSN leaked into logs: %s", out)
+	}
+}
+
+// 真实 MySQL：未迁移时 /ready 503；RUN_MIGRATIONS 开启后后台迁移完成，/ready 变为 200。
+func TestReadyWaitsForMigrations(t *testing.T) {
+	dsn := mysqltest.FreshDSN(t)
+	for _, tc := range []struct {
+		runMigrations string
+		want          int
+	}{
+		{"false", http.StatusServiceUnavailable},
+		{"true", http.StatusOK},
+	} {
+		t.Run("RUN_MIGRATIONS="+tc.runMigrations, func(t *testing.T) {
+			addr := freeAddr(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			logs := &syncBuffer{}
+			go func() {
+				done <- run(ctx, envOf(map[string]string{"API_ADDR": addr, "MYSQL_DSN": dsn, "RUN_MIGRATIONS": tc.runMigrations}), logs)
+			}()
+			defer func() {
+				cancel()
+				<-done
+			}()
+			base := "http://" + addr + "/api/v1"
+			waitUntilUp(t, base+"/health")
+			deadline := time.Now().Add(15 * time.Second)
+			code := get(t, base+"/ready")
+			for code != tc.want && time.Now().Before(deadline) {
+				time.Sleep(100 * time.Millisecond)
+				code = get(t, base+"/ready")
+			}
+			if code != tc.want {
+				t.Fatalf("/ready = %d, want %d; logs: %s", code, tc.want, logs)
+			}
+			if tc.runMigrations == "false" && !strings.Contains(logs.String(), "数据库迁移未执行") {
+				t.Fatalf("readiness log should mention pending migrations: %s", logs)
+			}
+		})
 	}
 }
 

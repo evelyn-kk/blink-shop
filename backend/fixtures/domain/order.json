@@ -1,0 +1,46 @@
+{
+  "order_id": "o_seed_completed",
+  "order_no": "BS2026092040001",
+  "account_id": "acct_seed_user",
+  "merchant_id": "m_seed_digital",
+  "status": "completed",
+  "total_amount": "1728.00",
+  "discount_amount": "0.00",
+  "pay_amount": "1728.00",
+  "payment_deadline_at": "2026-09-23T02:30:00Z",
+  "paid_at": "2026-09-23T02:05:00Z",
+  "shipped_at": "2026-09-23T08:00:00Z",
+  "completed_at": "2026-09-23T22:00:00Z",
+  "items": [
+    {
+      "order_item_id": "o_seed_completed_item1",
+      "order_id": "o_seed_completed",
+      "product_id": "p_seed_mouse",
+      "sku_id": "sku_seed_mouse_gray",
+      "name": "Blink 静音无线鼠标 M2",
+      "sku_name": "Blink M2 深空灰",
+      "image_url": "https://picsum.photos/seed/blink-p_seed_mouse/640/640",
+      "price": "129.00",
+      "quantity": 1,
+      "merchant_id": "m_seed_digital",
+      "merchant_name": "Blink 数码旗舰店",
+      "created_at": "2026-09-23T02:00:00Z"
+    },
+    {
+      "order_item_id": "o_seed_completed_item2",
+      "order_id": "o_seed_completed",
+      "product_id": "p_seed_legacy",
+      "sku_id": "sku_seed_legacy",
+      "name": "Blink Nova 9（停产）",
+      "sku_name": "Blink Nova 9 6+128G",
+      "image_url": "https://picsum.photos/seed/blink-p_seed_legacy/640/640",
+      "price": "1599.00",
+      "quantity": 1,
+      "merchant_id": "m_seed_digital",
+      "merchant_name": "Blink 数码旗舰店",
+      "created_at": "2026-09-23T02:00:00Z"
+    }
+  ],
+  "created_at": "2026-09-23T02:00:00Z",
+  "updated_at": "2026-09-23T23:00:00Z"
+}
