@@ -9,6 +9,14 @@ import { useRequest } from '../lib/useRequest';
 import type { CategoryNode } from '../types/api';
 
 const PAGE_SIZE = 12;
+// 与服务端分页上限一致（backend readPage）：超出的页码按上限请求。
+const MAX_PAGE = 100000;
+
+/** 读取地址栏页码：非整数按 1，再限定在 [1, MAX_PAGE]。 */
+function parsePage(raw: string | null): number {
+  const n = Math.trunc(Number(raw));
+  return Number.isFinite(n) ? Math.min(Math.max(n, 1), MAX_PAGE) : 1;
+}
 
 function flatten(tree: CategoryNode[]): { id: string; label: string }[] {
   return tree.flatMap((root) => [
@@ -20,7 +28,7 @@ function flatten(tree: CategoryNode[]): { id: string; label: string }[] {
 export function ProductListPage({ query }: { query: URLSearchParams }) {
   const keyword = query.get('keyword') ?? '';
   const categoryId = query.get('category_id') ?? '';
-  const page = Math.max(1, Number(query.get('page')) || 1);
+  const page = parsePage(query.get('page'));
   const href = productsHref({ keyword, categoryId, page });
 
   useEffect(() => rememberProductsHash(href), [href]);
@@ -52,7 +60,15 @@ export function ProductListPage({ query }: { query: URLSearchParams }) {
           )}
         </Empty>
       )}
-      {result.status === 'ok' && result.data.total > 0 && (
+      {result.status === 'ok' && result.data.total > 0 && result.data.items.length === 0 && (
+        // 页码超出范围：服务端返回空页但 total > 0，引导回最后一页，而不是显示无效的分页。
+        <Empty text={`第 ${result.data.page} 页没有商品，共 ${result.data.total} 件`}>
+          <a className="button" href={productsHref({ keyword, categoryId, page: lastPage(result.data.total, result.data.page_size) })}>
+            回到最后一页
+          </a>
+        </Empty>
+      )}
+      {result.status === 'ok' && result.data.items.length > 0 && (
         <>
           <p className="muted" aria-live="polite">
             共 {result.data.total} 件商品
@@ -88,15 +104,20 @@ export function ProductListPage({ query }: { query: URLSearchParams }) {
               </li>
             ))}
           </ul>
+          {/* 分页以服务端返回的实际 page / page_size 为准 */}
           <Pager
-            page={page}
-            totalPages={Math.max(1, Math.ceil(result.data.total / PAGE_SIZE))}
+            page={result.data.page}
+            totalPages={lastPage(result.data.total, result.data.page_size)}
             href={(n) => productsHref({ keyword, categoryId, page: n })}
           />
         </>
       )}
     </section>
   );
+}
+
+function lastPage(total: number, pageSize: number): number {
+  return Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
 }
 
 function SearchForm(props: { keyword: string; categoryId: string; options: { id: string; label: string }[] }) {

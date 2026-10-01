@@ -146,3 +146,29 @@ test('金额不在数字中间断行', async ({ page }) => {
   });
   expect(text, '金额应在一行内').toBe(1);
 });
+
+test('超出范围的页码以服务端实际页码为准，并能回到有效页', async ({ page }) => {
+  // 真实接口：服务端把页码钳到 100000，返回空页但 total > 0。
+  await page.goto('/#/products?page=999999999');
+  await expect(page.getByText('第 100000 页没有商品，共 6 件')).toBeVisible();
+  await expect(page.getByText(/第 999999999/)).toHaveCount(0);
+  await expect(page.getByRole('navigation', { name: '分页' })).toHaveCount(0);
+  await page.getByRole('link', { name: '回到最后一页' }).click();
+  await expect(page.getByText('共 6 件商品')).toBeVisible();
+  await expect(page).not.toHaveURL(/page=/); // 只有一页，最后一页即第 1 页
+
+  // 分页控件按响应中的 page / page_size 计算：请求第 7 页、服务端回显第 3 页时，显示第 3 页，上一页指向第 2 页。
+  await page.route(isProductList, async (route) => {
+    // 取第 1 页的真实商品作为这一页的内容，只改分页元数据。
+    const url = new URL(route.request().url());
+    url.searchParams.set('page', '1');
+    const res = await route.fetch({ url: url.toString() });
+    const body = await res.json();
+    await route.fulfill({ response: res, json: { ...body, page: 3, page_size: 12, total: 30 } });
+  });
+  await page.goto('/#/products?page=7');
+  const pager = page.getByRole('navigation', { name: '分页' });
+  await expect(pager).toContainText('第 3 / 3 页');
+  await expect(pager.getByRole('link', { name: '上一页' })).toHaveAttribute('href', '#/products?page=2');
+  await expect(pager.getByRole('link', { name: '下一页' })).toHaveCount(0);
+});
