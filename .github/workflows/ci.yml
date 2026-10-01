@@ -98,6 +98,69 @@ jobs:
             android-native/app/build/outputs/apk/debug/
           if-no-files-found: ignore
 
+  web-e2e:
+    name: Web E2E (real API)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4.11@sha256:6ea90827b1100f8f2ae306a539f86d2c264a26ed435a2a9f75551dd5c3aeb242
+        env:
+          MYSQL_ROOT_PASSWORD: blink_ci_root
+          MYSQL_DATABASE: blink_shop
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pblink_ci_root --silent"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+    env:
+      MYSQL_DSN: root:blink_ci_root@tcp(127.0.0.1:3306)/blink_shop
+      API_ADDR: 127.0.0.1:8080
+      # 所有用例来自同一 IP，放宽 IP 限流，避免误触 429。
+      RATE_LIMIT_IP_PER_MINUTE: "6000"
+      VITE_API_PROXY_TARGET: http://127.0.0.1:8080
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            quality/package-lock.json
+      - name: seed and start API
+        working-directory: backend
+        run: |
+          go run ./cmd/seed
+          go build -o /tmp/blink-api ./cmd/api
+          nohup /tmp/blink-api > /tmp/api.log 2>&1 &
+      - name: start web
+        working-directory: frontend
+        run: |
+          npm ci
+          nohup npx vite --port 5173 --strictPort --host 127.0.0.1 > /tmp/vite.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:5173/api/v1/ready && exit 0; sleep 1; done
+          cat /tmp/api.log /tmp/vite.log; exit 1
+      - name: playwright
+        working-directory: quality
+        env:
+          WEB_BASE_URL: http://127.0.0.1:5173
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: web-e2e-reports
+          path: |
+            quality/reports/e2e/
+            /tmp/api.log
+          if-no-files-found: ignore
+
   contract:
     name: OpenAPI & Compose
     runs-on: ubuntu-latest

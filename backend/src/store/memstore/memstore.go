@@ -311,10 +311,15 @@ func (s *Store) GetProduct(ctx context.Context, productID string) (domain.Produc
 	if !ok {
 		return domain.Product{}, store.ErrNotFound
 	}
+	return s.withSKUs(p), nil
+}
+
+// withSKUs 返回商品副本并加载 SKU（默认 SKU 在前，再按 sku_id）。调用方需持有锁。
+func (s *Store) withSKUs(p domain.Product) domain.Product {
 	p = cloneProduct(p)
 	p.SKUs = []domain.ProductSKU{}
 	for _, sku := range s.data.skus {
-		if sku.ProductID == productID {
+		if sku.ProductID == p.ProductID {
 			sku.Specs = maps.Clone(sku.Specs)
 			p.SKUs = append(p.SKUs, sku)
 		}
@@ -325,10 +330,163 @@ func (s *Store) GetProduct(ctx context.Context, productID string) (domain.Produc
 		}
 		return p.SKUs[i].SkuID < p.SKUs[j].SkuID
 	})
-	return p, nil
+	return p
 }
 
-// cloneProduct 复制切片，并把 nil 切片规范为空切片（与 MySQL 读出 [] 一致）。
+// ---------- 公开目录 ----------
+
+// pageOf 截取一页；越界返回空切片。
+func pageOf[T any](items []T, page store.Page) []T {
+	start := min(page.Offset(), len(items))
+	end := min(start+page.PageSize, len(items))
+	return slices.Clone(items[start:end])
+}
+
+func (s *Store) ListActiveMerchants(ctx context.Context, page store.Page) ([]domain.Merchant, int, error) {
+	defer s.lock(ctx)()
+	all := []domain.Merchant{}
+	for _, m := range s.data.merchants {
+		if m.Status == domain.StatusActive {
+			all = append(all, m)
+		}
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].MerchantID < all[j].MerchantID })
+	return pageOf(all, page), len(all), nil
+}
+
+// visible 判断商品是否公开可见，并返回商家名。调用方需持有锁。
+func (s *Store) visible(p domain.Product) (string, bool) {
+	m, ok := s.data.merchants[p.MerchantID]
+	return m.Name, ok && p.Status == domain.ProductActive && m.Status == domain.StatusActive
+}
+
+// containsFold 模拟 MySQL 不区分大小写的 LIKE '%term%'（term 已是小写）。
+func containsFold(text, term string) bool { return strings.Contains(strings.ToLower(text), term) }
+
+func (s *Store) matchesKeyword(p domain.Product, terms []string) bool {
+	categoryName := s.data.categories[p.CategoryID].Name
+	for _, term := range terms {
+		if containsFold(p.Name, term) || containsFold(p.Brand, term) || containsFold(categoryName, term) {
+			return true
+		}
+		for _, list := range [][]string{p.Tags, p.SellingPoints} {
+			for _, v := range list {
+				if containsFold(v, term) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func (s *Store) SearchVisibleProducts(ctx context.Context, q store.ProductSearch) ([]store.CatalogProduct, int, error) {
+	defer s.lock(ctx)()
+	terms := store.SearchTerms(q.Keyword)
+	if len(terms) == 0 && strings.TrimSpace(q.Keyword) != "" {
+		return []store.CatalogProduct{}, 0, nil
+	}
+	all := []store.CatalogProduct{}
+	for _, p := range s.data.products {
+		name, ok := s.visible(p)
+		if !ok {
+			continue
+		}
+		if q.CategoryID != "" && p.CategoryID != q.CategoryID && s.data.categories[p.CategoryID].ParentID != q.CategoryID {
+			continue
+		}
+		if len(terms) > 0 && !s.matchesKeyword(p, terms) {
+			continue
+		}
+		all = append(all, store.CatalogProduct{Product: p, MerchantName: name})
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].SortOrder != all[j].SortOrder {
+			return all[i].SortOrder < all[j].SortOrder
+		}
+		return all[i].ProductID < all[j].ProductID
+	})
+	out := pageOf(all, q.Page)
+	for i := range out {
+		out[i].Product = s.withSKUs(out[i].Product)
+	}
+	return out, len(all), nil
+}
+
+func (s *Store) GetVisibleProduct(ctx context.Context, productID string) (store.CatalogProduct, error) {
+	defer s.lock(ctx)()
+	p, ok := s.data.products[productID]
+	if !ok {
+		return store.CatalogProduct{}, store.ErrNotFound
+	}
+	name, ok := s.visible(p)
+	if !ok {
+		return store.CatalogProduct{}, store.ErrNotFound
+	}
+	return store.CatalogProduct{Product: s.withSKUs(p), MerchantName: name}, nil
+}
+
+func (s *Store) ListVisibleReviews(ctx context.Context, productID string, page store.Page) ([]store.PublicReview, int, error) {
+	defer s.lock(ctx)()
+	all := []store.PublicReview{}
+	for _, r := range s.data.reviews {
+		if r.ProductID != productID || r.Status != domain.ReviewVisible {
+			continue
+		}
+		r.Tags = cloneSlice(r.Tags)
+		pr := store.PublicReview{ProductReview: r}
+		if acc, ok := s.data.accounts[r.AccountID]; ok && acc.DeletedAt == nil {
+			pr.ReviewerName = acc.DisplayName
+		}
+		all = append(all, pr)
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if !all[i].CreatedAt.Equal(all[j].CreatedAt) {
+			return all[i].CreatedAt.After(all[j].CreatedAt)
+		}
+		return all[i].ReviewID > all[j].ReviewID
+	})
+	return pageOf(all, page), len(all), nil
+}
+
+func (s *Store) ListActivePromotions(ctx context.Context, q store.PromotionQuery) ([]domain.PromotionRule, int, error) {
+	defer s.lock(ctx)()
+	at := q.At.UTC()
+	applies := func(p domain.PromotionRule) bool {
+		if q.ProductID == "" {
+			return true
+		}
+		switch p.Scope {
+		case domain.ScopePlatform:
+			return true
+		case domain.ScopeMerchant:
+			return p.MerchantID == q.MerchantID
+		case domain.ScopeProduct:
+			return p.ProductID == q.ProductID
+		case domain.ScopeCategory:
+			return slices.Contains(q.CategoryIDs, p.CategoryID)
+		}
+		return false
+	}
+	all := []domain.PromotionRule{}
+	for _, p := range s.data.promotions {
+		if p.Status != domain.StatusActive || p.StartAt.After(at) || !p.EndAt.After(at) || !applies(p) {
+			continue
+		}
+		if p.MerchantID != "" && s.data.merchants[p.MerchantID].Status != domain.StatusActive {
+			continue
+		}
+		all = append(all, p)
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if !all[i].CreatedAt.Equal(all[j].CreatedAt) {
+			return all[i].CreatedAt.After(all[j].CreatedAt)
+		}
+		return all[i].PromotionID > all[j].PromotionID
+	})
+	return pageOf(all, q.Page), len(all), nil
+}
+
 func cloneProduct(p domain.Product) domain.Product {
 	p.ImageURLs = cloneSlice(p.ImageURLs)
 	p.Tags = cloneSlice(p.Tags)

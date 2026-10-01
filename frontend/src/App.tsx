@@ -1,29 +1,28 @@
-import { useEffect, useState } from 'react';
-import { getHealth } from './api/health';
-import { ApiError } from './api/http';
-
-type ApiState = { kind: 'loading' } | { kind: 'ok' } | { kind: 'error'; message: string };
+import { ProductDetailPage } from './pages/ProductDetailPage';
+import { ProductListPage } from './pages/ProductListPage';
+import { productsHref, useRoute } from './lib/router';
+import { Empty } from './components/StateView';
 
 export default function App() {
-  const [api, setApi] = useState<ApiState>({ kind: 'loading' });
-
-  useEffect(() => {
-    getHealth()
-      .then(() => setApi({ kind: 'ok' }))
-      .catch((err: unknown) =>
-        setApi({ kind: 'error', message: err instanceof ApiError ? err.message : '未知错误' }),
-      );
-  }, []);
-
+  const route = useRoute();
   return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', padding: 24 }}>
-      <h1>Blink Shop 管理端</h1>
-      <p>
-        后端状态：
-        {api.kind === 'loading' && '检测中…'}
-        {api.kind === 'ok' && '正常'}
-        {api.kind === 'error' && `不可用（${api.message}）`}
-      </p>
-    </main>
+    <>
+      <header className="topbar">
+        <a className="brand" href={productsHref({})}>
+          Blink Shop 管理端
+        </a>
+      </header>
+      <main className="container">
+        {route.name === 'products' && <ProductListPage query={route.query} />}
+        {route.name === 'product' && <ProductDetailPage key={route.id} id={route.id} />}
+        {route.name === 'not_found' && (
+          <Empty text="页面不存在">
+            <a className="button" href={productsHref({})}>
+              返回商品列表
+            </a>
+          </Empty>
+        )}
+      </main>
+    </>
   );
 }

@@ -1,0 +1,15 @@
+{
+  "description": "下架、风控、已删除或不存在的商品统一 404",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/products/p_seed_speaker"
+  },
+  "response": {
+    "status": 404,
+    "body": {
+      "code": "product_not_found",
+      "message": "商品不存在或已下架",
+      "request_id": "<request_id>"
+    }
+  }
+}

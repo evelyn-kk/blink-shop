@@ -1,0 +1,43 @@
+{
+  "description": "按分类筛选（含子分类）并分页；只返回上架且商家营业中的商品",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/products?category_id=c_office&page_size=1"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "items": [
+        {
+          "product_id": "p_seed_mouse",
+          "sku_id": "sku_seed_mouse_gray",
+          "merchant_id": "m_seed_digital",
+          "merchant_name": "Blink 数码旗舰店",
+          "category_id": "c_mouse",
+          "name": "Blink 静音无线鼠标 M2",
+          "brand": "Blink",
+          "image_url": "/api/v1/assets/catalog/products/p_seed_mouse.png",
+          "price": "129.00",
+          "market_price": "159.00",
+          "stock_status": "in_stock",
+          "tags": [
+            "静音",
+            "无线",
+            "办公"
+          ],
+          "selling_points": [
+            "静音微动",
+            "双模连接"
+          ],
+          "recommend_reason": "安静办公首选。",
+          "risk_notes": [
+            "不适合高强度电竞"
+          ]
+        }
+      ],
+      "page": 1,
+      "page_size": 1,
+      "total": 2
+    }
+  }
+}

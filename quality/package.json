@@ -7,9 +7,11 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "openapi:lint": "redocly lint --config redocly.yaml ../backend/openapi.yaml"
+    "openapi:lint": "redocly lint --config redocly.yaml ../backend/openapi.yaml",
+    "e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@redocly/cli": "2.57.0"
   }
 }

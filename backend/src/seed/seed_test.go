@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/evelyn-kk/blink-shop/backend/assets"
 	"github.com/evelyn-kk/blink-shop/backend/src/domain"
 	"github.com/evelyn-kk/blink-shop/backend/src/store"
 )
@@ -224,6 +226,37 @@ func TestDevSeedIntegrity(t *testing.T) {
 		o, ok := itemIDs[r.OrderItemID]
 		if !ok || o.Status != domain.OrderCompleted || o.OrderID != r.OrderID || r.Rating < 1 || r.Rating > 5 {
 			t.Errorf("review %s must reference an item of a completed order", r.ReviewID)
+		}
+	}
+}
+
+// TestSeedImagesEmbedded：种子里的每个商品图、商家 logo 和订单快照图都能在内嵌资源中找到，不依赖外网。
+func TestSeedImagesEmbedded(t *testing.T) {
+	data, err := Dev(func(string) (string, error) { return "h", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var urls []string
+	for _, m := range data.Merchants {
+		urls = append(urls, m.LogoURL)
+	}
+	for _, p := range data.Products {
+		urls = append(urls, p.ImageURL)
+		urls = append(urls, p.ImageURLs...)
+	}
+	for _, o := range data.Orders {
+		for _, it := range o.Items {
+			urls = append(urls, it.ImageURL)
+		}
+	}
+	for _, u := range urls {
+		name, ok := strings.CutPrefix(u, "/api/v1/assets/")
+		if !ok {
+			t.Errorf("%q 不是内嵌资源地址", u)
+			continue
+		}
+		if _, err := fs.Stat(assets.FS, name); err != nil {
+			t.Errorf("%q: %v", u, err)
 		}
 	}
 }

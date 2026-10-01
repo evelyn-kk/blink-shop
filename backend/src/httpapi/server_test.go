@@ -22,6 +22,9 @@ import (
 	"github.com/evelyn-kk/blink-shop/backend/src/store/storetest"
 )
 
+// testNow 是测试中服务端的“当前时间”，落在演示促销的有效期内。
+var testNow = time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+
 type testServer struct {
 	*Server
 	handler http.Handler
@@ -48,6 +51,7 @@ func newTestServer(t *testing.T, env map[string]string, readiness []ReadinessChe
 		Store:        mem,
 		AvatarDir:    t.TempDir(),
 		PasswordCost: bcrypt.MinCost,
+		Now:          func() time.Time { return testNow },
 	})
 	if extra != nil {
 		extra(s.mux)
@@ -208,6 +212,9 @@ func TestIPRateLimit(t *testing.T) {
 	}{
 		{"third request is limited", "203.0.113.1:5000", "", "/api/v1/nope", []int{404, 404, 429}},
 		{"health is exempt", "203.0.113.2:5000", "", "/api/v1/health", []int{200, 200, 200}},
+		{"embedded asset GET is exempt", "203.0.113.6:5000", "", "/api/v1/assets/catalog/products/p_seed_nova.png", []int{200, 200, 200}},
+		{"avatar GET is exempt", "203.0.113.7:5000", "", "/api/v1/uploads/avatar/acct_x_0123456789abcdef.png", []int{404, 404, 404}},
+		{"catalog API is not exempt", "203.0.113.8:5000", "", "/api/v1/products", []int{200, 200, 429}},
 		{"preflight is exempt", "203.0.113.3:5000", "", "OPTIONS", []int{204, 204, 204}},
 		{"untrusted client cannot spoof XFF", "203.0.113.4:5000", "spoof", "/api/v1/nope", []int{404, 404, 429}},
 		{"trusted proxy: different clients separated", "10.0.0.5:5000", "distinct", "/api/v1/nope", []int{404, 404, 404}},

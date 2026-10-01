@@ -1,0 +1,43 @@
+{
+  "description": "商品 SKU 分页列表，默认 SKU 在前",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/products/p_seed_nova/skus"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "items": [
+        {
+          "sku_id": "sku_seed_nova_128",
+          "product_id": "p_seed_nova",
+          "sku_name": "Blink Nova 12 8+128G",
+          "price": "2999.00",
+          "stock_quantity": 50,
+          "stock_status": "in_stock",
+          "specs": {
+            "存储": "128GB",
+            "颜色": "曜石黑"
+          },
+          "is_default": true
+        },
+        {
+          "sku_id": "sku_seed_nova_256",
+          "product_id": "p_seed_nova",
+          "sku_name": "Blink Nova 12 8+256G",
+          "price": "3299.00",
+          "stock_quantity": 30,
+          "stock_status": "in_stock",
+          "specs": {
+            "存储": "256GB",
+            "颜色": "曜石黑"
+          },
+          "is_default": false
+        }
+      ],
+      "page": 1,
+      "page_size": 10,
+      "total": 2
+    }
+  }
+}

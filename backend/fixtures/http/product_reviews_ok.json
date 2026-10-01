@@ -1,0 +1,32 @@
+{
+  "description": "公开评价：只含 visible 评价，评价人显示名脱敏，不含账户和订单 ID",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/products/p_seed_mouse/reviews"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "items": [
+        {
+          "review_id": "rv_seed_mouse",
+          "product_id": "p_seed_mouse",
+          "sku_id": "sku_seed_mouse_gray",
+          "reviewer_name": "演***",
+          "rating": 5,
+          "content": "按键很安静，宿舍用正好。",
+          "tags": [
+            "静音",
+            "手感好"
+          ],
+          "merchant_reply": "感谢支持！",
+          "merchant_replied_at": "2026-09-24T06:00:00Z",
+          "created_at": "2026-09-24T02:00:00Z"
+        }
+      ],
+      "page": 1,
+      "page_size": 10,
+      "total": 1
+    }
+  }
+}

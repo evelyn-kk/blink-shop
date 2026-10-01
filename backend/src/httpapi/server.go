@@ -32,6 +32,8 @@ type Options struct {
 	AvatarDir string
 	// PasswordCost 是 bcrypt 成本，0 表示 bcrypt.DefaultCost；测试可调低以提速。
 	PasswordCost int
+	// Now 返回当前时间（判断促销是否有效等），nil 表示 time.Now；测试用来固定时间。
+	Now func() time.Time
 }
 
 type Server struct {
@@ -41,6 +43,7 @@ type Server struct {
 	store          store.Store
 	avatars        avatarDir
 	passwords      *passwordHasher
+	now            func() time.Time
 	mux            *http.ServeMux
 	routeAccess    map[string]access // 路由 pattern → 访问规则，RBAC 矩阵测试据此核对
 	ipLimiter      *rateLimiter
@@ -58,11 +61,15 @@ func NewServer(opts Options) *Server {
 		store:          opts.Store,
 		avatars:        avatarDir{root: opts.AvatarDir},
 		passwords:      newPasswordHasher(opts.PasswordCost),
+		now:            opts.Now,
 		mux:            http.NewServeMux(),
 		routeAccess:    map[string]access{},
 		ipLimiter:      newRateLimiter(time.Minute),
 		accountLimiter: newRateLimiter(time.Minute),
 		loginLimiter:   newRateLimiter(time.Minute),
+	}
+	if s.now == nil {
+		s.now = time.Now
 	}
 	if s.store == nil {
 		panic("httpapi: Options.Store is required")
@@ -91,6 +98,15 @@ func (s *Server) routes() {
 
 	s.handle("POST /api/v1/uploads/avatar", accessAccount, s.handleUploadAvatar)
 	s.handle("GET /api/v1/uploads/avatar/{name}", accessPublic, s.handleGetAvatar)
+	s.handle("GET /api/v1/assets/{path...}", accessPublic, s.handleGetAsset)
+
+	s.handle("GET /api/v1/categories/tree", accessPublic, s.handleCategoryTree)
+	s.handle("GET /api/v1/merchants", accessPublic, s.handleListMerchants)
+	s.handle("GET /api/v1/products", accessPublic, s.handleListProducts)
+	s.handle("GET /api/v1/products/{id}", accessPublic, s.handleGetProduct)
+	s.handle("GET /api/v1/products/{id}/skus", accessPublic, s.handleListSKUs)
+	s.handle("GET /api/v1/products/{id}/reviews", accessPublic, s.handleListReviews)
+	s.handle("GET /api/v1/promotions", accessPublic, s.handleListPromotions)
 }
 
 // Handler 返回带完整中间件链的 handler。顺序（外 → 内）：

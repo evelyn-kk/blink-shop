@@ -169,9 +169,15 @@ func matchOrigin(allowed []string, origin string) string {
 	return ""
 }
 
-// 健康检查不参与限流，避免探针被误伤。
+// 不参与限流的请求：健康检查（避免探针被误伤），以及读取内嵌资源和头像的静态文件请求
+// （一个商品列表页就有十来张图，计入限额会让正常浏览很快触发 429；这些响应本身带长缓存）。
 func rateLimitExempt(r *http.Request) bool {
-	return r.URL.Path == "/api/v1/health" || r.URL.Path == "/api/v1/ready"
+	p := r.URL.Path
+	if p == "/api/v1/health" || p == "/api/v1/ready" {
+		return true
+	}
+	return (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
+		(strings.HasPrefix(p, "/api/v1/assets/") || strings.HasPrefix(p, "/api/v1/uploads/avatar/"))
 }
 
 // withIPRateLimit 是认证前的限流层：按客户端 IP 计数。

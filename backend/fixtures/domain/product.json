@@ -4,10 +4,10 @@
   "category_id": "c_phone",
   "name": "Blink Nova 12",
   "brand": "Blink",
-  "image_url": "https://picsum.photos/seed/blink-p_seed_nova/640/640",
+  "image_url": "/api/v1/assets/catalog/products/p_seed_nova.png",
   "image_urls": [
-    "https://picsum.photos/seed/blink-p_seed_nova/640/640",
-    "https://picsum.photos/seed/blink-p_seed_nova-2/640/640"
+    "/api/v1/assets/catalog/products/p_seed_nova.png",
+    "/api/v1/assets/catalog/products/p_seed_nova-2.png"
   ],
   "price": "2999.00",
   "market_price": "3299.00",

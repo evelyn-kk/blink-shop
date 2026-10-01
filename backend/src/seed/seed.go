@@ -50,7 +50,9 @@ func hashOf(s string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func image(slug string) string { return "https://picsum.photos/seed/blink-" + slug + "/640/640" }
+// 演示图片随后端内嵌发布（backend/assets/catalog），无需外网。
+func image(slug string) string { return "/api/v1/assets/catalog/products/" + slug + ".png" }
+func logo(slug string) string  { return "/api/v1/assets/catalog/merchants/" + slug + ".png" }
 
 // Dev 构建完整的开发数据集。hash 用于生成密码哈希，测试中可传入低成本 bcrypt。
 func Dev(hash HashFunc) (store.SeedData, error) {
@@ -75,9 +77,9 @@ func Dev(hash HashFunc) (store.SeedData, error) {
 	}
 
 	d.Merchants = []domain.Merchant{
-		{MerchantID: DigitalMerchant, Name: "Blink 数码旗舰店", LogoURL: image("logo-digital"), Description: "主营手机、耳机和办公外设。",
+		{MerchantID: DigitalMerchant, Name: "Blink 数码旗舰店", LogoURL: logo("logo-digital"), Description: "主营手机、耳机和办公外设。",
 			ServicePhone: "400-800-0001", Status: domain.StatusActive, CreatedAt: base, UpdatedAt: base},
-		{MerchantID: HomeMerchant, Name: "Blink 家居生活馆", LogoURL: image("logo-home"), Description: "主营照明和桌面收纳。",
+		{MerchantID: HomeMerchant, Name: "Blink 家居生活馆", LogoURL: logo("logo-home"), Description: "主营照明和桌面收纳。",
 			ServicePhone: "400-800-0002", Status: domain.StatusActive, CreatedAt: base, UpdatedAt: base},
 	}
 

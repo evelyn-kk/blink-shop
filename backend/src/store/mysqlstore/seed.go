@@ -165,13 +165,27 @@ func (s *Store) insertChunk(ctx context.Context, c domain.KnowledgeChunk) error 
 	return mapErr(err)
 }
 
+const promotionColumns = `promotion_id, name, scope, merchant_id, product_id, category_id, type, threshold_amount,
+	discount_amount, discount_rate, stackable, start_at, end_at, status, created_at, updated_at`
+
+// scanPromotion 按 promotionColumns 的顺序读取一行；discount_rate 越界时 Rate.Scan 报错。
+func scanPromotion(row rowScanner) (domain.PromotionRule, error) {
+	var p domain.PromotionRule
+	if err := row.Scan(&p.PromotionID, &p.Name, &p.Scope, &p.MerchantID, &p.ProductID, &p.CategoryID, &p.Type,
+		&p.ThresholdAmount, &p.DiscountAmount, &p.DiscountRate, &p.Stackable, &p.StartAt, &p.EndAt, &p.Status,
+		&p.CreatedAt, &p.UpdatedAt); err != nil {
+		return domain.PromotionRule{}, mapErr(err)
+	}
+	p.StartAt, p.EndAt = p.StartAt.UTC(), p.EndAt.UTC()
+	p.CreatedAt, p.UpdatedAt = p.CreatedAt.UTC(), p.UpdatedAt.UTC()
+	return p, nil
+}
+
 func (s *Store) insertPromotion(ctx context.Context, p domain.PromotionRule) error {
 	if err := store.ValidatePromotion(p); err != nil {
 		return err
 	}
-	_, err := s.q(ctx).ExecContext(ctx, `INSERT INTO promotion_rules
-		(promotion_id, name, scope, merchant_id, product_id, category_id, type, threshold_amount, discount_amount,
-		 discount_rate, stackable, start_at, end_at, status, created_at, updated_at)
+	_, err := s.q(ctx).ExecContext(ctx, `INSERT INTO promotion_rules (`+promotionColumns+`)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.PromotionID, p.Name, p.Scope, p.MerchantID, p.ProductID, p.CategoryID, p.Type, p.ThresholdAmount, p.DiscountAmount,
 		p.DiscountRate, p.Stackable, p.StartAt.UTC(), p.EndAt.UTC(), p.Status, s.orNow(p.CreatedAt), s.orNow(p.UpdatedAt))

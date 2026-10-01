@@ -43,6 +43,43 @@ const (
 	KeyPrimary              = "PRIMARY"
 )
 
+// Page 是分页参数：Page 从 1 开始，PageSize 为 1–100（由调用方规范化）。
+type Page struct {
+	Page     int
+	PageSize int
+}
+
+func (p Page) Offset() int { return (p.Page - 1) * p.PageSize }
+
+// ProductSearch 是公开商品搜索条件。CategoryID 同时匹配该分类及其子分类；Keyword 见 SearchTerms。
+type ProductSearch struct {
+	Keyword    string
+	CategoryID string
+	Page       Page
+}
+
+// CatalogProduct 是带商家名称的商品，SKUs 已加载（默认 SKU 在前）。
+type CatalogProduct struct {
+	domain.Product
+	MerchantName string
+}
+
+// PublicReview 是评价及评价人当前的显示名（账户已注销时为空）。
+type PublicReview struct {
+	domain.ProductReview
+	ReviewerName string
+}
+
+// PromotionQuery 查询某时刻有效的促销。ProductID 非空时只返回适用于该商品的促销：
+// 平台促销、该商品商家的促销、指定该商品的促销，以及作用于 CategoryIDs（商品分类及其父分类）的促销。
+type PromotionQuery struct {
+	At          time.Time
+	ProductID   string
+	MerchantID  string
+	CategoryIDs []string
+	Page        Page
+}
+
 // ProfileUpdate 是个人资料的部分更新，nil 表示不修改。
 type ProfileUpdate struct {
 	DisplayName *string
@@ -107,7 +144,17 @@ type Store interface {
 
 	// 目录（只读部分；写操作随 2.x 节点补充）。
 	ListCategories(ctx context.Context) ([]domain.Category, error)
+	// GetProduct 不区分状态，供内部使用；公开接口用 GetVisibleProduct。
 	GetProduct(ctx context.Context, productID string) (domain.Product, error)
+
+	// 公开目录。“可见”= 商品 active 且所属商家 active；不可见的商品按不存在处理（ErrNotFound）。
+	ListActiveMerchants(ctx context.Context, page Page) ([]domain.Merchant, int, error)
+	SearchVisibleProducts(ctx context.Context, q ProductSearch) ([]CatalogProduct, int, error)
+	GetVisibleProduct(ctx context.Context, productID string) (CatalogProduct, error)
+	// ListVisibleReviews 只返回 visible 评价，按 created_at、review_id 倒序。
+	ListVisibleReviews(ctx context.Context, productID string, page Page) ([]PublicReview, int, error)
+	// ListActivePromotions 只返回 active、在有效期内且所属商家（如有）为 active 的促销，按 created_at、promotion_id 倒序。
+	ListActivePromotions(ctx context.Context, q PromotionQuery) ([]domain.PromotionRule, int, error)
 
 	// ApplySeed 在一个事务内写入开发种子：按主键“不存在才插入”，可重复执行；违反其他唯一键时整体回滚并返回 ErrConflict。
 	ApplySeed(ctx context.Context, data SeedData) (SeedResult, error)

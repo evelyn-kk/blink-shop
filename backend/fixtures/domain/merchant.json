@@ -1,7 +1,7 @@
 {
   "merchant_id": "m_seed_digital",
   "name": "Blink 数码旗舰店",
-  "logo_url": "https://picsum.photos/seed/blink-logo-digital/640/640",
+  "logo_url": "/api/v1/assets/catalog/merchants/logo-digital.png",
   "description": "主营手机、耳机和办公外设。",
   "service_phone": "400-800-0001",
   "status": "active",

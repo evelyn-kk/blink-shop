@@ -1,0 +1,65 @@
+{
+  "description": "两级分类树；叶子分类的 children 为 []",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/categories/tree"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "items": [
+        {
+          "category_id": "c_digital",
+          "parent_id": "",
+          "name": "数码",
+          "children": [
+            {
+              "category_id": "c_phone",
+              "parent_id": "c_digital",
+              "name": "手机",
+              "children": []
+            },
+            {
+              "category_id": "c_audio",
+              "parent_id": "c_digital",
+              "name": "耳机音箱",
+              "children": []
+            }
+          ]
+        },
+        {
+          "category_id": "c_office",
+          "parent_id": "",
+          "name": "电脑办公",
+          "children": [
+            {
+              "category_id": "c_mouse",
+              "parent_id": "c_office",
+              "name": "鼠标",
+              "children": []
+            },
+            {
+              "category_id": "c_keyboard",
+              "parent_id": "c_office",
+              "name": "键盘",
+              "children": []
+            }
+          ]
+        },
+        {
+          "category_id": "c_home",
+          "parent_id": "",
+          "name": "家居",
+          "children": [
+            {
+              "category_id": "c_lamp",
+              "parent_id": "c_home",
+              "name": "台灯照明",
+              "children": []
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

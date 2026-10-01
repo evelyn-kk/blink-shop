@@ -25,6 +25,14 @@ var expectedRoutes = map[string]string{
 	"DELETE /api/v1/account":            "account",
 	"POST /api/v1/uploads/avatar":       "account",
 	"GET /api/v1/uploads/avatar/{name}": "public",
+	"GET /api/v1/assets/{path...}":      "public",
+	"GET /api/v1/categories/tree":       "public",
+	"GET /api/v1/merchants":             "public",
+	"GET /api/v1/products":              "public",
+	"GET /api/v1/products/{id}":         "public",
+	"GET /api/v1/products/{id}/skus":    "public",
+	"GET /api/v1/products/{id}/reviews": "public",
+	"GET /api/v1/promotions":            "public",
 }
 
 func TestRouteAccessTable(t *testing.T) {

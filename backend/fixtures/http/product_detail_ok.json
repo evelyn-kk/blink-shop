@@ -1,0 +1,60 @@
+{
+  "description": "商品详情：数组字段始终为数组，属性的 unit 始终存在",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/products/p_seed_earbuds"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "product_id": "p_seed_earbuds",
+      "sku_id": "sku_seed_earbuds_white",
+      "merchant_id": "m_seed_digital",
+      "merchant_name": "Blink 数码旗舰店",
+      "category_id": "c_audio",
+      "name": "Blink Air 降噪耳机",
+      "brand": "Blink",
+      "image_url": "/api/v1/assets/catalog/products/p_seed_earbuds.png",
+      "price": "599.00",
+      "market_price": "699.00",
+      "stock_status": "low_stock",
+      "tags": [
+        "降噪",
+        "通勤"
+      ],
+      "selling_points": [
+        "主动降噪",
+        "30 小时续航"
+      ],
+      "recommend_reason": "通勤降噪性价比高。",
+      "risk_notes": [
+        "不支持游泳佩戴"
+      ],
+      "image_urls": [
+        "/api/v1/assets/catalog/products/p_seed_earbuds.png",
+        "/api/v1/assets/catalog/products/p_seed_earbuds-2.png"
+      ],
+      "stock_quantity": 5,
+      "attributes": [
+        {
+          "key": "续航",
+          "value": "30",
+          "unit": "小时"
+        },
+        {
+          "key": "防水",
+          "value": "IPX4",
+          "unit": ""
+        }
+      ],
+      "suitable_for": [
+        "通勤",
+        "办公"
+      ],
+      "not_suitable_for": [
+        "运动防水场景"
+      ],
+      "description": "入耳式主动降噪蓝牙耳机。"
+    }
+  }
+}
