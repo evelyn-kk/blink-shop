@@ -1,0 +1,5 @@
+{
+  "description": "MySQL 不可用",
+  "request": {"method": "GET", "path": "/api/v1/ready"},
+  "response": {"status": 503, "body": {"code": "not_ready", "message": "依赖 mysql 不可用", "request_id": "<request_id>"}}
+}

@@ -1,0 +1,5 @@
+{
+  "description": "JSON 请求体超过 HTTP_MAX_BODY_BYTES",
+  "request": {"method": "POST", "path": "/api/v1/health", "headers": {"Content-Type": "application/json"}, "body_bytes": 1048577},
+  "response": {"status": 413, "body": {"code": "payload_too_large", "message": "请求体过大", "request_id": "<request_id>"}}
+}

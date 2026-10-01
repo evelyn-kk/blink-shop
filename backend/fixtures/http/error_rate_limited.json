@@ -1,0 +1,5 @@
+{
+  "description": "同一 IP 在一分钟内超过 RATE_LIMIT_IP_PER_MINUTE（默认 120）",
+  "request": {"method": "GET", "path": "/api/v1/does-not-exist", "repeat": 121},
+  "response": {"status": 429, "headers": {"Retry-After": "<seconds>"}, "body": {"code": "rate_limited", "message": "请求过于频繁，请稍后再试", "request_id": "<request_id>"}}
+}

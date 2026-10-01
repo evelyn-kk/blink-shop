@@ -6,7 +6,7 @@
 
 | 目录 | 内容 |
 | --- | --- |
-| `backend/` | Go 1.24 API（`net/http`），`openapi.yaml` 是唯一接口契约 |
+| `backend/` | Go 1.24 API（`net/http`），`openapi.yaml` 是唯一接口契约；中间件、配置和日志见 [backend/README.md](backend/README.md) |
 | `frontend/` | React 19 + TypeScript + Vite，商家和平台管理端 |
 | `android-native/` | Java 原生 Android（minSdk 24），用户端 |
 | `deployments/` | 本地依赖的 Docker Compose，详见 [deployments/README.md](deployments/README.md) |
@@ -24,7 +24,8 @@
 ```bash
 cp .env.example .env                                    # 按需修改；.env 不提交
 docker compose -f deployments/docker-compose.yml up -d  # MySQL/Redis/Nacos/MinIO/etcd/Milvus
-cd backend && go run ./cmd/api                          # http://localhost:8080/api/v1/health
+set -a && source .env && set +a                         # 后端读取环境变量；不加载则用内置开发默认值
+cd backend && go run ./cmd/api                          # /api/v1/health 存活，/api/v1/ready 检查 MySQL
 cd frontend && npm ci && npm run dev -- --port 5173     # /api 代理到 :8080
 cd android-native && ./gradlew :app:assembleDebug       # 模拟器默认访问 http://10.0.2.2:8080/api/v1
 ```

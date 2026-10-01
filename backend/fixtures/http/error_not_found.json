@@ -1,0 +1,4 @@
+{
+  "request": {"method": "GET", "path": "/api/v1/does-not-exist"},
+  "response": {"status": 404, "body": {"code": "not_found", "message": "接口不存在", "request_id": "<request_id>"}}
+}

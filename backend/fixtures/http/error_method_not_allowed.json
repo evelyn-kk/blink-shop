@@ -1,0 +1,4 @@
+{
+  "request": {"method": "POST", "path": "/api/v1/health"},
+  "response": {"status": 405, "headers": {"Allow": "GET, HEAD"}, "body": {"code": "method_not_allowed", "message": "不支持该请求方法", "request_id": "<request_id>"}}
+}

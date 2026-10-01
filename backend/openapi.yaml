@@ -1,12 +1,17 @@
 openapi: 3.1.0
 info:
   title: Blink Shop API
-  version: 0.1.0
+  version: 0.2.0
   description: |
     Blink Shop 的单一接口契约。约定：
     - 所有路径前缀为 `/api/v1`，JSON 字段使用 snake_case。
     - 成功响应直接返回业务对象，不包 `data` 外层。
     - 失败响应统一为 `Error`；状态码含义见 `docs/03-api-contract.md`。
+    - 每个响应都带 `X-Request-ID`；请求可携带 `X-Request-ID`（1–64 位字母、数字、`.`、`_`、`-`），否则由服务端生成。
+    - 请求体上限：JSON 默认 1 MiB，multipart 上传默认 10 MiB，超限返回 413。
+    - 未登录请求按客户端 IP 限流，已登录请求另按账号限流，超限返回 429 并带 `Retry-After`。
+    - 非流式请求默认 30 秒超时，超时返回 504。
+    - 未知路径返回 404，路径存在但方法不支持返回 405（带 `Allow` 头），均为 `Error` JSON。
     - 分页参数 `page` 从 1 开始，`page_size` 默认 10、最大 100；列表响应使用 `Page` 结构。
   license:
     name: Proprietary
@@ -25,25 +30,68 @@ paths:
       tags: [health]
       operationId: getHealth
       summary: 进程存活检查
-      description: 只表示进程存活，不检查数据库等依赖。
+      description: 只表示进程存活，不检查数据库等依赖；不参与限流。
       security: []
       responses:
         "200":
           description: 进程存活
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
               example:
                 status: ok
-        "500":
-          $ref: "#/components/responses/InternalError"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+  /ready:
+    get:
+      tags: [health]
+      operationId: getReady
+      summary: 就绪检查
+      description: 检查数据库是否可用；不可用时返回 503，具体原因只写服务端日志。不参与限流。
+      security: []
+      responses:
+        "200":
+          description: 所有依赖可用
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyResponse"
+              example:
+                status: ready
+                checks:
+                  mysql: ok
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/NotReady"
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       description: 登录后获得的不透明 token。
+  headers:
+    RequestID:
+      description: 请求追踪 ID，与错误响应体中的 `request_id` 一致。
+      schema:
+        type: string
+        pattern: "^[A-Za-z0-9._-]{1,64}$"
+    RetryAfter:
+      description: 距离限流窗口重置的秒数。
+      schema:
+        type: integer
+        minimum: 1
+    Allow:
+      description: 该路径支持的方法。
+      schema:
+        type: string
   parameters:
     Page:
       name: page
@@ -72,13 +120,29 @@ components:
         status:
           type: string
           const: ok
+    ReadyResponse:
+      type: object
+      required: [status, checks]
+      properties:
+        status:
+          type: string
+          const: ready
+        checks:
+          type: object
+          description: 每个依赖的检查结果。
+          additionalProperties:
+            type: string
+            const: ok
     Error:
       type: object
       required: [code, message]
       properties:
         code:
           type: string
-          description: 机器可读错误码，例如 `invalid_argument`、`unauthorized`、`forbidden`、`not_found`、`conflict`、`payload_too_large`、`rate_limited`、`internal_error`。
+          description: |
+            机器可读错误码。通用错误码：`invalid_argument`、`invalid_json`、`unauthorized`、`forbidden`、`not_found`、
+            `method_not_allowed`、`conflict`、`payload_too_large`、`unsupported_media_type`、`rate_limited`、
+            `internal_error`、`not_ready`、`timeout`。
           examples: [not_found]
         message:
           type: string
@@ -113,16 +177,23 @@ components:
               items: {}
   responses:
     BadRequest:
-      description: 参数错误
+      description: 参数错误或请求体不是合法 JSON（`invalid_argument` / `invalid_json`）
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
           example:
-            code: invalid_argument
-            message: 请求参数不正确
+            code: invalid_json
+            message: 请求体不是合法的 JSON
+            request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
     Unauthorized:
       description: 未登录或登录已失效
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
       content:
         application/json:
           schema:
@@ -130,8 +201,12 @@ components:
           example:
             code: unauthorized
             message: 请先登录
+            request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
     Forbidden:
       description: 无权访问该资源
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
       content:
         application/json:
           schema:
@@ -139,17 +214,40 @@ components:
           example:
             code: forbidden
             message: 没有权限
+            request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
     NotFound:
-      description: 资源不存在
+      description: 路径或资源不存在
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
           example:
             code: not_found
-            message: 资源不存在
+            message: 接口不存在
+            request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
+    MethodNotAllowed:
+      description: 路径存在但不支持该方法
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
+        Allow:
+          $ref: "#/components/headers/Allow"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: method_not_allowed
+            message: 不支持该请求方法
+            request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
     Conflict:
       description: 幂等、状态或库存冲突
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
       content:
         application/json:
           schema:
@@ -157,17 +255,40 @@ components:
           example:
             code: conflict
             message: 当前状态不允许该操作
+            request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
     PayloadTooLarge:
       description: 请求体或文件过大
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
           example:
             code: payload_too_large
-            message: 文件过大
+            message: 请求体过大
+            request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
+    UnsupportedMediaType:
+      description: 请求体不是 application/json
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: unsupported_media_type
+            message: 请求体必须是 application/json
+            request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
     TooManyRequests:
       description: 触发限流
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
       content:
         application/json:
           schema:
@@ -175,8 +296,12 @@ components:
           example:
             code: rate_limited
             message: 请求过于频繁，请稍后再试
+            request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
     InternalError:
-      description: 服务内部错误
+      description: 服务内部错误（不回显内部细节）
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
       content:
         application/json:
           schema:
@@ -184,3 +309,30 @@ components:
           example:
             code: internal_error
             message: 服务暂时不可用
+            request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
+    NotReady:
+      description: 依赖不可用，服务尚未就绪
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: not_ready
+            message: 依赖 mysql 不可用
+            request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
+    GatewayTimeout:
+      description: 请求处理超时
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: timeout
+            message: 请求处理超时，请稍后重试
+            request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
