@@ -1,0 +1,5 @@
+{
+  "description": "token 过期、已登出或伪造。客户端应清除本地会话并回到登录页",
+  "request": {"method": "GET", "path": "/api/v1/auth/me", "headers": {"Authorization": "Bearer expired-or-forged-token"}},
+  "response": {"status": 401, "body": {"code": "unauthorized", "message": "登录已失效，请重新登录", "request_id": "<request_id>"}}
+}

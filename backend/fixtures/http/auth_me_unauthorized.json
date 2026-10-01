@@ -1,0 +1,5 @@
+{
+  "description": "未带 token 访问需要登录的接口",
+  "request": {"method": "GET", "path": "/api/v1/auth/me"},
+  "response": {"status": 401, "body": {"code": "unauthorized", "message": "请先登录", "request_id": "<request_id>"}}
+}

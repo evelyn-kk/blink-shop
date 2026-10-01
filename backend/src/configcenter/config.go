@@ -23,6 +23,7 @@ type Config struct {
 	MinIOSecretKey       string
 	MilvusToken          string
 	AIAPIKey             string
+	AvatarUploadDir      string
 }
 
 // IsProduction 判断是否生产环境（production / prod）。
@@ -38,13 +39,14 @@ func isProductionEnv(env string) bool {
 // Load 读取启动配置，并校验所有 HTTP 配置都能被解析；任何格式错误都会返回。
 func Load(ctx context.Context, r *Resolver) (Config, error) {
 	cfg := Config{
-		AppEnv:         strings.ToLower(r.Get(ctx, KeyAppEnv)),
-		APIAddr:        r.Get(ctx, KeyAPIAddr),
-		MySQLDSN:       r.Get(ctx, KeyMySQLDSN),
-		MinIOAccessKey: r.Get(ctx, KeyMinIOAccessKey),
-		MinIOSecretKey: r.Get(ctx, KeyMinIOSecretKey),
-		MilvusToken:    r.Get(ctx, KeyMilvusToken),
-		AIAPIKey:       r.Get(ctx, KeyAIAPIKey),
+		AppEnv:          strings.ToLower(r.Get(ctx, KeyAppEnv)),
+		APIAddr:         r.Get(ctx, KeyAPIAddr),
+		MySQLDSN:        r.Get(ctx, KeyMySQLDSN),
+		MinIOAccessKey:  r.Get(ctx, KeyMinIOAccessKey),
+		MinIOSecretKey:  r.Get(ctx, KeyMinIOSecretKey),
+		MilvusToken:     r.Get(ctx, KeyMilvusToken),
+		AIAPIKey:        r.Get(ctx, KeyAIAPIKey),
+		AvatarUploadDir: r.Get(ctx, KeyAvatarUploadDir),
 	}
 	switch cfg.AppEnv {
 	case "development", "test", "production", "prod":
@@ -124,6 +126,8 @@ type HTTPSettings struct {
 	RequestTimeout         time.Duration
 	RateLimitIPPerMin      int
 	RateLimitAccountPerMin int
+	AuthTokenTTL           time.Duration
+	LoginAttemptsPerMin    int // 同一用户名每分钟最多尝试登录次数
 }
 
 // HTTPSettingsProvider 每次调用都按当前配置返回 HTTPSettings。
@@ -159,6 +163,8 @@ func parseHTTPSettings(ctx context.Context, r *Resolver) (HTTPSettings, error) {
 	s.RequestTimeout = parseOr(&errs, KeyRequestTimeout, get, parsePositiveDuration)
 	s.RateLimitIPPerMin = int(parseOr(&errs, KeyRateLimitIPPerMin, get, parsePositiveInt))
 	s.RateLimitAccountPerMin = int(parseOr(&errs, KeyRateLimitAccountPerMin, get, parsePositiveInt))
+	s.AuthTokenTTL = parseOr(&errs, KeyAuthTokenTTL, get, parsePositiveDuration)
+	s.LoginAttemptsPerMin = int(parseOr(&errs, KeyLoginAttemptsPerMin, get, parsePositiveInt))
 	return s, errors.Join(errs...)
 }
 

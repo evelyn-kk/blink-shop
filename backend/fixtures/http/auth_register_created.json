@@ -1,0 +1,8 @@
+{
+  "description": "注册普通用户，成功后直接返回会话（与登录响应结构相同）",
+  "request": {"method": "POST", "path": "/api/v1/auth/register", "body": {"username": "new_user", "password": "Passw0rd!", "display_name": "新用户"}},
+  "response": {"status": 201, "body": {
+    "token": "<token>", "token_type": "Bearer", "expires_at": "<timestamp>",
+    "account": {"account_id": "<account_id>", "username": "new_user", "display_name": "新用户", "avatar_url": "", "phone": "", "email": "", "role": "user", "status": "active", "created_at": "<timestamp>", "updated_at": "<timestamp>"}
+  }}
+}

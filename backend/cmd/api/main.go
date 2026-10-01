@@ -74,8 +74,10 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 	}
 
 	server := httpapi.NewServer(httpapi.Options{
-		Logger:   logger,
-		Settings: configcenter.NewHTTPSettingsProvider(resolver, cfg.IsProduction()),
+		Logger:    logger,
+		Settings:  configcenter.NewHTTPSettingsProvider(resolver, cfg.IsProduction()),
+		Store:     st,
+		AvatarDir: cfg.AvatarUploadDir,
 		Readiness: []httpapi.ReadinessCheck{
 			{Name: "mysql", Check: func(ctx context.Context) error { return schemaReady(ctx, st) }},
 		},

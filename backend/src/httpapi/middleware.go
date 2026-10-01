@@ -26,8 +26,14 @@ type ctxKey int
 const (
 	ctxRequestID ctxKey = iota
 	ctxSettings
-	ctxAccountID // 由 1.2 的认证中间件写入
+	ctxState
+	ctxAccount // 认证中间件写入的 domain.Account
 )
+
+// requestState 由最外层中间件创建，内层（认证）写入、外层（访问日志）读取。
+type requestState struct {
+	accountID string
+}
 
 func requestIDFromContext(ctx context.Context) string {
 	id, _ := ctx.Value(ctxRequestID).(string)
@@ -40,8 +46,11 @@ func settingsFromContext(ctx context.Context) configcenter.HTTPSettings {
 }
 
 func accountIDFromContext(ctx context.Context) (string, bool) {
-	id, ok := ctx.Value(ctxAccountID).(string)
-	return id, ok && id != ""
+	st, _ := ctx.Value(ctxState).(*requestState)
+	if st == nil || st.accountID == "" {
+		return "", false
+	}
+	return st.accountID, true
 }
 
 // 客户端传入的 request id 只接受安全字符，避免日志注入。
@@ -63,6 +72,7 @@ func (s *Server) withRequestContext(next http.Handler) http.Handler {
 		w.Header().Set(headerRequestID, id)
 		ctx := context.WithValue(r.Context(), ctxRequestID, id)
 		ctx = context.WithValue(ctx, ctxSettings, s.settings.Current(ctx))
+		ctx = context.WithValue(ctx, ctxState, &requestState{})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -193,12 +203,16 @@ func (s *Server) withAccountRateLimit(next http.Handler) http.Handler {
 }
 
 func writeRateLimited(w http.ResponseWriter, retryAfter time.Duration) {
+	setRetryAfter(w, retryAfter)
+	writeError(w, ErrRateLimited)
+}
+
+func setRetryAfter(w http.ResponseWriter, retryAfter time.Duration) {
 	seconds := int(retryAfter.Round(time.Second) / time.Second)
 	if seconds < 1 {
 		seconds = 1
 	}
 	w.Header().Set("Retry-After", strconv.Itoa(seconds))
-	writeError(w, ErrRateLimited)
 }
 
 // withBodyLimit 限制请求体：multipart 上传用 UploadMaxBytes，其余用 MaxBodyBytes。

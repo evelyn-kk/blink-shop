@@ -62,6 +62,7 @@ func Run(t *testing.T, newStore Factory) {
 		{"UniqueKeysReportedByName", testUniqueKeyNames},
 		{"OutOfRangeDiscountRateRejected", testOutOfRangeRate},
 	}
+	cases = append(cases, authCases()...)
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) { c.fn(t, newStore(t)) })
 	}

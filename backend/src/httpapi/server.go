@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/configcenter"
+	"github.com/evelyn-kk/blink-shop/backend/src/store"
 )
 
 // SettingsProvider 返回当前生效的 HTTP 配置；由 configcenter.HTTPSettingsProvider 实现。
@@ -26,15 +27,25 @@ type Options struct {
 	Logger    *slog.Logger
 	Settings  SettingsProvider
 	Readiness []ReadinessCheck
+	Store     store.Store
+	// AvatarDir 是头像文件目录，不存在时在首次上传时创建。
+	AvatarDir string
+	// PasswordCost 是 bcrypt 成本，0 表示 bcrypt.DefaultCost；测试可调低以提速。
+	PasswordCost int
 }
 
 type Server struct {
 	logger         *slog.Logger
 	settings       SettingsProvider
 	readiness      []ReadinessCheck
+	store          store.Store
+	avatars        avatarDir
+	passwords      *passwordHasher
 	mux            *http.ServeMux
+	routeAccess    map[string]access // 路由 pattern → 访问规则，RBAC 矩阵测试据此核对
 	ipLimiter      *rateLimiter
 	accountLimiter *rateLimiter
+	loginLimiter   *rateLimiter
 }
 
 const readinessTimeout = 2 * time.Second
@@ -44,9 +55,17 @@ func NewServer(opts Options) *Server {
 		logger:         opts.Logger,
 		settings:       opts.Settings,
 		readiness:      opts.Readiness,
+		store:          opts.Store,
+		avatars:        avatarDir{root: opts.AvatarDir},
+		passwords:      newPasswordHasher(opts.PasswordCost),
 		mux:            http.NewServeMux(),
+		routeAccess:    map[string]access{},
 		ipLimiter:      newRateLimiter(time.Minute),
 		accountLimiter: newRateLimiter(time.Minute),
+		loginLimiter:   newRateLimiter(time.Minute),
+	}
+	if s.store == nil {
+		panic("httpapi: Options.Store is required")
 	}
 	if s.logger == nil {
 		s.logger = slog.New(slog.DiscardHandler)
@@ -55,16 +74,31 @@ func NewServer(opts Options) *Server {
 	return s
 }
 
+// routes 注册全部路由。访问规则含义见 auth.go 的 access；RBAC 矩阵见 backend/README.md。
 func (s *Server) routes() {
-	s.mux.HandleFunc("GET /api/v1/health", s.handleHealth)
-	s.mux.HandleFunc("GET /api/v1/ready", s.handleReady)
+	s.handle("GET /api/v1/health", accessPublic, s.handleHealth)
+	s.handle("GET /api/v1/ready", accessPublic, s.handleReady)
+
+	s.handle("POST /api/v1/auth/register", accessPublic, s.handleRegister)
+	s.handle("POST /api/v1/auth/login", accessPublic, s.handleLogin)
+	s.handle("POST /api/v1/auth/logout", accessSession, s.handleLogout)
+	s.handle("GET /api/v1/auth/me", accessSession, s.handleMe)
+
+	s.handle("GET /api/v1/account/profile", accessAccount, s.handleGetProfile)
+	s.handle("PATCH /api/v1/account/profile", accessAccount, s.handleUpdateProfile)
+	s.handle("PATCH /api/v1/account/contact", accessAccount, s.handleUpdateContact)
+	s.handle("DELETE /api/v1/account", accessAccount, s.handleDeleteAccount)
+
+	s.handle("POST /api/v1/uploads/avatar", accessAccount, s.handleUploadAvatar)
+	s.handle("GET /api/v1/uploads/avatar/{name}", accessPublic, s.handleGetAvatar)
 }
 
 // Handler 返回带完整中间件链的 handler。顺序（外 → 内）：
-// request id/配置 → 访问日志 → panic 恢复 → CORS → IP 限流 → 请求体限制 → 超时 → [认证，1.2] → 账号限流 → 路由。
+// request id/配置 → 访问日志 → panic 恢复 → CORS → IP 限流 → 请求体限制 → 超时 → 认证 → 账号限流 → 路由（含访问规则）。
 func (s *Server) Handler() http.Handler {
 	var h http.Handler = http.HandlerFunc(s.dispatch)
 	h = s.withAccountRateLimit(h)
+	h = s.withAuth(h)
 	h = s.withTimeout(h)
 	h = s.withBodyLimit(h)
 	h = s.withIPRateLimit(h)

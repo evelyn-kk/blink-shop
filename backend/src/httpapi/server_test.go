@@ -14,8 +14,12 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/evelyn-kk/blink-shop/backend/src/configcenter"
 	"github.com/evelyn-kk/blink-shop/backend/src/logging"
+	"github.com/evelyn-kk/blink-shop/backend/src/store/memstore"
+	"github.com/evelyn-kk/blink-shop/backend/src/store/storetest"
 )
 
 type testServer struct {
@@ -23,6 +27,7 @@ type testServer struct {
 	handler http.Handler
 	logs    *bytes.Buffer
 	dynamic *configcenter.MemorySource
+	mem     *memstore.Store // 已写入开发种子
 }
 
 // newTestServer 用给定环境变量创建 Server；extra 在构建 handler 前注册测试路由。
@@ -32,15 +37,22 @@ func newTestServer(t *testing.T, env map[string]string, readiness []ReadinessChe
 	dynamic := configcenter.NewMemorySource(nil)
 	resolver := configcenter.NewResolver(func(k string) string { return env[k] }, dynamic)
 	production := env["APP_ENV"] == "production"
+	mem := memstore.New()
+	if _, err := mem.ApplySeed(context.Background(), storetest.DevSeed(t)); err != nil {
+		t.Fatal(err)
+	}
 	s := NewServer(Options{
-		Logger:    logging.New(logs, slog.LevelDebug),
-		Settings:  configcenter.NewHTTPSettingsProvider(resolver, production),
-		Readiness: readiness,
+		Logger:       logging.New(logs, slog.LevelDebug),
+		Settings:     configcenter.NewHTTPSettingsProvider(resolver, production),
+		Readiness:    readiness,
+		Store:        mem,
+		AvatarDir:    t.TempDir(),
+		PasswordCost: bcrypt.MinCost,
 	})
 	if extra != nil {
 		extra(s.mux)
 	}
-	return &testServer{Server: s, handler: s.Handler(), logs: logs, dynamic: dynamic}
+	return &testServer{Server: s, handler: s.Handler(), logs: logs, dynamic: dynamic, mem: mem}
 }
 
 func (ts *testServer) do(r *http.Request) *httptest.ResponseRecorder {
@@ -244,9 +256,7 @@ func TestAccountRateLimit(t *testing.T) {
 	send := func(account string) int {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/cart", nil)
 		ctx := context.WithValue(req.Context(), ctxSettings, ts.settings.Current(req.Context()))
-		if account != "" {
-			ctx = context.WithValue(ctx, ctxAccountID, account)
-		}
+		ctx = context.WithValue(ctx, ctxState, &requestState{accountID: account})
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req.WithContext(ctx))
 		return rec.Code

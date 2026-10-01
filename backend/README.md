@@ -37,7 +37,7 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 })
 ```
 
-`Store` 目前只包含本节点需要的方法（账户、分类、商品读取、事务、种子）；其余方法随各功能节点加入，并同步补充契约测试。
+`Store` 目前只包含本节点需要的方法（账户与资料、登录 token、分类、商品读取、事务、种子）；其余方法随各功能节点加入，并同步补充契约测试。
 
 ## 演示数据
 
@@ -75,9 +75,9 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 | 5 | IP 限流 | 认证前一层，按客户端 IP 固定窗口计数；超限 429 + `Retry-After` |
 | 6 | 请求体限制 | multipart 用 `UPLOAD_MAX_BYTES`，其余用 `HTTP_MAX_BODY_BYTES`；声明长度超限直接 413，未声明长度时读取超限 413 |
 | 7 | 超时 | 给 context 设截止时间；handler 超时返回且未写响应时输出 504。`*:stream` 和 `/speech/realtime` 不设超时 |
-| 8 | 认证 | 1.2 节点接入 |
+| 8 | 认证 | 解析 `Authorization: Bearer <token>`，把账户放进 context；只识别不拒绝，是否需要登录由路由的访问规则决定 |
 | 9 | 账号限流 | 认证后一层，已登录请求按账号计数；未登录请求只受 IP 层约束 |
-| 10 | 路由 | 未知路径 404、方法不支持 405（带 `Allow`），都是统一错误 JSON |
+| 10 | 路由 | 未知路径 404、方法不支持 405（带 `Allow`），都是统一错误 JSON；命中后先按访问规则检查登录、账户状态和角色 |
 
 `/health`、`/ready` 不参与限流。客户端 IP：只有直连方属于 `TRUSTED_PROXY_CIDRS` 时才读取 `X-Forwarded-For`，并从右往左跳过可信代理，取第一个不可信地址，客户端在头部前面伪造的地址不会被采用。
 
@@ -88,7 +88,12 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 | 状态码 | code | 场景 |
 | --- | --- | --- |
 | 400 | `invalid_json` / `invalid_argument` | JSON 语法错误、空请求体、尾随内容 / 字段类型错误 |
+| 401 | `unauthorized` | 未登录，或 token 过期、已登出、伪造 |
+| 401 | `invalid_credential` | 登录时账号或密码错误（含用户不存在、已注销） |
+| 403 | `forbidden` | 角色不符，或商家操作其他店铺的资源 |
+| 403 | `account_inactive` / `account_risk` | 账户状态不允许该操作，见“认证与权限” |
 | 404 | `not_found` | 路径不存在 |
+| 409 | `username_exists` | 注册时用户名已存在 |
 | 405 | `method_not_allowed` | 方法不支持 |
 | 413 | `payload_too_large` | 请求体超限 |
 | 415 | `unsupported_media_type` | JSON 接口收到非 `application/json` |
@@ -98,6 +103,52 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 | 504 | `timeout` | 请求处理超时 |
 
 业务 handler 读请求体用 `decodeJSON`，返回错误用 `writeError`：`*APIError` 原样输出，其他 error 一律按 500 处理。
+
+## 认证与权限
+
+- **token**：注册/登录返回 32 字节随机 token（base64url），`auth_tokens` 只存 SHA-256 摘要和过期时间。每个请求都按 token 重新读取账户，所以管理员改账户状态立即生效。登出撤销当前 token，注销撤销全部 token。
+- **密码**：bcrypt（`DefaultCost`）。兼容上游遗留的 SHA-256 hex 哈希，登录成功后自动升级；bcrypt 成本低于当前设置时同样升级。用户不存在时也做一次 bcrypt 比较，避免按响应时间枚举用户名。
+- **审计**：注册、登录成功/失败/被拒、登出、改资料、改联系方式、上传头像、注销、密码升级都写一条 `msg=audit` 日志，只含动作和 ID，不含密码、token、手机号、邮箱。
+- **头像**：`POST /uploads/avatar` 按内容嗅探（JPG/PNG/WebP，≤2MB），文件名为 `<account_id>_<随机 16 位 hex>.<ext>`；`PATCH /account/profile` 只接受本人上传且仍存在的头像地址。读取接口公开，经 `os.Root` 限定在头像目录内。
+
+### 路由访问规则
+
+每条路由注册时必须用 `s.handle(pattern, access, handler)` 指定规则（`src/httpapi/auth.go`）：
+
+| 规则 | 需要登录 | 允许角色 | inactive | risk |
+| --- | --- | --- | --- | --- |
+| `public` | 否 | 任何人 | — | — |
+| `session` | 是 | user / merchant / admin | 允许 | 允许 |
+| `account` | 是 | user / merchant / admin | 403 `account_inactive` | 只读，写操作 403 `account_risk` |
+| `user` | 是 | user | 403 `account_inactive` | 只读，写操作 403 `account_risk` |
+| `merchant` | 是 | merchant（且已关联店铺） | 403 `account_inactive` | 只读，写操作 403 `account_risk` |
+| `admin` | 是 | admin | 403 `account_inactive` | 只读，写操作 403 `account_risk` |
+
+检查顺序：未登录 401 → 账户状态 403 → 角色 403。inactive/risk 账户不能新登录（密码正确时返回对应 403）；已注销账户的 token 全部删除，等同未登录。商家与管理员共用的资源接口，在角色检查之后还要调用 `requireMerchantOwner`：商家只能操作 `merchant_id` 与自己一致的资源，管理员不受限。
+
+### RBAC 矩阵
+
+当前全部路由（`TestRouteAccessTable` 保证与代码一致，新增路由必须同时更新这里和测试）：
+
+| 路由 | 规则 |
+| --- | --- |
+| `GET /health`、`GET /ready` | public |
+| `POST /auth/register`、`POST /auth/login` | public |
+| `POST /auth/logout`、`GET /auth/me` | session |
+| `GET,PATCH /account/profile`、`PATCH /account/contact`、`DELETE /account` | account |
+| `POST /uploads/avatar` | account |
+| `GET /uploads/avatar/{name}` | public |
+
+后续节点按前缀约定（`TestRoutePrefixRoles` 检查）：`/admin/*` → admin；`/merchant/*` → merchant；`/cart`、`/orders`、`/coupons/*`、`/agent/*`、`/speech/*` → user；分类/商家/商品读取 → public。
+
+| 场景 | 预期 |
+| --- | --- |
+| 未登录访问任何非 public 路由 | 401 `unauthorized` |
+| user / merchant 访问 admin 路由 | 403 `forbidden` |
+| merchant / admin 访问 user 交易路由 | 403 `forbidden` |
+| merchant 修改其他店铺资源 | 403 `forbidden` |
+| inactive 用户写交易 | 403 `account_inactive` |
+| risk 用户写交易 | 403 `account_risk` |
 
 ## 配置
 
@@ -118,6 +169,9 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 | `HTTP_REQUEST_TIMEOUT` | `http.request_timeout` | `30s` | 非流式请求超时 |
 | `RATE_LIMIT_IP_PER_MINUTE` | `http.rate_limit.ip_per_minute` | `120` | 认证前 IP 限额 |
 | `RATE_LIMIT_ACCOUNT_PER_MINUTE` | `http.rate_limit.account_per_minute` | `120` | 认证后账号限额 |
+| `AUTH_TOKEN_TTL` | `auth.token_ttl` | `24h` | 登录 token 有效期（与上游一致） |
+| `LOGIN_ATTEMPTS_PER_MINUTE` | `auth.login_attempts_per_minute` | `10` | 同一用户名每分钟登录尝试上限 |
+| `AVATAR_UPLOAD_DIR` | — | `uploads/avatar` | 头像文件目录（相对启动目录）；3.1 接入对象存储后替换 |
 | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | — | `minioadmin` | 密钥类 |
 | `MILVUS_TOKEN` | — | 空 | 密钥类 |
 | `AI_API_KEY` | — | 空 | 密钥类 |
@@ -151,9 +205,11 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 | `duration_ms` | 处理耗时（毫秒） |
 | `client_ip` | 按可信代理规则得到的客户端 IP |
 | `user_agent` | 请求的 User-Agent |
-| `account_id` | 已登录时出现（1.2 起） |
+| `account_id` | 已登录时出现 |
 
-其他事件：`config loaded`、`api listening`、`mysql unavailable at startup`、`readiness check failed`、`panic recovered`（含 `stack`）、`mysql driver`、`database migrated`、`database migration failed, will retry`、`api shutdown completed`。
+审计事件：`audit`，字段 `action`（如 `auth.login`、`auth.login_failed`、`account.deleted`）、`account_id`、`client_ip`，见“认证与权限”。
+
+其他事件：`auth lookup failed`、`register failed`、`login lookup failed`、`create token failed`、`password rehash failed`、`account update failed`、`delete account failed`、`save avatar failed`、`config loaded`、`api listening`、`mysql unavailable at startup`、`readiness check failed`、`panic recovered`（含 `stack`）、`mysql driver`、`database migrated`、`database migration failed, will retry`、`api shutdown completed`。
 
 ### 脱敏规则
 

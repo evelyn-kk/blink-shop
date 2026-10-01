@@ -28,6 +28,13 @@ var (
 	KeyRateLimitAccountPerMin = Key{Name: "http.rate_limit.account_per_minute", Env: "RATE_LIMIT_ACCOUNT_PER_MINUTE", Default: "120"}
 )
 
+// 认证；运行中可由动态配置调整（环境变量未设置时）。
+var (
+	KeyAuthTokenTTL        = Key{Name: "auth.token_ttl", Env: "AUTH_TOKEN_TTL", Default: "24h"}
+	KeyLoginAttemptsPerMin = Key{Name: "auth.login_attempts_per_minute", Env: "LOGIN_ATTEMPTS_PER_MINUTE", Default: "10"}
+	KeyAvatarUploadDir     = Key{Name: "uploads.avatar_dir", Env: "AVATAR_UPLOAD_DIR", Default: "uploads/avatar"} // 仅启动时读取
+)
+
 // 外部依赖连接与凭据。
 var (
 	KeyMySQLDSN       = Key{Name: "mysql.dsn", Env: "MYSQL_DSN", Default: "blink:blink_dev_password@tcp(127.0.0.1:3306)/blink_shop?parseTime=true&loc=Local&charset=utf8mb4", Secret: true}

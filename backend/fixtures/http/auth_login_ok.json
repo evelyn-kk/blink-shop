@@ -1,0 +1,5 @@
+{
+  "description": "登录成功。客户端保存 token，后续请求带 Authorization: Bearer <token>；expires_at 之后需重新登录",
+  "request": {"method": "POST", "path": "/api/v1/auth/login", "body": {"username": "blink_user", "password": "BlinkDev#2026"}},
+  "response": {"status": 200, "body": {"token": "<token>", "token_type": "Bearer", "expires_at": "<timestamp>", "account": {"account_id": "acct_seed_user", "username": "blink_user", "display_name": "演示用户", "avatar_url": "", "phone": "", "email": "", "role": "user", "status": "active", "created_at": "2026-09-20T02:00:00Z", "updated_at": "2026-09-20T02:00:00Z"}}}
+}

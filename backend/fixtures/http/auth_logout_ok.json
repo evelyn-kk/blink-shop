@@ -1,0 +1,5 @@
+{
+  "description": "登出：只撤销本次请求使用的 token",
+  "request": {"method": "POST", "path": "/api/v1/auth/logout", "as": "blink_user"},
+  "response": {"status": 200, "body": {"ok": true}}
+}

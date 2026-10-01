@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/go-sql-driver/mysql"
 
@@ -395,5 +396,34 @@ func TestMigrateUpgradeFrom0001(t *testing.T) {
 	}
 	if n, err := s.PendingMigrations(ctx, migrations.FS); err != nil || n != 0 {
 		t.Fatalf("pending after upgrade = %d, %v", n, err)
+	}
+}
+
+// TestAuthTokenStoredAsDigest：auth_tokens 只有 SHA-256 摘要，没有任何一列等于 token 明文。
+func TestAuthTokenStoredAsDigest(t *testing.T) {
+	ctx := context.Background()
+	s := migrated(t)
+	acc, err := s.CreateAccount(ctx, store.NewAccount{Username: "digest", PasswordHash: "h", Role: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, _, err := s.CreateAuthToken(ctx, acc.AccountID, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hash, accountID string
+	var n int
+	if err := s.DB().QueryRowContext(ctx, `SELECT COUNT(*), MAX(token_hash), MAX(account_id) FROM auth_tokens`).Scan(&n, &hash, &accountID); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || hash != store.HashAuthToken(token) || hash == token || accountID != acc.AccountID {
+		t.Fatalf("auth_tokens: n=%d hash=%q account=%q", n, hash, accountID)
+	}
+	var leaked int
+	if err := s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM auth_tokens WHERE token_hash = ? OR account_id = ?`, token, token).Scan(&leaked); err != nil {
+		t.Fatal(err)
+	}
+	if leaked != 0 {
+		t.Fatal("token 明文出现在 auth_tokens 中")
 	}
 }

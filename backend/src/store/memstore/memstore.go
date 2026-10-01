@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +24,7 @@ type accountRow struct {
 // state 是全部表数据；事务开始时整体复制一份用于回滚。
 type state struct {
 	accounts    map[string]accountRow
+	tokens      map[string]domain.AuthToken // 按 token_hash
 	merchants   map[string]domain.Merchant
 	categories  map[string]domain.Category
 	products    map[string]domain.Product // 不含 SKUs，SKU 单独存
@@ -40,7 +42,7 @@ type state struct {
 
 func newState() state {
 	return state{
-		accounts: map[string]accountRow{}, merchants: map[string]domain.Merchant{}, categories: map[string]domain.Category{},
+		accounts: map[string]accountRow{}, tokens: map[string]domain.AuthToken{}, merchants: map[string]domain.Merchant{}, categories: map[string]domain.Category{},
 		products: map[string]domain.Product{}, skus: map[string]domain.ProductSKU{}, documents: map[string]domain.KnowledgeDocument{},
 		chunks: map[string]domain.KnowledgeChunk{}, promotions: map[string]domain.PromotionRule{}, coupons: map[string]domain.Coupon{},
 		userCoupons: map[string]domain.UserCoupon{}, orders: map[string]domain.Order{}, orderItems: map[string]domain.OrderItem{},
@@ -51,7 +53,7 @@ func newState() state {
 // clone 复制所有 map。行内的切片在存储时已复制且之后不再修改，可以共享。
 func (s state) clone() state {
 	return state{
-		accounts: maps.Clone(s.accounts), merchants: maps.Clone(s.merchants), categories: maps.Clone(s.categories),
+		accounts: maps.Clone(s.accounts), tokens: maps.Clone(s.tokens), merchants: maps.Clone(s.merchants), categories: maps.Clone(s.categories),
 		products: maps.Clone(s.products), skus: maps.Clone(s.skus), documents: maps.Clone(s.documents),
 		chunks: maps.Clone(s.chunks), promotions: maps.Clone(s.promotions), coupons: maps.Clone(s.coupons),
 		userCoupons: maps.Clone(s.userCoupons), orders: maps.Clone(s.orders), orderItems: maps.Clone(s.orderItems),
@@ -146,7 +148,7 @@ func (s *Store) insertAccount(acc domain.Account, hash string) error {
 		return &store.ConflictError{Key: store.KeyPrimary}
 	}
 	for _, other := range s.data.accounts {
-		if other.Username == acc.Username {
+		if sameUsername(other.Username, acc.Username) {
 			return &store.ConflictError{Key: store.KeyAccountUsername}
 		}
 	}
@@ -167,11 +169,122 @@ func (s *Store) GetAccount(ctx context.Context, accountID string) (domain.Accoun
 func (s *Store) GetAccountByUsername(ctx context.Context, username string) (domain.Account, string, error) {
 	defer s.lock(ctx)()
 	for _, row := range s.data.accounts {
-		if row.Username == username && row.DeletedAt == nil {
+		if sameUsername(row.Username, username) && row.DeletedAt == nil {
 			return row.Account, row.passwordHash, nil
 		}
 	}
 	return domain.Account{}, "", store.ErrNotFound
+}
+
+// sameUsername 模拟 MySQL utf8mb4_0900_ai_ci 排序规则：用户名比较不区分大小写。
+func sameUsername(a, b string) bool { return strings.EqualFold(a, b) }
+
+// liveAccount 返回未软删的账户行；调用方需持有锁。
+func (s *Store) liveAccount(accountID string) (accountRow, error) {
+	row, ok := s.data.accounts[accountID]
+	if !ok || row.DeletedAt != nil {
+		return accountRow{}, store.ErrNotFound
+	}
+	return row, nil
+}
+
+func (s *Store) UpdatePasswordHash(ctx context.Context, accountID, passwordHash string) error {
+	if passwordHash == "" {
+		return store.ErrInvalid
+	}
+	defer s.lock(ctx)()
+	row, err := s.liveAccount(accountID)
+	if err != nil {
+		return err
+	}
+	row.passwordHash = passwordHash
+	row.UpdatedAt = s.timestamp()
+	s.data.accounts[accountID] = row
+	return nil
+}
+
+func (s *Store) UpdateAccountProfile(ctx context.Context, accountID string, in store.ProfileUpdate) (domain.Account, error) {
+	defer s.lock(ctx)()
+	row, err := s.liveAccount(accountID)
+	if err != nil {
+		return domain.Account{}, err
+	}
+	if in.DisplayName != nil {
+		row.DisplayName = *in.DisplayName
+	}
+	if in.AvatarURL != nil {
+		row.AvatarURL = *in.AvatarURL
+	}
+	row.UpdatedAt = s.timestamp()
+	s.data.accounts[accountID] = row
+	return row.Account, nil
+}
+
+func (s *Store) UpdateAccountContact(ctx context.Context, accountID string, in store.ContactUpdate) (domain.Account, error) {
+	defer s.lock(ctx)()
+	row, err := s.liveAccount(accountID)
+	if err != nil {
+		return domain.Account{}, err
+	}
+	if in.Phone != nil {
+		row.Phone = *in.Phone
+	}
+	if in.Email != nil {
+		row.Email = *in.Email
+	}
+	row.UpdatedAt = s.timestamp()
+	s.data.accounts[accountID] = row
+	return row.Account, nil
+}
+
+func (s *Store) SoftDeleteAccount(ctx context.Context, accountID string) error {
+	defer s.lock(ctx)()
+	row, err := s.liveAccount(accountID)
+	if err != nil {
+		return err
+	}
+	now := s.timestamp()
+	row.DeletedAt, row.UpdatedAt = &now, now
+	s.data.accounts[accountID] = row
+	for hash, t := range s.data.tokens {
+		if t.AccountID == accountID {
+			delete(s.data.tokens, hash)
+		}
+	}
+	return nil
+}
+
+// ---------- 登录 token ----------
+
+func (s *Store) CreateAuthToken(ctx context.Context, accountID string, ttl time.Duration) (string, time.Time, error) {
+	if ttl <= 0 {
+		return "", time.Time{}, store.ErrInvalid
+	}
+	defer s.lock(ctx)()
+	token, hash := store.NewAuthToken()
+	now := s.timestamp()
+	t := domain.AuthToken{TokenHash: hash, AccountID: accountID, CreatedAt: now, ExpiresAt: now.Add(ttl)}
+	s.data.tokens[hash] = t
+	return token, t.ExpiresAt, nil
+}
+
+func (s *Store) GetAccountByToken(ctx context.Context, token string) (domain.Account, error) {
+	if token == "" {
+		return domain.Account{}, store.ErrNotFound
+	}
+	defer s.lock(ctx)()
+	t, ok := s.data.tokens[store.HashAuthToken(token)]
+	if !ok || !t.ExpiresAt.After(s.timestamp()) {
+		return domain.Account{}, store.ErrNotFound
+	}
+	row, err := s.liveAccount(t.AccountID)
+	return row.Account, err
+}
+
+func (s *Store) DeleteAuthToken(ctx context.Context, token string) error {
+	defer s.lock(ctx)()
+	delete(s.data.tokens, store.HashAuthToken(token))
+	return nil
 }
 
 // ---------- 目录 ----------

@@ -5,8 +5,13 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/domain"
 )
@@ -38,6 +43,32 @@ const (
 	KeyPrimary              = "PRIMARY"
 )
 
+// ProfileUpdate 是个人资料的部分更新，nil 表示不修改。
+type ProfileUpdate struct {
+	DisplayName *string
+	AvatarURL   *string
+}
+
+// ContactUpdate 是联系方式的部分更新，nil 表示不修改。
+type ContactUpdate struct {
+	Phone *string
+	Email *string
+}
+
+// NewAuthToken 生成 32 字节随机 token（base64url，无填充）及其摘要。
+func NewAuthToken() (token, hash string) {
+	var b [32]byte
+	_, _ = rand.Read(b[:]) // Go 1.24 起 crypto/rand.Read 不会返回错误
+	token = base64.RawURLEncoding.EncodeToString(b[:])
+	return token, HashAuthToken(token)
+}
+
+// HashAuthToken 返回 token 的 SHA-256 hex，即 auth_tokens.token_hash。
+func HashAuthToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
 // NewAccount 是创建账户的输入；AccountID 为空时自动生成。
 type NewAccount struct {
 	AccountID    string
@@ -61,6 +92,18 @@ type Store interface {
 	CreateAccount(ctx context.Context, in NewAccount) (domain.Account, error)
 	GetAccount(ctx context.Context, accountID string) (domain.Account, error)
 	GetAccountByUsername(ctx context.Context, username string) (domain.Account, string, error)
+	UpdatePasswordHash(ctx context.Context, accountID, passwordHash string) error
+	// UpdateAccountProfile / UpdateAccountContact 只修改非 nil 字段（空串表示清空），在存储层合并，并发的部分更新互不覆盖。
+	UpdateAccountProfile(ctx context.Context, accountID string, in ProfileUpdate) (domain.Account, error)
+	UpdateAccountContact(ctx context.Context, accountID string, in ContactUpdate) (domain.Account, error)
+	// SoftDeleteAccount 在一个事务内写 deleted_at 并删除该账户的全部 token；已注销的账户返回 ErrNotFound。
+	SoftDeleteAccount(ctx context.Context, accountID string) error
+
+	// 登录 token。只保存摘要，明文只在 CreateAuthToken 的返回值里出现一次。
+	// GetAccountByToken 只认未过期 token 且账户未软删；账户状态（inactive/risk）由调用方决定如何处理。
+	CreateAuthToken(ctx context.Context, accountID string, ttl time.Duration) (token string, expiresAt time.Time, err error)
+	GetAccountByToken(ctx context.Context, token string) (domain.Account, error)
+	DeleteAuthToken(ctx context.Context, token string) error
 
 	// 目录（只读部分；写操作随 2.x 节点补充）。
 	ListCategories(ctx context.Context) ([]domain.Category, error)

@@ -1,0 +1,5 @@
+{
+  "description": "注销账户：软删并撤销全部 token，用户名不能再注册",
+  "request": {"method": "DELETE", "path": "/api/v1/account", "as": "blink_user2"},
+  "response": {"status": 200, "body": {"ok": true}}
+}

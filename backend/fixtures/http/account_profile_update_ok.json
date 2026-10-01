@@ -1,0 +1,5 @@
+{
+  "description": "修改昵称；返回更新后的账户",
+  "request": {"method": "PATCH", "path": "/api/v1/account/profile", "as": "blink_user", "body": {"display_name": "小蓝"}},
+  "response": {"status": 200, "body": {"account_id": "acct_seed_user", "username": "blink_user", "display_name": "小蓝", "avatar_url": "", "phone": "", "email": "", "role": "user", "status": "active", "created_at": "2026-09-20T02:00:00Z", "updated_at": "<timestamp>"}}
+}
