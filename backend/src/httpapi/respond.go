@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
-	"strings"
 )
 
 // APIError 是可以直接返回给客户端的错误：状态码、机器码和可展示的中文说明。
@@ -66,8 +66,11 @@ func writeError(w http.ResponseWriter, err error) {
 
 // decodeJSON 读取 JSON 请求体到 dst。错误已映射为 APIError（400/413/415），调用方直接 writeError 即可。
 func decodeJSON(r *http.Request, dst any) error {
-	if ct := r.Header.Get("Content-Type"); ct != "" && !strings.HasPrefix(strings.ToLower(ct), "application/json") {
-		return ErrUnsupportedType
+	// 未带 Content-Type 时按 JSON 处理；带了就必须精确是 application/json（允许 charset 等参数）。
+	if ct := r.Header.Get("Content-Type"); ct != "" {
+		if mediaType, _, err := mime.ParseMediaType(ct); err != nil || mediaType != "application/json" {
+			return ErrUnsupportedType
+		}
 	}
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(dst); err != nil {
