@@ -91,3 +91,11 @@ jobs:
           npm run openapi:lint
       - name: Compose config
         run: docker compose -f deployments/docker-compose.yml config -q
+      - name: Compose images pinned by digest
+        run: |
+          unpinned=$(docker compose -f deployments/docker-compose.yml config --images | grep -v '@sha256:[0-9a-f]\{64\}$' || true)
+          if [ -n "$unpinned" ]; then
+            echo "以下镜像没有固定 digest："
+            echo "$unpinned"
+            exit 1
+          fi

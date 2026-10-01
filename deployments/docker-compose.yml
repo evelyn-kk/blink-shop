@@ -1,11 +1,12 @@
 # Blink Shop 本地开发依赖。只用于开发：端口全部绑定 127.0.0.1，凭据是开发默认值。
 # 启动：docker compose -f deployments/docker-compose.yml up -d
 # 覆盖端口或凭据：在仓库根目录 .env 中设置同名变量，并加 --env-file .env。
+# 镜像统一写成“发行版本@多架构 index digest”，保证任何时间拉到同一份镜像；升级时两者一起改。
 name: blink_shop
 
 services:
   mysql:
-    image: mysql:8.4
+    image: mysql:8.4.11@sha256:6ea90827b1100f8f2ae306a539f86d2c264a26ed435a2a9f75551dd5c3aeb242
     environment:
       MYSQL_ROOT_PASSWORD: ${BLINK_MYSQL_ROOT_PASSWORD:-blink_dev_root}
       MYSQL_DATABASE: ${BLINK_MYSQL_DATABASE:-blink_shop}
@@ -26,7 +27,7 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7.4
+    image: redis:7.4.11@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f
     command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "127.0.0.1:${BLINK_REDIS_PORT:-6379}:6379"
@@ -40,7 +41,7 @@ services:
     restart: unless-stopped
 
   nacos:
-    image: nacos/nacos-server:v2.5.1
+    image: nacos/nacos-server:v2.5.1@sha256:8987908cb94ed5f9d30522a64493d35732a6c05f216d667a7addb022f3d92e80
     environment:
       MODE: standalone
       NACOS_AUTH_ENABLE: "false"
@@ -66,7 +67,7 @@ services:
 
   # 官方 minio/minio 镜像已停止公开发布，这里用 Bitnami 归档的同版本镜像（MinIO RELEASE.2025-04-22）。
   minio:
-    image: bitnamilegacy/minio:2025.4.22
+    image: bitnamilegacy/minio:2025.4.22@sha256:50cec18ac4184af4671a78aedd5554942c8ae105d51a465fa82037949046da01
     environment:
       MINIO_ROOT_USER: ${BLINK_MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${BLINK_MINIO_ROOT_PASSWORD:-minioadmin}
@@ -86,7 +87,7 @@ services:
 
   # etcd 只供 Milvus 使用，不对宿主机暴露端口。
   etcd:
-    image: quay.io/coreos/etcd:v3.5.18
+    image: quay.io/coreos/etcd:v3.5.18@sha256:d0a641d5fbcc89678c931a61b7de7b8a1cf097149f135c9c73bc81d076a1494b
     environment:
       ETCD_AUTO_COMPACTION_MODE: revision
       ETCD_AUTO_COMPACTION_RETENTION: "1000"
@@ -107,7 +108,7 @@ services:
     restart: unless-stopped
 
   milvus:
-    image: milvusdb/milvus:v2.5.10
+    image: milvusdb/milvus:v2.5.10@sha256:02e1d60d71ab60f435c60076f4fed2abe59602ecd5e18dcfe229c8c558c4379d
     command: ["milvus", "run", "standalone"]
     security_opt:
       - seccomp:unconfined
