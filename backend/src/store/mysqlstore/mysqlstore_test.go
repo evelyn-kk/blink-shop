@@ -3,10 +3,12 @@ package mysqlstore_test
 import (
 	"context"
 	"errors"
+	"github.com/evelyn-kk/blink-shop/backend/src/seed"
 	"io/fs"
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -451,5 +453,45 @@ func TestAuthTokenStoredAsDigest(t *testing.T) {
 	}
 	if leaked != 0 {
 		t.Fatal("token 明文出现在 auth_tokens 中")
+	}
+}
+
+// 同一账户并发加购同一规格（购物车里还没有这一行）：账户行锁让请求串行执行，不应出现死锁重试。
+// 只锁购物车行时，各请求对不存在的行拿到间隙锁后互相等待 INSERT，会频繁死锁。
+func TestConcurrentAddCartNoDeadlock(t *testing.T) {
+	ctx := context.Background()
+	s := migrated(t)
+	if _, err := s.ApplySeed(ctx, storetest.DevSeed(t)); err != nil {
+		t.Fatal(err)
+	}
+	for round := 0; round < 5; round++ {
+		sku := []string{"sku_seed_mouse_gray", "sku_seed_lamp_white", "sku_seed_nova_128", "sku_seed_nova_256", "sku_seed_vista_256"}[round]
+		var wg sync.WaitGroup
+		errs := make([]error, 30)
+		for i := range errs {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, errs[i] = s.AddCartItem(ctx, seed.UserID, "p_round", sku, func(current, _ int) (int, error) { return current + 1, nil })
+			}()
+		}
+		wg.Wait()
+		for _, err := range errs {
+			if err != nil {
+				t.Fatalf("round %d: %v", round, err)
+			}
+		}
+	}
+	if n := s.TxRetries(); n != 0 {
+		t.Fatalf("%d transaction retries (deadlocks or duplicate inserts)", n)
+	}
+	lines, _ := s.ListCartLines(ctx, seed.UserID)
+	if len(lines) != 5 {
+		t.Fatalf("lines = %d", len(lines))
+	}
+	for _, l := range lines {
+		if l.Quantity != 30 {
+			t.Fatalf("%s quantity = %d", l.SkuID, l.Quantity)
+		}
 	}
 }

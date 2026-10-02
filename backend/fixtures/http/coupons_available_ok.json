@@ -1,0 +1,5 @@
+{
+  "description": "可领取的券（含已领完的），claimed_by_me 为本人已领张数，can_claim 表示还能否领取",
+  "request": {"method": "GET", "path": "/api/v1/coupons/available", "as": "blink_user"},
+  "response": {"status": 200, "body": {"items": [{"coupon_id": "coupon_seed_platform", "name": "平台满 200 减 20", "scope": "platform", "merchant_id": "", "type": "fixed_amount", "threshold_amount": "200.00", "discount_amount": "20.00", "description": "满 200 减 20", "total_count": 10000, "claimed_count": 2, "per_user_limit": 1, "start_at": "2026-01-01T00:00:00Z", "end_at": "2027-12-31T15:59:59Z", "claimed_by_me": 1, "can_claim": false}, {"coupon_id": "coupon_seed_digital", "name": "Blink 数码满 500 减 50", "scope": "merchant", "merchant_id": "m_seed_digital", "type": "fixed_amount", "threshold_amount": "500.00", "discount_amount": "50.00", "description": "满 500 减 50", "total_count": 500, "claimed_count": 0, "per_user_limit": 1, "start_at": "2026-01-01T00:00:00Z", "end_at": "2027-12-31T15:59:59Z", "claimed_by_me": 0, "can_claim": true}], "page": 1, "page_size": 10, "total": 2}}
+}

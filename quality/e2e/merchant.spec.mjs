@@ -156,6 +156,8 @@ test('必填与格式校验，服务端错误定位到字段', async ({ page, re
   await page.getByLabel('价格（元）').fill('1.234');
   await page.getByRole('button', { name: '创建商品' }).click();
   await expect(page.getByText('请填写大于 0 的价格，最多两位小数')).toBeVisible();
+  // 出错后表单在下一帧把焦点移到第一个出错的字段；等焦点落定再输入，否则输入可能落到被抢走焦点的输入框里。
+  await expect(page.getByLabel('价格（元）')).toBeFocused();
 
   // 客户端放行、服务端拒绝：市场价低于售价，错误显示在市场价字段下。
   await page.getByLabel('价格（元）').fill('50');

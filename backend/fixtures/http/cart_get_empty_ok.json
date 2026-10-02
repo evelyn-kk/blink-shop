@@ -1,0 +1,5 @@
+{
+  "description": "查看购物车（仅普通用户）：items 与 summary；summary 的金额与试算一致（自动选最优券）",
+  "request": {"method": "GET", "path": "/api/v1/cart", "as": "blink_user2"},
+  "response": {"status": 200, "body": {"items": [], "summary": {"item_count": 0, "selected_count": 0, "total_amount": "0.00", "discount_amount": "0.00", "pay_amount": "0.00"}}}
+}

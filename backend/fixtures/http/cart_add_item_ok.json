@@ -1,0 +1,5 @@
+{
+  "description": "加购：不传 sku_id 用默认规格，不传 quantity 为 1；同一规格再次加购累加数量。返回整个购物车，每项含是否可购买和分摊后的金额（耳机 95 折且不与其他活动叠加：599 → 569.05）",
+  "request": {"method": "POST", "path": "/api/v1/cart/items", "as": "blink_user2", "body": {"product_id": "p_seed_earbuds"}},
+  "response": {"status": 200, "body": {"items": [{"cart_item_id": "<cart_item_id>", "product_id": "p_seed_earbuds", "sku_id": "sku_seed_earbuds_white", "product_name": "Blink Air 降噪耳机", "sku_name": "Blink Air 白色", "image_url": "/api/v1/assets/catalog/products/p_seed_earbuds.png", "merchant_id": "m_seed_digital", "merchant_name": "Blink 数码旗舰店", "unit_price": "599.00", "quantity": 1, "selected": true, "stock_quantity": 5, "available": true, "unavailable_reason": "", "amount": "599.00", "discount_amount": "29.95", "pay_amount": "569.05"}], "summary": {"item_count": 1, "selected_count": 1, "total_amount": "599.00", "discount_amount": "29.95", "pay_amount": "569.05"}}}
+}

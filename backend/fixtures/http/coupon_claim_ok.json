@@ -1,0 +1,5 @@
+{
+  "description": "领券（POST /coupons/{coupon_id}:claim）：锁定券行后检查有效期、总量与每人限领，不会超发",
+  "request": {"method": "POST", "path": "/api/v1/coupons/coupon_seed_digital:claim", "as": "blink_user"},
+  "response": {"status": 200, "body": {"user_coupon_id": "<user_coupon_id>", "coupon_id": "coupon_seed_digital", "status": "unused", "order_id": "", "claimed_at": "<timestamp>", "used_at": null, "coupon": {"coupon_id": "coupon_seed_digital", "name": "Blink 数码满 500 减 50", "scope": "merchant", "merchant_id": "m_seed_digital", "type": "fixed_amount", "threshold_amount": "500.00", "discount_amount": "50.00", "description": "满 500 减 50", "total_count": 500, "claimed_count": 1, "per_user_limit": 1, "start_at": "2026-01-01T00:00:00Z", "end_at": "2027-12-31T15:59:59Z"}}}
+}

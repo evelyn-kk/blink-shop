@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Blink Shop API
-  version: 0.7.0
+  version: 0.8.0
   description: |
     Blink Shop 的单一接口契约。约定：
     - 所有路径前缀为 `/api/v1`，JSON 字段使用 snake_case。
@@ -45,6 +45,11 @@ tags:
       知识文档。入库流程：清洗 → 按商家去重（清洗后正文的 SHA-256）→ 切块 → 写分块 → 向量索引（未配置时跳过，检索走关键词）。
       文档状态 uploaded → parsing → indexing → indexed，任一步失败为 failed（error_reason 说明原因），失败或已索引的文档可重新处理。
       商家只能看和提交自己的资料；管理员可以看全部资料，并为任意商家或平台（merchant_id 为空）采集。
+  - name: cart
+    description: |
+      购物车、优惠试算与优惠券（仅普通用户）。金额由服务端计算，规则见 backend/README.md“营销规则”：
+      活动按单品 → 品类 → 店铺 → 平台计算，不可叠加的活动只作用于未参加其他活动的商品且这些商品不再参加后续活动和用券；
+      之后每个店铺最多用一张店铺券、整单最多一张平台券。discount_rate 为实付比例（0.95 = 9.5 折）。
   - name: catalog
     description: 公开商品目录（无需登录）。只展示上架且商家营业中的商品；下架、风控、已删除商品按不存在处理
 paths:
@@ -1150,6 +1155,347 @@ paths:
             image/png: {}
         "404":
           $ref: "#/components/responses/NotFound"
+  /cart:
+    get:
+      tags: [cart]
+      operationId: getCart
+      summary: 查看购物车
+      description: 按加入顺序返回购物车项。商品下架/删除、规格失效、售罄或数量超过库存的项 available=false 并给出原因，不参与计价；summary 与默认试算一致（自动选券）。
+      responses:
+        "200":
+          description: 操作后的整个购物车
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cart"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /cart/discount-preview:
+    get:
+      tags: [cart]
+      operationId: previewCartDiscount
+      summary: 优惠试算
+      description: 只计算已选中且可购买的项。只做试算，不会占用或核销券；4.2 下单使用同一套计算。
+      parameters:
+        - name: user_coupon_ids
+          in: query
+          required: false
+          description: 不传时自动选择最优券；传了（逗号分隔，可以为空值）只使用这些券，空值表示不用券。最多 20 张。
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 试算结果
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscountPreview"
+        "400":
+          description: 指定的券不能用（`coupon_not_applicable`，field=user_coupon_ids）：不属于本人、已使用、已过期、未开始、已停用、门槛不够、没有适用商品，或同一范围指定了多张
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: coupon_not_applicable
+                message: 优惠券不能使用：未满足使用门槛或没有适用商品
+                field: user_coupon_ids
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /cart/items:
+    post:
+      tags: [cart]
+      operationId: addCartItem
+      summary: 加购
+      description: |
+        商品必须公开可见；不传 sku_id 时使用默认规格，不传 quantity 为 1。同一规格再次加购累加数量并重新选中（同一账户、商品、规格只有一行，
+        并发加购不会产生重复行或丢失数量）。累加后的数量不能超过库存和单行上限 99；购物车最多 100 种商品。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product_id]
+              properties:
+                product_id:
+                  type: string
+                sku_id:
+                  type: string
+                quantity:
+                  type: integer
+                  minimum: 1
+                  maximum: 99
+                  default: 1
+      responses:
+        "200":
+          description: 操作后的整个购物车
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cart"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 商品不存在、未上架或店铺停业（`product_not_found`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: product_not_found
+                message: 商品不存在或已下架
+        "409":
+          description: "`out_of_stock` 售罄；`insufficient_stock` 累加后超过库存；`quantity_limit` 超过单行 99 件；`cart_full` 购物车已满 100 种商品"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: insufficient_stock
+                message: 库存不足，最多可买 5 件
+  /cart/items/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    patch:
+      tags: [cart]
+      operationId: updateCartItem
+      summary: 修改数量或选中状态
+      description: quantity 必须是 1–99 且不超过当前库存（0 和负数不会当作删除）；已失效的商品只能取消选中或删除。只能修改本人的购物车项，其他人的按不存在处理（404）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                quantity:
+                  type: integer
+                  minimum: 1
+                  maximum: 99
+                selected:
+                  type: boolean
+      responses:
+        "200":
+          description: 操作后的整个购物车
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cart"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 购物车项不存在（`cart_item_not_found`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: cart_item_not_found
+                message: 购物车项不存在
+        "409":
+          description: "`insufficient_stock` 超过库存；`out_of_stock` 已售罄；`item_unavailable` 商品已下架、删除或规格失效"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: item_unavailable
+                message: 商品已失效，只能删除
+    delete:
+      tags: [cart]
+      operationId: deleteCartItem
+      summary: 删除购物车项
+      responses:
+        "200":
+          description: 操作后的整个购物车
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cart"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 购物车项不存在（`cart_item_not_found`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: cart_item_not_found
+                message: 购物车项不存在
+  /coupons/available:
+    get:
+      tags: [cart]
+      operationId: listAvailableCoupons
+      summary: 可领取的优惠券
+      description: active、在有效期 [start_at, end_at) 内、店铺券的店铺营业中的券（含已领完的，can_claim=false），最新的在前。
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 优惠券分页列表
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AvailableCoupon"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /coupons/mine:
+    get:
+      tags: [cart]
+      operationId: listMyCoupons
+      summary: 我的优惠券
+      description: 按领取时间倒序。状态按当前时间计算：未使用但已到期的为 expired。
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [unused, used, expired]
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 我的优惠券分页列表
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/UserCoupon"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /coupons/{coupon_id}:claim:
+    post:
+      tags: [cart]
+      operationId: claimCoupon
+      summary: 领券
+      description: 与上游一致，动作写在路径段内（`/coupons/coupon_seed_digital:claim`）。锁定券行后检查有效期、总量（total_count 为 0 不限）和每人限领，并发领取不会超发。
+      parameters:
+        - name: coupon_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 领取成功
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserCoupon"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 券不存在（`coupon_not_found`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: coupon_not_found
+                message: 优惠券不存在
+        "409":
+          description: "`coupon_unavailable` 不在有效期、已停用或店铺停业；`coupon_sold_out` 已领完；`coupon_limit_reached` 达到每人限领"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: coupon_limit_reached
+                message: 已达到这张券的领取上限
   /merchant/products:
     get:
       tags: [merchant]
@@ -2068,6 +2414,230 @@ components:
         truncated:
           type: boolean
           description: 清洗后超过 120000 字被截断。
+    CartItem:
+      type: object
+      required: [cart_item_id, product_id, sku_id, product_name, sku_name, image_url, merchant_id, merchant_name, unit_price, quantity, selected, stock_quantity, available, unavailable_reason, amount, discount_amount, pay_amount]
+      properties:
+        cart_item_id:
+          type: string
+        product_id:
+          type: string
+        sku_id:
+          type: string
+        product_name:
+          type: string
+        sku_name:
+          type: string
+        image_url:
+          type: string
+        merchant_id:
+          type: string
+        merchant_name:
+          type: string
+        unit_price:
+          $ref: "#/components/schemas/Money"
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 99
+        selected:
+          type: boolean
+        stock_quantity:
+          type: integer
+        available:
+          type: boolean
+        unavailable_reason:
+          type: string
+          description: 商品已删除 / 商品已下架 / 规格已失效 / 已售罄 / 库存不足，仅剩 N 件；可购买时为空串。
+        amount:
+          $ref: "#/components/schemas/Money"
+        discount_amount:
+          $ref: "#/components/schemas/Money"
+          description: 分摊到该项的优惠；未选中或不可购买时为 0。
+        pay_amount:
+          $ref: "#/components/schemas/Money"
+    Cart:
+      type: object
+      required: [items, summary]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CartItem"
+        summary:
+          type: object
+          required: [item_count, selected_count, total_amount, discount_amount, pay_amount]
+          properties:
+            item_count:
+              type: integer
+              description: 购物车行数。
+            selected_count:
+              type: integer
+              description: 参与计价（选中且可购买）的商品件数。
+            total_amount:
+              $ref: "#/components/schemas/Money"
+            discount_amount:
+              $ref: "#/components/schemas/Money"
+            pay_amount:
+              $ref: "#/components/schemas/Money"
+    DiscountPreview:
+      type: object
+      required: [total_amount, discount_amount, pay_amount, lines, merchants, items, hints, user_coupon_ids]
+      properties:
+        total_amount:
+          $ref: "#/components/schemas/Money"
+        discount_amount:
+          $ref: "#/components/schemas/Money"
+        pay_amount:
+          $ref: "#/components/schemas/Money"
+        lines:
+          type: array
+          description: 逐项优惠，按计算顺序排列。
+          items:
+            type: object
+            required: [type, id, name, scope, merchant_id, amount, description, cart_item_ids]
+            properties:
+              type:
+                type: string
+                enum: [promotion, coupon]
+              id:
+                type: string
+                description: promotion_id 或 user_coupon_id。
+              name:
+                type: string
+              scope:
+                type: string
+                enum: [platform, merchant, product, category]
+              merchant_id:
+                type: string
+              amount:
+                $ref: "#/components/schemas/Money"
+              description:
+                type: string
+                examples: [满 300 减 30, 9.5 折]
+              cart_item_ids:
+                type: array
+                description: 这条优惠分摊到的购物车项。
+                items:
+                  type: string
+        merchants:
+          type: array
+          description: 按店铺小计（4.2 按店铺拆单）。
+          items:
+            type: object
+            required: [merchant_id, merchant_name, total_amount, discount_amount, pay_amount]
+            properties:
+              merchant_id:
+                type: string
+              merchant_name:
+                type: string
+              total_amount:
+                $ref: "#/components/schemas/Money"
+              discount_amount:
+                $ref: "#/components/schemas/Money"
+              pay_amount:
+                $ref: "#/components/schemas/Money"
+        items:
+          type: array
+          items:
+            type: object
+            required: [cart_item_id, amount, discount_amount, pay_amount]
+            properties:
+              cart_item_id:
+                type: string
+              amount:
+                $ref: "#/components/schemas/Money"
+              discount_amount:
+                $ref: "#/components/schemas/Money"
+              pay_amount:
+                $ref: "#/components/schemas/Money"
+        hints:
+          type: array
+          description: 满减活动还差多少金额达到门槛（凑单提示）。
+          items:
+            type: object
+            required: [promotion_id, name, shortfall]
+            properties:
+              promotion_id:
+                type: string
+              name:
+                type: string
+              shortfall:
+                $ref: "#/components/schemas/Money"
+        user_coupon_ids:
+          type: array
+          description: 实际使用的券。
+          items:
+            type: string
+    Coupon:
+      type: object
+      required: [coupon_id, name, scope, merchant_id, type, threshold_amount, discount_amount, description, total_count, claimed_count, per_user_limit, start_at, end_at]
+      properties:
+        coupon_id:
+          type: string
+        name:
+          type: string
+        scope:
+          type: string
+          enum: [platform, merchant]
+        merchant_id:
+          type: string
+        type:
+          type: string
+          enum: [fixed_amount]
+        threshold_amount:
+          $ref: "#/components/schemas/Money"
+        discount_amount:
+          $ref: "#/components/schemas/Money"
+        description:
+          type: string
+          examples: [满 200 减 20]
+        total_count:
+          type: integer
+          description: 0 表示不限量。
+        claimed_count:
+          type: integer
+        per_user_limit:
+          type: integer
+          minimum: 1
+        start_at:
+          type: string
+          format: date-time
+        end_at:
+          type: string
+          format: date-time
+          description: 不含该时刻。
+    AvailableCoupon:
+      allOf:
+        - $ref: "#/components/schemas/Coupon"
+        - type: object
+          required: [claimed_by_me, can_claim]
+          properties:
+            claimed_by_me:
+              type: integer
+            can_claim:
+              type: boolean
+    UserCoupon:
+      type: object
+      required: [user_coupon_id, coupon_id, status, order_id, claimed_at, used_at, coupon]
+      properties:
+        user_coupon_id:
+          type: string
+        coupon_id:
+          type: string
+        status:
+          type: string
+          enum: [unused, used, expired]
+        order_id:
+          type: string
+        claimed_at:
+          type: string
+          format: date-time
+        used_at:
+          type: [string, "null"]
+          format: date-time
+        coupon:
+          $ref: "#/components/schemas/Coupon"
     FileUpload:
       type: object
       required: [file]

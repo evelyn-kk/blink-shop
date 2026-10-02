@@ -1,0 +1,5 @@
+{
+  "description": "超过每人限领：409 coupon_limit_reached；已领完 409 coupon_sold_out；不在有效期或已停用 409 coupon_unavailable；不存在 404 coupon_not_found",
+  "request": {"method": "POST", "path": "/api/v1/coupons/coupon_seed_platform:claim", "as": "blink_user"},
+  "response": {"status": 409, "body": {"code": "coupon_limit_reached", "message": "已达到这张券的领取上限", "request_id": "<request_id>"}}
+}

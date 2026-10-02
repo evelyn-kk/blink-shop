@@ -1,0 +1,6 @@
+{
+  "description": "指定的券不能用（不属于本人、已使用、已过期、门槛不够、同范围多张）：400 coupon_not_applicable；user_coupon_ids 为空值表示不用券",
+  "setup_requests": [{"as": "blink_user2", "method": "POST", "path": "/api/v1/cart/items", "body": {"product_id": "p_seed_earbuds"}}],
+  "request": {"method": "GET", "path": "/api/v1/cart/discount-preview?user_coupon_ids=uc_seed_user_platform_used", "as": "blink_user2"},
+  "response": {"status": 400, "body": {"code": "coupon_not_applicable", "message": "优惠券不能使用：不存在", "field": "user_coupon_ids", "request_id": "<request_id>"}}
+}

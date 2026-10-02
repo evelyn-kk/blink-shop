@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -20,7 +21,12 @@ type Store struct {
 	db  *sql.DB
 	cfg *mysql.Config
 	now func() time.Time
+	// txRetries 记录因唯一键冲突或死锁而重试的事务次数，用于测试确认正常并发下不需要重试。
+	txRetries atomic.Int64
 }
+
+// TxRetries 返回累计的事务重试次数。
+func (s *Store) TxRetries() int64 { return s.txRetries.Load() }
 
 var _ store.Store = (*Store)(nil)
 

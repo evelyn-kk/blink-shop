@@ -1,0 +1,5 @@
+{
+  "description": "数量必须是 1–99 的整数：0 不会被当作删除",
+  "request": {"method": "POST", "path": "/api/v1/cart/items", "as": "blink_user2", "body": {"product_id": "p_seed_mouse", "quantity": 0}},
+  "response": {"status": 400, "body": {"code": "invalid_argument", "message": "数量必须是 1 到 99 之间的整数", "field": "quantity", "request_id": "<request_id>"}}
+}

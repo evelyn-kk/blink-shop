@@ -134,6 +134,15 @@ func (s *Server) routes() {
 	s.handle("PATCH /api/v1/merchant/products/{id}", accessMerchant, s.handleUpdateMerchantProduct)
 	s.handle("DELETE /api/v1/merchant/products/{id}", accessMerchant, s.handleDeleteMerchantProduct)
 
+	s.handle("GET /api/v1/cart", accessUser, s.handleGetCart)
+	s.handle("GET /api/v1/cart/discount-preview", accessUser, s.handleDiscountPreview)
+	s.handle("POST /api/v1/cart/items", accessUser, s.handleAddCartItem)
+	s.handle("PATCH /api/v1/cart/items/{id}", accessUser, s.handleUpdateCartItem)
+	s.handle("DELETE /api/v1/cart/items/{id}", accessUser, s.handleDeleteCartItem)
+	s.handle("GET /api/v1/coupons/available", accessUser, s.handleListAvailableCoupons)
+	s.handle("GET /api/v1/coupons/mine", accessUser, s.handleListMyCoupons)
+	s.handle("POST /api/v1/coupons/{action}", accessUser, s.handleCouponAction)
+
 	s.handle("GET /api/v1/merchant/documents", accessMerchant, s.handleListMerchantDocuments)
 	s.handle("POST /api/v1/merchant/documents", accessMerchant, s.handleCreateMerchantDocument)
 	s.handle("GET /api/v1/merchant/documents/{id}", accessMerchant, s.handleGetMerchantDocument)

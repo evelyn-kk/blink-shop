@@ -41,6 +41,11 @@ func (m Money) String() string { return formatFixed(int64(m), moneyScale) }
 // Mul 计算单价 × 数量。
 func (m Money) Mul(quantity int) Money { return m * Money(quantity) }
 
+// MulRate 计算金额 × 比例，四舍五入到分（例如 99.99 × 0.95 = 94.9905 → 94.99）。比例必须在 [0, 1]。
+func (m Money) MulRate(r Rate) Money {
+	return Money((int64(m)*int64(r) + int64(rateOne)/2) / int64(rateOne))
+}
+
 func (m Money) MarshalJSON() ([]byte, error) { return json.Marshal(m.String()) }
 
 // UnmarshalJSON 接受字符串 "12.30" 或数字 12.3；负数视为非法。

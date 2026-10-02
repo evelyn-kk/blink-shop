@@ -239,3 +239,19 @@ func TestNewID(t *testing.T) {
 		t.Fatalf("NewID = %q, %q", a, b)
 	}
 }
+
+func TestMoneyMulRate(t *testing.T) {
+	for _, c := range []struct{ m, r, want string }{
+		{"99.99", "0.95", "94.99"},  // 94.9905
+		{"0.10", "0.95", "0.10"},    // 0.095 → 0.10（四舍五入）
+		{"0.01", "0.5", "0.01"},     // 0.005 → 0.01
+		{"0.01", "0.4999", "0.00"},  // 0.004999
+		{"2999.00", "1", "2999.00"}, // 不打折
+		{"2999.00", "0", "0.00"},    // 免费
+		{"99999999.99", "0.9999", "99989999.99"},
+	} {
+		if got := MustMoney(c.m).MulRate(MustRate(c.r)).String(); got != c.want {
+			t.Errorf("%s × %s = %s, want %s", c.m, c.r, got, c.want)
+		}
+	}
+}

@@ -1,0 +1,5 @@
+{
+  "description": "加购后数量超过库存：409 insufficient_stock，购物车不变；数量 0、负数、超过 99 为 400（field=quantity），售罄 409 out_of_stock",
+  "request": {"method": "POST", "path": "/api/v1/cart/items", "as": "blink_user2", "body": {"product_id": "p_seed_earbuds", "quantity": 6}},
+  "response": {"status": 409, "body": {"code": "insufficient_stock", "message": "库存不足，最多可买 5 件", "request_id": "<request_id>"}}
+}

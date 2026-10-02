@@ -335,8 +335,6 @@ func mustHash(t *testing.T, p *passwordHasher, pw string) string {
 // TestAccountStatusAccess 覆盖 inactive/risk 账户的访问范围；状态在每次请求时重新读取，管理员改状态立即生效。
 func TestAccountStatusAccess(t *testing.T) {
 	ts := newTestServer(t, nil, nil, nil)
-	ts.handle("POST /api/v1/cart/items", accessUser, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
-	ts.handle("GET /api/v1/cart", accessUser, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	off := ts.tokenFor(t, ts.addAccount(t, "off_user", "h", domain.RoleUser, "", domain.StatusInactive))
 	risk := ts.tokenFor(t, ts.addAccount(t, "risk_user", "h", domain.RoleUser, "", domain.StatusRisk))
 
@@ -353,7 +351,9 @@ func TestAccountStatusAccess(t *testing.T) {
 		{"PATCH", "/api/v1/account/contact", 403, "account_inactive", 403, "account_risk"},
 		{"DELETE", "/api/v1/account", 403, "account_inactive", 403, "account_risk"},
 		{"POST", "/api/v1/uploads/avatar", 403, "account_inactive", 403, "account_risk"},
-		{"GET", "/api/v1/cart", 403, "account_inactive", 204, ""},
+		{"GET", "/api/v1/cart", 403, "account_inactive", 200, ""},
+		{"GET", "/api/v1/coupons/mine", 403, "account_inactive", 200, ""},
+		{"POST", "/api/v1/coupons/coupon_seed_digital:claim", 403, "account_inactive", 403, "account_risk"},
 		{"POST", "/api/v1/cart/items", 403, "account_inactive", 403, "account_risk"},
 	}
 	for _, c := range cases {

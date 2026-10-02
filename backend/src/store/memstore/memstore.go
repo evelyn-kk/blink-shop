@@ -39,6 +39,7 @@ type state struct {
 	payments    map[string]domain.Payment
 	reviews     map[string]domain.ProductReview
 	files       map[string]domain.StoredFile
+	cartItems   map[string]domain.CartItem
 }
 
 func newState() state {
@@ -48,6 +49,7 @@ func newState() state {
 		chunks: map[string]domain.KnowledgeChunk{}, promotions: map[string]domain.PromotionRule{}, coupons: map[string]domain.Coupon{},
 		userCoupons: map[string]domain.UserCoupon{}, orders: map[string]domain.Order{}, orderItems: map[string]domain.OrderItem{},
 		payments: map[string]domain.Payment{}, reviews: map[string]domain.ProductReview{}, files: map[string]domain.StoredFile{},
+		cartItems: map[string]domain.CartItem{},
 	}
 }
 
@@ -59,6 +61,7 @@ func (s state) clone() state {
 		chunks: maps.Clone(s.chunks), promotions: maps.Clone(s.promotions), coupons: maps.Clone(s.coupons),
 		userCoupons: maps.Clone(s.userCoupons), orders: maps.Clone(s.orders), orderItems: maps.Clone(s.orderItems),
 		payments: maps.Clone(s.payments), reviews: maps.Clone(s.reviews), files: maps.Clone(s.files),
+		cartItems: maps.Clone(s.cartItems),
 	}
 }
 

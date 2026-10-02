@@ -23,6 +23,11 @@ var (
 	ErrConflict = errors.New("store: conflict")
 	// ErrInvalid 输入不满足存储层的基本约束。
 	ErrInvalid = errors.New("store: invalid input")
+
+	// 领券失败的原因（ClaimCoupon）。
+	ErrCouponUnavailable  = errors.New("store: coupon not claimable") // 停用、未开始、已结束或所属店铺停业
+	ErrCouponSoldOut      = errors.New("store: coupon sold out")
+	ErrCouponLimitReached = errors.New("store: coupon per-user limit reached")
 )
 
 // ConflictError 指出冲突的唯一键名（与 migration 中的 UNIQUE KEY 名一致）。
@@ -41,6 +46,7 @@ const (
 	KeyDocumentMerchantHash = "uk_knowledge_documents_merchant_hash"
 	KeyChunkDocumentIndex   = "uk_knowledge_chunks_document_index"
 	KeyStoredFileObjectKey  = "uk_stored_files_object_key"
+	KeyCartItem             = "uk_cart_items_account_product_sku"
 	KeyPrimary              = "PRIMARY"
 )
 
@@ -136,6 +142,39 @@ type KnowledgeHit struct {
 	DocumentTitle string
 	DocType       string
 	SourceURL     string
+}
+
+// CartLine 是购物车项及其关联信息。商品或规格被删除时 SkuFound 为 false、名称等为空。
+type CartLine struct {
+	domain.CartItem
+	ProductName    string
+	ProductStatus  domain.ProductStatus
+	ImageURL       string
+	CategoryID     string
+	MerchantID     string
+	MerchantName   string
+	MerchantStatus domain.EntityStatus
+	SkuFound       bool
+	SkuName        string
+	UnitPrice      domain.Money
+	StockQuantity  int
+}
+
+// MaxCartLines 是一个购物车最多的行数（不同商品规格数）。
+const MaxCartLines = 100
+
+// UserCouponQuery 列出账户的券。Status 为空表示全部；unused / used / expired 按 At 计算。
+type UserCouponQuery struct {
+	AccountID string
+	Status    string
+	At        time.Time
+	Page      Page
+}
+
+// OwnedCoupon 是用户持有的一张券及其定义；Status 已按查询时间计算（未使用但已过期的为 expired）。
+type OwnedCoupon struct {
+	domain.UserCoupon
+	Coupon domain.Coupon
 }
 
 // PromotionQuery 查询某时刻有效的促销。ProductID 非空时只返回适用于该商品的促销：
@@ -255,6 +294,27 @@ type Store interface {
 	ListDocumentChunks(ctx context.Context, documentID string) ([]domain.KnowledgeChunk, error)
 	// SearchKnowledge 召回可检索的分块：文档为 indexed，所属商家营业中（或平台资料），关联的商品（如有）公开可见。
 	SearchKnowledge(ctx context.Context, q KnowledgeQuery) ([]KnowledgeHit, error)
+
+	// 购物车。所有方法都按 accountID 限定，访问不到其他账户的购物车项（返回 ErrNotFound）。
+	// ListCartLines 按加入时间（同一毫秒加入的按商品、规格 ID）顺序返回购物车项及其商品、规格、店铺的当前信息（商品或规格可能已失效）。
+	ListCartLines(ctx context.Context, accountID string) ([]CartLine, error)
+	// AddCartItem 原子加购：在事务中锁定 (账户, 商品, 规格) 对应的行，fn 拿到当前数量（没有时为 0）和购物车现有行数，
+	// 返回新的数量；fn 出错时不做任何修改。同一账户的加购串行执行：并发加购同一规格不会产生重复行，数量也不会丢失。
+	// 账户不存在返回 ErrNotFound。
+	AddCartItem(ctx context.Context, accountID, productID, skuID string, fn func(current, lines int) (int, error)) (domain.CartItem, error)
+	// UpdateCartItem 锁定本人的购物车项交给 fn 修改数量和选中状态。
+	UpdateCartItem(ctx context.Context, accountID, cartItemID string, fn func(item *domain.CartItem) error) (domain.CartItem, error)
+	DeleteCartItem(ctx context.Context, accountID, cartItemID string) error
+
+	// 优惠券。ListClaimableCoupons 返回 at 时刻有效（active、在有效期内、店铺券的店铺营业中）的券，按 created_at、coupon_id 倒序。
+	ListClaimableCoupons(ctx context.Context, at time.Time, page Page) ([]domain.Coupon, int, error)
+	// CountClaimed 返回账户对每张券已领取的张数。
+	CountClaimed(ctx context.Context, accountID string, couponIDs []string) (map[string]int, error)
+	// ListUserCoupons 返回账户的券（含券的定义），按领取时间、user_coupon_id 倒序。状态按 at 计算：未使用但已过期的为 expired。
+	ListUserCoupons(ctx context.Context, q UserCouponQuery) ([]OwnedCoupon, int, error)
+	// ClaimCoupon 在事务中锁定券行后检查有效期、总量和每人限领，写入领取记录并增加已领数量。
+	// 券不存在 ErrNotFound；不可领 ErrCouponUnavailable / ErrCouponSoldOut / ErrCouponLimitReached。
+	ClaimCoupon(ctx context.Context, accountID, couponID string, at time.Time) (OwnedCoupon, error)
 
 	// ApplySeed 在一个事务内写入开发种子：按主键“不存在才插入”，可重复执行；违反其他唯一键时整体回滚并返回 ErrConflict。
 	ApplySeed(ctx context.Context, data SeedData) (SeedResult, error)
@@ -393,4 +453,28 @@ func PrepareChunks(d domain.KnowledgeDocument, chunks []domain.KnowledgeChunk, n
 		out[i] = c
 	}
 	return out, nil
+}
+
+// EffectiveCouponStatus 按时间计算用户券的状态：未使用但券已到期（at ≥ end_at）的视为 expired。
+func EffectiveCouponStatus(stored string, c domain.Coupon, at time.Time) string {
+	if stored == domain.UserCouponUnused && !at.Before(c.EndAt) {
+		return domain.UserCouponExpired
+	}
+	return stored
+}
+
+// CheckClaim 是两种实现领券时共用的判断：券 active、在 [start_at, end_at) 内、店铺券的店铺营业中，
+// 总量（total_count 为 0 表示不限）和每人限领都还有余量。owned 是该账户已领取的张数。
+func CheckClaim(c domain.Coupon, merchantStatus domain.EntityStatus, owned int, at time.Time) error {
+	switch {
+	case c.Status != domain.StatusActive || at.Before(c.StartAt) || !at.Before(c.EndAt):
+		return ErrCouponUnavailable
+	case c.MerchantID != "" && merchantStatus != domain.StatusActive:
+		return ErrCouponUnavailable
+	case c.TotalCount > 0 && c.ClaimedCount >= c.TotalCount:
+		return ErrCouponSoldOut
+	case owned >= max(c.PerUserLimit, 1):
+		return ErrCouponLimitReached
+	}
+	return nil
 }

@@ -34,6 +34,13 @@ type fixture struct {
 		As        string            `json:"as"`
 		Multipart *fixtureMultipart `json:"multipart"`
 	} `json:"setup"`
+	// SetupRequests 在正式请求前依次以 As 账号发送的 JSON 请求（如先加购再试算），每个都必须返回 2xx。
+	SetupRequests []struct {
+		As     string          `json:"as"`
+		Method string          `json:"method"`
+		Path   string          `json:"path"`
+		Body   json.RawMessage `json:"body"`
+	} `json:"setup_requests"`
 	Request struct {
 		Method    string            `json:"method"`
 		Path      string            `json:"path"`
@@ -76,6 +83,14 @@ var fixturePlaceholders = map[string]func(got any, rec *httptest.ResponseRecorde
 	"<sku_id>": func(got any, _ *httptest.ResponseRecorder) bool {
 		s, ok := got.(string)
 		return ok && strings.HasPrefix(s, "sku_") && len(s) == 28
+	},
+	"<cart_item_id>": func(got any, _ *httptest.ResponseRecorder) bool {
+		s, ok := got.(string)
+		return ok && strings.HasPrefix(s, "ci_") && len(s) == 27
+	},
+	"<user_coupon_id>": func(got any, _ *httptest.ResponseRecorder) bool {
+		s, ok := got.(string)
+		return ok && strings.HasPrefix(s, "uc_") && len(s) == 27
 	},
 	"<document_id>": func(got any, _ *httptest.ResponseRecorder) bool {
 		s, ok := got.(string)
@@ -176,6 +191,18 @@ func TestHTTPFixtures(t *testing.T) {
 					t.Fatalf("setup upload: %d %s", rec.Code, rec.Body)
 				}
 				path = strings.ReplaceAll(path, "{setup_file_id}", decodeBody[uploadFileResponse](t, rec).File.FileID)
+			}
+
+			for i, sr := range fx.SetupRequests {
+				var body any
+				if len(sr.Body) > 0 {
+					body = sr.Body
+				}
+				rec := ts.call(t, sr.Method, sr.Path, ts.login(t, sr.As, seed.DevPassword).Token, body)
+				if rec.Code < 200 || rec.Code > 299 {
+					t.Fatalf("setup request %d: %d %s", i, rec.Code, rec.Body)
+				}
+				time.Sleep(2 * time.Millisecond) // 时间精确到毫秒：隔开以保持加入顺序
 			}
 
 			var rec *httptest.ResponseRecorder
