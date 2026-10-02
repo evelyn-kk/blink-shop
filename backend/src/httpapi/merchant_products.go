@@ -99,7 +99,18 @@ func parseMoney(field string, raw json.RawMessage, allowZero bool) (domain.Money
 	return m, nil
 }
 
+// checkText 校验单行文本（名称、品牌、规格名、列表项等）：去掉首尾空白后不能含任何控制字符，
+// 包括换行和制表符，也不能含 Unicode 行/段分隔符，这些字段都按单行展示。
 func checkText(field, value string, required bool, max int) (string, error) {
+	return checkTextMode(field, value, required, max, false)
+}
+
+// checkMultiline 校验多行文本（目前只有商品介绍）：允许换行和制表符，\r\n 统一为 \n，其他控制字符仍拒绝。
+func checkMultiline(field, value string, required bool, max int) (string, error) {
+	return checkTextMode(field, strings.ReplaceAll(value, "\r\n", "\n"), required, max, true)
+}
+
+func checkTextMode(field, value string, required bool, max int, multiline bool) (string, error) {
 	value = strings.TrimSpace(value)
 	if required && value == "" {
 		return "", fieldError(field, "不能为空")
@@ -108,8 +119,14 @@ func checkText(field, value string, required bool, max int) (string, error) {
 		return "", fieldError(field, fmt.Sprintf("最多 %d 个字符", max))
 	}
 	for _, c := range value {
-		if unicode.IsControl(c) && c != '\n' && c != '\t' {
-			return "", fieldError(field, "不能包含控制字符")
+		if multiline && (c == '\n' || c == '\t') {
+			continue
+		}
+		if unicode.IsControl(c) || c == '\u2028' || c == '\u2029' {
+			if multiline {
+				return "", fieldError(field, "不能包含控制字符")
+			}
+			return "", fieldError(field, "不能包含换行、制表符等控制字符")
 		}
 	}
 	return value, nil
@@ -239,7 +256,7 @@ func applyProductInput(p *domain.Product, in productInput, creating bool, catego
 		p.RecommendReason = v
 	}
 	if in.Description != nil {
-		v, err := checkText("description", *in.Description, false, maxDescription)
+		v, err := checkMultiline("description", *in.Description, false, maxDescription)
 		if err != nil {
 			return err
 		}

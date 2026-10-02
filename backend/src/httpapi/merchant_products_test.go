@@ -386,3 +386,88 @@ func TestListMerchantProducts(t *testing.T) {
 		t.Fatalf("detail = %+v", got)
 	}
 }
+
+// TestSingleLineFieldsRejectLineBreaks 覆盖 REV-006：单行字段拒绝换行、制表符、回车和 Unicode 行/段分隔符，
+// 创建和修改都一样，且不写入；只有商品介绍允许多行。
+func TestSingleLineFieldsRejectLineBreaks(t *testing.T) {
+	// 用例会发出一百多个请求，放宽限流，避免被默认的每分钟 120 次拦下。
+	ts := newTestServer(t, map[string]string{"RATE_LIMIT_IP_PER_MINUTE": "10000", "RATE_LIMIT_ACCOUNT_PER_MINUTE": "10000"}, nil, nil)
+	tok := ts.merchantToken(t, seed.MerchantUsername)
+	target := createProduct(t, ts, tok, fullProduct())
+	path := merchantProducts + "/" + target.ProductID
+	before := ts.call(t, http.MethodGet, path, tok, nil).Body.String()
+
+	skuWith := func(name string, specs map[string]string) []map[string]any {
+		return []map[string]any{{"sku_name": name, "price": "10", "stock_quantity": 1, "specs": specs}}
+	}
+	fields := []struct {
+		field string
+		body  func(bad string) map[string]any
+	}{
+		{"name", func(bad string) map[string]any { return map[string]any{"name": "键盘" + bad + "限时促销"} }},
+		{"brand", func(bad string) map[string]any { return map[string]any{"brand": "品牌" + bad + "旗舰店"} }},
+		{"skus[0].sku_name", func(bad string) map[string]any {
+			return map[string]any{"skus": skuWith("白色"+bad+"标准版", nil)}
+		}},
+		{"skus[0].specs", func(bad string) map[string]any {
+			return map[string]any{"skus": skuWith("白色", map[string]string{"颜色": "白" + bad + "黑"})}
+		}},
+		{"recommend_reason", func(bad string) map[string]any { return map[string]any{"recommend_reason": "好" + bad + "用"} }},
+		{"tags[0]", func(bad string) map[string]any { return map[string]any{"tags": []string{"轻" + bad + "薄"}} }},
+		{"selling_points[0]", func(bad string) map[string]any { return map[string]any{"selling_points": []string{"a" + bad + "b"}} }},
+		{"suitable_for[0]", func(bad string) map[string]any { return map[string]any{"suitable_for": []string{"a" + bad + "b"}} }},
+		{"attributes[0].key", func(bad string) map[string]any {
+			return map[string]any{"attributes": []map[string]string{{"key": "键" + bad + "数", "value": "84"}}}
+		}},
+		{"attributes[0].value", func(bad string) map[string]any {
+			return map[string]any{"attributes": []map[string]string{{"key": "键数", "value": "8" + bad + "4"}}}
+		}},
+	}
+	breaks := map[string]string{`\n`: "\n", `\t`: "\t", `\r`: "\r", `U+2028`: " ", `U+2029`: " ", `\x00`: "\x00"}
+
+	for _, f := range fields {
+		for label, bad := range breaks {
+			t.Run(f.field+" "+label, func(t *testing.T) {
+				// POST：在完整请求上覆盖该字段。
+				create := with(fullProduct())
+				for k, v := range f.body(bad) {
+					create[k] = v
+				}
+				rec := ts.call(t, http.MethodPost, merchantProducts, tok, create)
+				expectStatus(t, rec, 400, "invalid_argument")
+				if got := decodeError(t, rec).Field; got != f.field {
+					t.Fatalf("POST field = %q, want %q", got, f.field)
+				}
+				// PATCH：只提交该字段。
+				rec = ts.call(t, http.MethodPatch, path, tok, f.body(bad))
+				expectStatus(t, rec, 400, "invalid_argument")
+				if got := decodeError(t, rec).Field; got != f.field {
+					t.Fatalf("PATCH field = %q, want %q", got, f.field)
+				}
+			})
+		}
+	}
+	// 以上请求都没有写入：商品数量和目标商品都不变。
+	if total := getMerchantPage(t, ts, tok, "").Total; total != 8 {
+		t.Fatalf("merchant products total = %d, want 8", total)
+	}
+	if after := ts.call(t, http.MethodGet, path, tok, nil).Body.String(); after != before {
+		t.Fatal("rejected PATCH changed the product")
+	}
+
+	// 商品介绍允许多行：保留换行和制表符，\r\n 统一为 \n；其他控制字符仍拒绝。
+	rec := ts.call(t, http.MethodPatch, path, tok, map[string]any{"description": "第一行\r\n第二行\n\t缩进"})
+	expectStatus(t, rec, 200, "")
+	if got := decodeBody[merchantProductView](t, rec).Description; got != "第一行\n第二行\n\t缩进" {
+		t.Fatalf("description = %q", got)
+	}
+	rec = ts.call(t, http.MethodPatch, path, tok, map[string]any{"description": "a\x00b"})
+	expectStatus(t, rec, 400, "invalid_argument")
+	if got := decodeError(t, rec).Field; got != "description" {
+		t.Fatalf("description field = %q", got)
+	}
+	created := createProduct(t, ts, tok, with(fullProduct(), "description", "多行\n介绍"))
+	if created.Description != "多行\n介绍" {
+		t.Fatalf("created description = %q", created.Description)
+	}
+}
