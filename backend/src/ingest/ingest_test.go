@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -200,13 +199,6 @@ func TestPublicAddr(t *testing.T) {
 	}
 }
 
-// redirectDial 让所有连接都连到测试服务器，但仍经过 Fetcher 的拨号器，连接前的 IP 检查照常生效。
-func redirectDial(f *Fetcher, addr string) func(ctx context.Context, network, _ string) (net.Conn, error) {
-	return func(ctx context.Context, network, _ string) (net.Conn, error) {
-		return f.dialer.DialContext(ctx, network, addr)
-	}
-}
-
 func TestFetcher(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/page", func(w http.ResponseWriter, _ *http.Request) {
@@ -230,6 +222,18 @@ func TestFetcher(t *testing.T) {
 		w.Header().Set("Content-Type", "text/html; charset=gbk")
 		fmt.Fprint(w, "x")
 	})
+	mux.HandleFunc("/bad-utf8", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Write([]byte("售后\xff政策"))
+	})
+	mux.HandleFunc("/bad-utf8-no-charset", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("<p>售后\xc3政策</p>"))
+	})
+	mux.HandleFunc("/ascii", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=us-ascii")
+		fmt.Fprint(w, "warranty one year")
+	})
 	mux.HandleFunc("/500", func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "boom", 500) })
 	mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
 		select {
@@ -241,15 +245,18 @@ func TestFetcher(t *testing.T) {
 	defer srv.Close()
 	// httptest 监听随机端口，不在允许端口内：测试里把服务器“当作” 8080 端口的外网地址访问。
 	ctx := context.Background()
-	f := NewFetcher(FetcherOptions{AllowLoopback: true, MaxBytes: 1024, Timeout: 500 * time.Millisecond})
-	f.client.Transport.(*http.Transport).DialContext = redirectDial(f, srv.Listener.Addr().String())
+	f := NewFetcher(FetcherOptions{AllowLoopback: true, MaxBytes: 1024, Timeout: 500 * time.Millisecond, DialAddr: srv.Listener.Addr().String()})
 	base := "http://example.com:8080"
 
 	got, err := f.Fetch(ctx, base+"/redirect")
 	if err != nil || got.Body != "<h1>你好</h1>" || got.MediaType != "text/html" || got.FinalURL != base+"/page" {
 		t.Fatalf("redirect fetch = %+v, %v", got, err)
 	}
+	if got, err := f.Fetch(ctx, base+"/ascii"); err != nil || got.Body != "warranty one year" {
+		t.Fatalf("us-ascii fetch = %+v, %v", got, err)
+	}
 	for path, want := range map[string]error{
+		"/bad-utf8": ErrFetchFailed, "/bad-utf8-no-charset": ErrFetchFailed,
 		"/loop": ErrFetchFailed, "/to-metadata": ErrURLNotAllowed, "/big": ErrFetchFailed, "/binary": ErrFetchFailed,
 		"/gbk": ErrFetchFailed, "/500": ErrFetchFailed, "/slow": ErrFetchFailed,
 	} {
@@ -259,8 +266,7 @@ func TestFetcher(t *testing.T) {
 	}
 
 	// 默认配置下连接到回环地址会在拨号前被拦截（模拟 DNS 解析到内网的域名）。
-	strict := NewFetcher(FetcherOptions{Timeout: 500 * time.Millisecond})
-	strict.client.Transport.(*http.Transport).DialContext = redirectDial(strict, srv.Listener.Addr().String())
+	strict := NewFetcher(FetcherOptions{Timeout: 500 * time.Millisecond, DialAddr: srv.Listener.Addr().String()})
 	if _, err := strict.Fetch(ctx, base+"/page"); !errors.Is(err, ErrURLNotAllowed) {
 		t.Fatalf("rebinding to loopback: %v", err)
 	}

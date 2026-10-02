@@ -13,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -39,9 +40,11 @@ type Fetcher struct {
 	allowAddr func(netip.Addr) bool
 }
 
-// FetcherOptions 只在测试中使用：AllowLoopback 允许访问 127.0.0.1 上的测试服务器，其他限制不变。
+// FetcherOptions 只在测试中使用：AllowLoopback 允许访问 127.0.0.1 上的测试服务器；DialAddr 非空时所有连接都改连
+// 这个地址（URL 中的主机名照常参与静态检查，连接前的 IP 检查照常生效）。其他限制不变。
 type FetcherOptions struct {
 	AllowLoopback bool
+	DialAddr      string
 	MaxBytes      int64
 	Timeout       time.Duration
 }
@@ -74,9 +77,15 @@ func NewFetcher(opts FetcherOptions) *Fetcher {
 		},
 	}
 	f.dialer = dialer
+	dial := dialer.DialContext
+	if opts.DialAddr != "" {
+		dial = func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return dialer.DialContext(ctx, network, opts.DialAddr)
+		}
+	}
 	transport := &http.Transport{
 		Proxy:                 nil, // 不走环境变量代理，否则检查的是代理地址而不是目标地址
-		DialContext:           dialer.DialContext,
+		DialContext:           dial,
 		TLSHandshakeTimeout:   5 * time.Second,
 		ResponseHeaderTimeout: timeout,
 		MaxIdleConns:          10,
@@ -210,5 +219,9 @@ func (f *Fetcher) Fetch(ctx context.Context, raw string) (Fetched, error) {
 	if int64(len(body)) > f.maxBytes {
 		return Fetched{}, fmt.Errorf("%w: 页面超过 %d KB", ErrFetchFailed, f.maxBytes>>10)
 	}
-	return Fetched{Body: strings.ToValidUTF8(string(body), ""), MediaType: mediaType, FinalURL: resp.Request.URL.String()}, nil
+	// 无论是否声明 charset，正文都必须是合法 UTF-8；不做静默替换，否则入库内容与原文不符，不同的畸形页面还可能被判成重复。
+	if !utf8.Valid(body) {
+		return Fetched{}, fmt.Errorf("%w: 页面不是合法的 UTF-8 编码", ErrFetchFailed)
+	}
+	return Fetched{Body: string(body), MediaType: mediaType, FinalURL: resp.Request.URL.String()}, nil
 }

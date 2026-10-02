@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -302,4 +303,61 @@ func TestDocumentProcessingConflict(t *testing.T) {
 	}
 	rec := ts.call(t, http.MethodPost, "/api/v1/merchant/documents", tok, map[string]any{"title": "处理中", "content": "处理中的资料"})
 	expectStatus(t, rec, http.StatusConflict, "document_processing")
+}
+
+// REV-007：抓取到的正文不是合法 UTF-8 时（无论是否声明 charset）拒绝入库，不静默删除字节。
+// 使用真实的 Fetcher（连接改连到测试服务器，IP 检查照常），覆盖从抓取到入库的完整路径。
+func TestIngestionRejectsInvalidUTF8(t *testing.T) {
+	mux := http.NewServeMux()
+	page := func(contentType string, body []byte) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", contentType)
+			_, _ = w.Write(body)
+		}
+	}
+	mux.Handle("/bad-utf8", page("text/plain; charset=utf-8", []byte("售后\xff政策")))
+	mux.Handle("/bad-no-charset", page("text/plain", []byte("售后\xff政策")))
+	mux.Handle("/bad-html", page("text/html", []byte("<p>售后\xc3政策</p>")))
+	mux.Handle("/good", page("text/plain; charset=utf-8", []byte("售后政策：七天无理由退货。")))
+	mux.Handle("/ascii", page("text/plain; charset=us-ascii", []byte("Warranty: one year.")))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	ts := newTestServer(t, nil, nil, nil)
+	ts.useFetcher(ingest.NewFetcher(ingest.FetcherOptions{AllowLoopback: true, DialAddr: srv.Listener.Addr().String()}))
+	tok := ts.merchantToken(t, seed.MerchantUsername)
+	ctx := context.Background()
+	count := func() (docs, chunks int) {
+		list, total, err := ts.mem.ListDocuments(ctx, store.DocumentQuery{AllMerchants: true, Page: store.Page{Page: 1, PageSize: 100}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range list {
+			cs, _ := ts.mem.ListDocumentChunks(ctx, d.DocumentID)
+			chunks += len(cs)
+		}
+		return total, chunks
+	}
+	docsBefore, chunksBefore := count()
+
+	for _, path := range []string{"/bad-utf8", "/bad-no-charset", "/bad-html"} {
+		rec := ts.call(t, http.MethodPost, "/api/v1/merchant/unstructured-ingestions", tok, map[string]any{"source_url": "http://example.com:8080" + path})
+		expectStatus(t, rec, http.StatusBadGateway, "source_fetch_failed")
+		if e := decodeError(t, rec); e.Field != "source_url" || !strings.Contains(e.Message, "UTF-8") {
+			t.Fatalf("%s: error = %+v", path, e)
+		}
+	}
+	if d, c := count(); d != docsBefore || c != chunksBefore {
+		t.Fatalf("rejected pages wrote data: docs %d→%d chunks %d→%d", docsBefore, d, chunksBefore, c)
+	}
+
+	for path, want := range map[string]string{"/good": "售后政策：七天无理由退货。", "/ascii": "Warranty: one year."} {
+		rec := ts.call(t, http.MethodPost, "/api/v1/merchant/unstructured-ingestions", tok, map[string]any{"source_url": "http://example.com:8080" + path})
+		expectStatus(t, rec, http.StatusCreated, "")
+		res := decodeBody[ingestionResponse](t, rec)
+		detail := decodeBody[documentDetail](t, ts.call(t, http.MethodGet, "/api/v1/merchant/documents/"+res.Document.DocumentID, tok, nil))
+		if detail.Content != want || res.Document.SourceURL != "http://example.com:8080"+path {
+			t.Fatalf("%s: content %q source %q", path, detail.Content, res.Document.SourceURL)
+		}
+	}
 }

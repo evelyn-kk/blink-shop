@@ -713,7 +713,7 @@ paths:
                 code: document_index_failed
                 message: 资料入库失败，已记录为失败状态，请稍后重新提交
         "502":
-          description: 网页抓取失败（`source_fetch_failed`）：超时、对方非 2xx、超过 2MB、不是网页/JSON/纯文本或不是 UTF-8
+          description: 网页抓取失败（`source_fetch_failed`）：超时、对方非 2xx、超过 2MB、不是网页/JSON/纯文本、声明了非 UTF-8 编码，或正文含非法 UTF-8 字节（不做替换或删除）
           headers:
             X-Request-ID:
               $ref: "#/components/headers/RequestID"
@@ -895,7 +895,7 @@ paths:
                 code: document_index_failed
                 message: 资料入库失败，已记录为失败状态，请稍后重新提交
         "502":
-          description: 网页抓取失败（`source_fetch_failed`）：超时、对方非 2xx、超过 2MB、不是网页/JSON/纯文本或不是 UTF-8
+          description: 网页抓取失败（`source_fetch_failed`）：超时、对方非 2xx、超过 2MB、不是网页/JSON/纯文本、声明了非 UTF-8 编码，或正文含非法 UTF-8 字节（不做替换或删除）
           headers:
             X-Request-ID:
               $ref: "#/components/headers/RequestID"
