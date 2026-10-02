@@ -1,0 +1,5 @@
+{
+  "description": "采集地址指向内网、回环、云元数据等保留地址，或不是 http(s)：400 url_not_allowed，不发起请求、不写入数据；抓取失败为 502 source_fetch_failed",
+  "request": {"method": "POST", "path": "/api/v1/merchant/unstructured-ingestions", "as": "blink_merchant", "body": {"source_url": "http://169.254.169.254/latest/meta-data/"}},
+  "response": {"status": 400, "body": {"code": "url_not_allowed", "message": "不能访问内网或保留地址", "field": "source_url", "request_id": "<request_id>"}}
+}

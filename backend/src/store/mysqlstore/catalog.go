@@ -138,6 +138,17 @@ func (s *Store) ListActiveMerchants(ctx context.Context, page store.Page) ([]dom
 	return out, total, rows.Err()
 }
 
+func (s *Store) GetMerchant(ctx context.Context, merchantID string) (domain.Merchant, error) {
+	var m domain.Merchant
+	err := s.q(ctx).QueryRowContext(ctx, `SELECT merchant_id, name, logo_url, description, service_phone, status, created_at, updated_at
+		FROM merchants WHERE merchant_id = ?`, merchantID).Scan(&m.MerchantID, &m.Name, &m.LogoURL, &m.Description, &m.ServicePhone, &m.Status, &m.CreatedAt, &m.UpdatedAt)
+	if err != nil {
+		return domain.Merchant{}, mapErr(err)
+	}
+	m.CreatedAt, m.UpdatedAt = m.CreatedAt.UTC(), m.UpdatedAt.UTC()
+	return m, nil
+}
+
 // visibleProductFrom 是公开商品查询的 FROM/WHERE 公共部分。
 const visibleProductFrom = ` FROM products p
 	JOIN merchants m ON m.merchant_id = p.merchant_id

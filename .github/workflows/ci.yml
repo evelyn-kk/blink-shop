@@ -65,7 +65,7 @@ jobs:
         run: |
           go run ./cmd/seed | tee first.txt
           go run ./cmd/seed | tee second.txt
-          grep -q "本次执行 2 个" first.txt
+          grep -q "本次执行 4 个" first.txt
           grep -q "本次执行 0 个" second.txt
           grep -q "本次新增 0 行" second.txt
 

@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { logout } from './api/auth';
 import { Empty } from './components/StateView';
-import { RequireMerchant } from './components/RequireMerchant';
-import { loginHref, merchantProductsHref, navigate, productsHref, useRoute } from './lib/router';
+import { RequireRole } from './components/RequireRole';
+import { documentsHref, loginHref, merchantProductsHref, navigate, productsHref, useRoute } from './lib/router';
 import { clearSession, useSession } from './lib/session';
+import { DocumentDetailPage } from './pages/DocumentDetailPage';
+import { DocumentFormPage } from './pages/DocumentFormPage';
+import { DocumentsPage } from './pages/DocumentsPage';
 import { LoginPage } from './pages/LoginPage';
 import { MerchantProductFormPage } from './pages/MerchantProductFormPage';
 import { MerchantProductsPage } from './pages/MerchantProductsPage';
@@ -20,19 +23,34 @@ export default function App() {
         {route.name === 'product' && <ProductDetailPage key={route.id} id={route.id} />}
         {route.name === 'login' && <LoginPage next={route.next} />}
         {route.name === 'merchant_products' && (
-          <RequireMerchant>
+          <RequireRole role="merchant">
             <MerchantProductsPage query={route.query} />
-          </RequireMerchant>
+          </RequireRole>
         )}
         {route.name === 'merchant_product_new' && (
-          <RequireMerchant>
+          <RequireRole role="merchant">
             <MerchantProductFormPage />
-          </RequireMerchant>
+          </RequireRole>
         )}
         {route.name === 'merchant_product_edit' && (
-          <RequireMerchant>
+          <RequireRole role="merchant">
             <MerchantProductFormPage key={route.id} id={route.id} />
-          </RequireMerchant>
+          </RequireRole>
+        )}
+        {route.name === 'documents' && (
+          <RequireRole role={route.scope}>
+            <DocumentsPage key={route.scope} scope={route.scope} query={route.query} />
+          </RequireRole>
+        )}
+        {route.name === 'document_new' && (
+          <RequireRole role={route.scope}>
+            <DocumentFormPage key={route.scope} scope={route.scope} />
+          </RequireRole>
+        )}
+        {route.name === 'document' && (
+          <RequireRole role={route.scope}>
+            <DocumentDetailPage key={`${route.scope}|${route.id}`} scope={route.scope} id={route.id} />
+          </RequireRole>
         )}
         {route.name === 'not_found' && (
           <Empty text="页面不存在">
@@ -70,7 +88,13 @@ function TopBar() {
       </a>
       <nav className="topnav" aria-label="主导航">
         <a href={productsHref({})}>商品巡检</a>
-        {session?.account.role === 'merchant' && <a href={merchantProductsHref()}>我的商品</a>}
+        {session?.account.role === 'merchant' && (
+          <>
+            <a href={merchantProductsHref()}>我的商品</a>
+            <a href={documentsHref('merchant')}>知识资料</a>
+          </>
+        )}
+        {session?.account.role === 'admin' && <a href={documentsHref('admin')}>知识资料</a>}
       </nav>
       <div className="account">
         {session ? (

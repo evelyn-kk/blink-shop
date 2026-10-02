@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import type { DocumentScope } from '../api/knowledge';
 
 // 轻量 hash 路由：#/products?keyword=..、#/products/:id。5.1 接入登录与角色路由时再替换为正式路由。
 export type Route =
@@ -8,6 +9,9 @@ export type Route =
   | { name: 'merchant_products'; query: URLSearchParams }
   | { name: 'merchant_product_new' }
   | { name: 'merchant_product_edit'; id: string }
+  | { name: 'documents'; scope: DocumentScope; query: URLSearchParams }
+  | { name: 'document_new'; scope: DocumentScope }
+  | { name: 'document'; scope: DocumentScope; id: string }
   | { name: 'not_found' };
 
 export function parseRoute(hash: string): Route {
@@ -32,6 +36,12 @@ export function parseRoute(hash: string): Route {
     if (parts.length === 4 && parts[3] === 'edit') {
       return { name: 'merchant_product_edit', id: decodeURIComponent(parts[2]) };
     }
+  }
+  if ((parts[0] === 'merchant' || parts[0] === 'admin') && parts[1] === 'documents') {
+    const scope: DocumentScope = parts[0];
+    if (parts.length === 2) return { name: 'documents', scope, query: new URLSearchParams(search) };
+    if (parts.length === 3 && parts[2] === 'new') return { name: 'document_new', scope };
+    if (parts.length === 3) return { name: 'document', scope, id: decodeURIComponent(parts[2]) };
   }
   return { name: 'not_found' };
 }
@@ -90,3 +100,25 @@ export function merchantProductEditHref(id: string): string {
 export function navigate(hash: string): void {
   window.location.hash = hash;
 }
+
+export function documentsHref(
+  scope: DocumentScope,
+  params: { status?: string; keyword?: string; merchantId?: string; page?: number } = {},
+): string {
+  const q = new URLSearchParams();
+  if (params.status) q.set('status', params.status);
+  if (params.keyword) q.set('keyword', params.keyword);
+  if (scope === 'admin' && params.merchantId !== undefined) q.set('merchant_id', params.merchantId);
+  if (params.page && params.page > 1) q.set('page', String(params.page));
+  const text = q.toString();
+  return `#/${scope}/documents${text ? `?${text}` : ''}`;
+}
+
+export function documentHref(scope: DocumentScope, id: string): string {
+  return `#/${scope}/documents/${encodeURIComponent(id)}`;
+}
+
+export function newDocumentHref(scope: DocumentScope): string {
+  return `#/${scope}/documents/new`;
+}
+

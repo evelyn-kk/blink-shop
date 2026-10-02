@@ -1,8 +1,10 @@
-import { useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { getCategoryTree } from '../api/catalog';
 import { ApiError } from '../api/http';
 import { createMerchantProduct, getMerchantProduct, updateMerchantProduct } from '../api/merchant';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { Field } from '../components/FormField';
+import { invalid } from '../lib/invalid';
 import { ErrorState, Loading } from '../components/StateView';
 import { setFlash } from '../lib/flash';
 import { productStatusLabel } from '../lib/format';
@@ -516,28 +518,6 @@ function ProductForm({ product, categories }: { product: MerchantProduct | null;
         onCancel={() => setConfirmLeave(false)}
       />
     </section>
-  );
-}
-
-function invalid(error: string | undefined, id: string) {
-  return error ? { 'aria-invalid': true as const, 'aria-describedby': `${id}-error` } : {};
-}
-
-function Field(props: { label: string; id: string; required?: boolean; error?: string; hint?: string; children: ReactNode }) {
-  return (
-    <div className="field">
-      <label htmlFor={props.id}>
-        {props.label}
-        {props.required && <span className="required">*</span>}
-      </label>
-      {props.children}
-      {props.hint && <span className="muted small">{props.hint}</span>}
-      {props.error && (
-        <span id={`${props.id}-error`} className="field-error">
-          {props.error}
-        </span>
-      )}
-    </div>
   );
 }
 

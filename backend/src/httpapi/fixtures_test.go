@@ -77,6 +77,10 @@ var fixturePlaceholders = map[string]func(got any, rec *httptest.ResponseRecorde
 		s, ok := got.(string)
 		return ok && strings.HasPrefix(s, "sku_") && len(s) == 28
 	},
+	"<document_id>": func(got any, _ *httptest.ResponseRecorder) bool {
+		s, ok := got.(string)
+		return ok && strings.HasPrefix(s, "doc_") && len(s) == 28
+	},
 	"<file_id>": func(got any, _ *httptest.ResponseRecorder) bool {
 		s, ok := got.(string)
 		return ok && strings.HasPrefix(s, "file_") && len(s) == 29

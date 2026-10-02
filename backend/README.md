@@ -26,6 +26,9 @@ BLINK_TEST_MINIO_ENDPOINT=127.0.0.1:9000 go test ./...
 | `src/store/memstore` | 内存实现，供上层单测使用；实现同样的唯一约束和事务回滚 |
 | `src/store/storetest` | 两种实现共用的契约测试 |
 | `src/objectstore` | 私有文件的对象存储接口；MinIO 实现与测试用内存实现（可注入写入/读取失败） |
+| `src/ingest` | 知识资料入库：清洗（文本/HTML/JSON）、带 SSRF 防护的网页抓取、去重与状态流转 |
+| `src/rag` | 切块、检索词拆分、关键词/向量召回、打分排序和引用（citation）输出 |
+| `fixtures/rag/` | 检索评测用的固定语料和问题集（含调参后才加入的 held-out 用例） |
 | `src/seed`、`cmd/seed` | 开发演示数据与写入命令 |
 | `fixtures/domain/` | 领域对象 JSON 序列化样例；改了领域类型后用 `go test ./src/seed -update` 更新 |
 
@@ -92,18 +95,23 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 | --- | --- | --- |
 | 400 | `invalid_json` / `invalid_argument` | JSON 语法错误、空请求体、尾随内容 / 字段类型错误 |
 | 400 | `unsupported_file_type` | 上传文件的内容不是允许的类型 |
+| 400 | `url_not_allowed` | 采集地址不是 http(s)、带账号密码、端口不允许，或指向内网/保留地址 |
 | 401 | `unauthorized` | 未登录，或 token 过期、已登出、伪造 |
 | 401 | `invalid_credential` | 登录时账号或密码错误（含用户不存在、已注销） |
 | 403 | `forbidden` | 角色不符，或商家操作其他店铺的资源 |
 | 403 | `account_inactive` / `account_risk` | 账户状态不允许该操作，见“认证与权限” |
 | 404 | `not_found` | 路径不存在 |
 | 404 | `file_not_found` | 文件不存在（含记录在但对象已丢失） |
+| 404 | `document_not_found` | 知识资料不存在 |
+| 409 | `document_processing` | 相同内容的资料正在处理 |
 | 409 | `username_exists` | 注册时用户名已存在 |
 | 405 | `method_not_allowed` | 方法不支持 |
 | 413 | `payload_too_large` | 请求体或上传文件超限 |
 | 415 | `unsupported_media_type` | JSON 接口收到非 `application/json` |
 | 429 | `rate_limited` | 触发限流 |
 | 500 | `internal_error` | 未预期错误或 panic |
+| 500 | `document_index_failed` | 写分块失败，资料已记为 failed，可重新提交 |
+| 502 | `source_fetch_failed` | 采集网页抓取失败（超时、非 2xx、过大、类型或编码不支持） |
 | 503 | `not_ready` | `/ready` 依赖不可用 |
 | 503 | `object_storage_unavailable` | 对象存储未配置或暂时不可用 |
 | 504 | `timeout` | 请求处理超时 |
@@ -133,6 +141,35 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 - **不留半条记录**：先写对象再写元数据。对象存储未配置 / 写入失败 → 503 `object_storage_unavailable`，不写元数据；元数据写入失败 → 删除刚写入的对象并返回 500。
 - **下载** `GET /files/{id}`：只有上传者本人和管理员可读，其他账号 403（先查归属再访问存储，存储不可用时越权请求仍是 403）。响应使用上传时嗅探出的类型，带 `nosniff`、`Content-Security-Policy: default-src 'none'; sandbox`，图片 inline、PDF attachment，`Cache-Control: private`，`ETag` 为内容 hash，支持 `If-None-Match` → 304。目前没有缩略图接口；预览也走同一个需要登录的地址。
 - **审计**：`file.uploaded`（file_id、类型、大小，不记录 object key）。
+
+## 知识文档与检索
+
+接口：商家 `GET,POST /merchant/documents`、`GET /merchant/documents/{id}`、`POST /merchant/unstructured-ingestions`；管理员 `GET /admin/documents`、`GET /admin/documents/{id}`、`POST /admin/unstructured-ingestions`。商家只能看和提交自己的资料（其他商家和平台资料 403）；管理员看全部，可以为任意商家或平台（`merchant_id` 为空）采集。平台资料不能关联商品。
+
+**入库流程**（`ingest.Service.Ingest`）：
+
+1. 取得内容：`content` / `html` / `json_text` / `source_url` 四选一。网页由服务端抓取：只允许 http(s) 和 80/443/8080/8443 端口，URL 不能带账号密码；拨号时检查实际连接的 IP（重定向和 DNS 重绑定同样受检），拒绝回环、内网、链路本地、组播、运营商 NAT、NAT64、文档保留段和云元数据地址；不走环境代理；最多 3 次重定向；8 秒超时、2MB 上限；只接受 UTF-8 的网页、JSON、纯文本。
+2. 清洗为纯文本：统一换行、去掉控制字符和零宽字符、压缩空白、连续空行合并为一个（段落分隔）。HTML 用分词器解析，跳过 script/style/noscript/template/head/svg/iframe/nav 等，块级元素换行；JSON 展开为“路径: 值”，对象键按名称排序（上游按 map 随机顺序，同一份 JSON 每次 hash 不同，去重失效），顶层数组的记录之间空一行。超过 120000 字截断。
+3. 去重：同一商家（平台算一个“商家”）清洗后正文的 SHA-256 相同 → 已索引的直接返回（200，`duplicate`）；`force_reindex` 或此前失败的文档 → 用本次的标题、类型、商品和元数据重新处理同一篇文档；正在处理 → 409；处理中超过 10 分钟视为中断，先记为失败再重新处理。并发提交同样内容只会建一篇文档（唯一键 `(merchant_id, content_hash)`）。
+4. 状态：新文档 `uploaded` → `parsing`（切块）→ `indexing`（写分块，同一事务改为 `indexed`）→ 建向量索引。写分块失败 → `failed` 并记录原因，返回 500 `document_index_failed`。向量索引失败只记日志，文档仍为 `indexed`（关键词检索可用）。所有状态变化都经 `DocumentStatus` 状态机校验。
+5. 审计：`knowledge.ingested` / `knowledge.duplicate`。
+
+**分块策略**（`rag.Split`，每块不超过 800 字）：
+
+- 按空行分段，相邻段落合并到不超过 800 字；
+- 单个段落超长时在句末标点（。！？；!?; 和换行）处切句，再不行按逗号、顿号切，句子打包成块，相邻块重叠上一块末尾约 100 字；单句仍超长时按 800 字硬切，同样重叠 100 字；
+- `faq` 类型：以“问：/问题：/Q:”开头的行开始一个问答块（块标题为问题），第一个问题之前的内容按普通段落切；
+- 分块标题默认是文档标题，来源（source）是文档标题。
+
+**检索**（`rag.Retriever.Search`，供导购 Agent 使用，暂无独立 HTTP 接口）：
+
+- 检索词（`rag.QueryTerms`）：汉字按相邻两字切分，含语气词的二元组丢弃，“多少”“可以”等提问用语权重 0.2；字母数字片段（型号、品牌、单位）整体作为一个词，权重 2；最多 24 个。
+- 关键词召回：任一词出现在分块标题、正文或文档标题中；只召回已索引、商家营业中（或平台资料）、关联商品（如有）公开可见的分块；命中词多的优先，最多 200 个。
+- 打分：每个词的权重乘以候选集内的区分度 `ln(1 + N/df)`（所有候选都有的词权重最低；候选中都没出现的词多为跨词边界的无意义片段，按 0.3 折扣计入）。关键词分 = 0.7 × 命中权重占比 + 0.15 × 标题命中占比 + 0.15 × 是否包含完整问题。
+- 向量（`rag.VectorIndex`，Milvus 在 8.2 接入）：配置后取前 50 个相似分块，经 Store 按同样的可见性和过滤条件取回（已删除、下架、被过滤的向量结果丢弃），最终分 = 0.65 × 关键词分 + 0.35 × 相似度；向量检索失败时记日志并回退关键词（`Result.VectorError`）。
+- 低于 0.2 分的不返回；按分数降序、chunk_id 升序取前 5（最多 20）；摘要截取第一个命中词附近的 160 字。
+- 引用字段：chunk_id、document_id、merchant_id、product_id、title（分块标题）、document_title、snippet、source、source_url、score、matched_by。
+- 评测：`TestRecallOnFixedCorpus` 用 `fixtures/rag/` 的 13 篇语料 + 种子资料、34 个问题（其中 12 个是调参之后才加入的 held-out），在内存和 MySQL 两种 Store 上要求 recall@3 = 1.0，并核对首条引用的文档、商品、来源和摘要。
 
 ## 认证与权限
 
@@ -172,6 +209,8 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 | `GET /assets/{path...}` | public |
 | `POST /files`、`GET /files/{id}` | account（下载另做本人/管理员校验） |
 | `GET,POST /merchant/products`、`GET,PATCH,DELETE /merchant/products/{id}` | merchant（另做归属校验） |
+| `GET,POST /merchant/documents`、`GET /merchant/documents/{id}`、`POST /merchant/unstructured-ingestions` | merchant（另做归属校验） |
+| `GET /admin/documents`、`GET /admin/documents/{id}`、`POST /admin/unstructured-ingestions` | admin |
 
 后续节点按前缀约定（`TestRoutePrefixRoles` 检查）：`/admin/*` → admin；`/merchant/*` → merchant；`/cart`、`/orders`、`/coupons/*`、`/agent/*`、`/speech/*` → user；`/files` → account；分类/商家/商品读取 → public。
 

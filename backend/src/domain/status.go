@@ -171,6 +171,12 @@ var documentTransitions = transitions[DocumentStatus]{
 	DocFailed:   {DocParsing},
 }
 
+// Valid 判断是否为已知的文档状态。
+func (s DocumentStatus) Valid() bool {
+	_, ok := documentTransitions[s]
+	return ok
+}
+
 func (s DocumentStatus) CanTransitionTo(to DocumentStatus) error {
 	return check(documentTransitions, "文档", s, to)
 }

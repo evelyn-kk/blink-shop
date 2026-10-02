@@ -29,7 +29,7 @@ func TestSeedTwiceOnEmptyDatabase(t *testing.T) {
 	if err := run(context.Background(), env, &first, storetest.FastHash); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
-	if !strings.Contains(first.String(), "本次执行 2 个 [0001_init.sql 0002_promotion_discount_rate_check.sql]") || strings.Contains(first.String(), "本次新增 0 行") {
+	if !strings.Contains(first.String(), "本次执行 4 个 [0001_init.sql 0002_promotion_discount_rate_check.sql 0003_knowledge_document_product.sql 0004_backfill_knowledge_document_product.sql]") || strings.Contains(first.String(), "本次新增 0 行") {
 		t.Fatalf("unexpected first output:\n%s", first.String())
 	}
 	if !strings.Contains(first.String(), "blink_admin") || !strings.Contains(first.String(), "blink_merchant") || !strings.Contains(first.String(), "blink_user") {

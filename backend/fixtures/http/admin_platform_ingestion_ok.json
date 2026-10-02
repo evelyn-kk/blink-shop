@@ -1,0 +1,5 @@
+{
+  "description": "管理员采集：merchant_id 为空或不传时是平台资料（所有商家的导购都可引用），也可以指定商家",
+  "request": {"method": "POST", "path": "/api/v1/admin/unstructured-ingestions", "as": "blink_admin", "body": {"title": "平台退款说明", "content": "退款原路退回，1 到 3 个工作日到账。"}},
+  "response": {"status": 201, "body": {"document": {"document_id": "<document_id>", "merchant_id": "", "product_id": "", "title": "平台退款说明", "doc_type": "unstructured_note", "status": "indexed", "chunk_count": 1, "source_url": "", "content_hash": "2d1605359b93ab798400cc629b0a170ca7fbf9d184fc2a2b0150f7577fc29f88", "metadata": {}, "error_reason": "", "created_at": "<timestamp>", "updated_at": "<timestamp>"}, "duplicate": false, "text_runes": 20, "truncated": false}}
+}

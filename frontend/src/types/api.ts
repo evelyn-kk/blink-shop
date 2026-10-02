@@ -215,3 +215,73 @@ export interface StoredFile {
 export interface FileUpload {
   file: StoredFile;
 }
+
+// ---------- 知识文档（openapi tag: knowledge） ----------
+
+export type DocumentStatus = 'uploaded' | 'parsing' | 'indexing' | 'indexed' | 'failed';
+
+export type DocType =
+  | 'product_detail'
+  | 'faq'
+  | 'policy'
+  | 'guide'
+  | 'web_article'
+  | 'structured_note'
+  | 'unstructured_note';
+
+export interface KnowledgeDocument {
+  document_id: string;
+  /** 空串表示平台资料。 */
+  merchant_id: string;
+  product_id: string;
+  title: string;
+  doc_type: DocType;
+  status: DocumentStatus;
+  chunk_count: number;
+  source_url: string;
+  content_hash: string;
+  metadata: Record<string, string | number | boolean | null>;
+  error_reason: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeChunk {
+  chunk_id: string;
+  chunk_index: number;
+  title: string;
+  content: string;
+}
+
+export interface KnowledgeDocumentDetail extends KnowledgeDocument {
+  content: string;
+  chunks: KnowledgeChunk[];
+}
+
+export interface DocumentInput {
+  title: string;
+  content: string;
+  doc_type?: DocType;
+  product_id?: string;
+  force_reindex?: boolean;
+}
+
+/** content、html、json_text、source_url 必须且只能提供一个。 */
+export interface IngestionInput {
+  merchant_id?: string;
+  title?: string;
+  content?: string;
+  html?: string;
+  json_text?: string;
+  source_url?: string;
+  product_id?: string;
+  force_reindex?: boolean;
+}
+
+export interface IngestionResult {
+  document: KnowledgeDocument;
+  duplicate: boolean;
+  text_runes: number;
+  truncated: boolean;
+}
+

@@ -1,0 +1,5 @@
+{
+  "description": "商家查看其他商家或平台的资料：403；不存在的资料 404 document_not_found",
+  "request": {"method": "GET", "path": "/api/v1/merchant/documents/doc_seed_nova", "as": "blink_merchant2"},
+  "response": {"status": 403, "body": {"code": "forbidden", "message": "不能查看其他商家的资料", "request_id": "<request_id>"}}
+}

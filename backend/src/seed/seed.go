@@ -251,8 +251,14 @@ func knowledge() ([]domain.KnowledgeDocument, []domain.KnowledgeChunk) {
 				ChunkIndex: i, Title: c.title, Content: c.content, Source: def.title, CreatedAt: base,
 			})
 		}
+		product := def.chunks[0].product
+		for _, c := range def.chunks {
+			if c.product != product {
+				product = ""
+			}
+		}
 		docs = append(docs, domain.KnowledgeDocument{
-			DocumentID: def.id, MerchantID: DigitalMerchant, Title: def.title, DocType: def.docType, Content: content,
+			DocumentID: def.id, MerchantID: DigitalMerchant, ProductID: product, Title: def.title, DocType: def.docType, Content: content,
 			Status: domain.DocIndexed, ChunkCount: len(def.chunks), ContentHash: hashOf(content),
 			Metadata: map[string]any{"seed": true}, CreatedAt: base, UpdatedAt: base,
 		})

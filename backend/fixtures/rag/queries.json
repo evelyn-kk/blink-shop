@@ -1,0 +1,285 @@
+{
+  "description": "检索用例：expect 为必须出现在前 k 条结果中的文档（corpus 的 key 或种子文档 ID），citation 为第一条结果应满足的引用字段；expect_none 表示不应返回任何结果；absent 为不能出现的文档。；held_out 标记的用例在调参之后才加入，用来检查是否过拟合。",
+  "k": 3,
+  "min_recall": 1.0,
+  "queries": [
+    {
+      "query": "Vista Pro 长焦能拍演唱会吗",
+      "expect": [
+        "vista_camera"
+      ],
+      "citation": {
+        "document_key": "vista_camera",
+        "product_id": "p_seed_vista",
+        "source": "Blink Vista Pro 影像说明",
+        "snippet_contains": "演唱会"
+      }
+    },
+    {
+      "query": "Vista Pro 无线充电功率",
+      "expect": [
+        "vista_battery"
+      ]
+    },
+    {
+      "query": "多久能充满电 快充",
+      "expect": [
+        "vista_battery"
+      ]
+    },
+    {
+      "query": "耳机降噪多少分贝",
+      "expect": [
+        "earbuds_faq"
+      ],
+      "citation": {
+        "document_key": "earbuds_faq",
+        "title": "降噪深度是多少？",
+        "product_id": "p_seed_earbuds",
+        "snippet_contains": "45dB"
+      }
+    },
+    {
+      "query": "耳机可以游泳的时候戴吗",
+      "expect": [
+        "earbuds_faq"
+      ]
+    },
+    {
+      "query": "LDAC 高清",
+      "expect": [
+        "earbuds_faq"
+      ]
+    },
+    {
+      "query": "键盘怎么换轴",
+      "expect": [
+        "keyboard_guide"
+      ]
+    },
+    {
+      "query": "键盘在 Mac 上怎么用",
+      "expect": [
+        "keyboard_guide"
+      ]
+    },
+    {
+      "query": "新疆多久能收到货",
+      "expect": [
+        "digital_shipping"
+      ]
+    },
+    {
+      "query": "怎么开增值税专用发票",
+      "expect": [
+        "digital_invoice"
+      ],
+      "citation": {
+        "document_key": "digital_invoice",
+        "source": "Blink 数码发票开具规则",
+        "snippet_contains": "税号"
+      }
+    },
+    {
+      "query": "台灯有没有频闪",
+      "expect": [
+        "lamp_guide"
+      ]
+    },
+    {
+      "query": "台灯夜灯模式怎么开",
+      "expect": [
+        "lamp_guide"
+      ]
+    },
+    {
+      "query": "台灯坏了能换新吗",
+      "expect": [
+        "home_returns"
+      ]
+    },
+    {
+      "query": "退款几天到账",
+      "expect": [
+        "platform_payment"
+      ],
+      "citation": {
+        "document_key": "platform_payment",
+        "merchant_id": "",
+        "source": "平台支付与退款说明",
+        "snippet_contains": "工作日"
+      }
+    },
+    {
+      "query": "订单多久不付款会取消",
+      "expect": [
+        "platform_payment"
+      ]
+    },
+    {
+      "query": "优惠券能叠加吗",
+      "expect": [
+        "platform_coupon"
+      ]
+    },
+    {
+      "query": "屏幕刷新率",
+      "expect": [
+        "web_review"
+      ],
+      "citation": {
+        "document_key": "web_review",
+        "source": "Vista Pro 深度体验：屏幕与散热",
+        "snippet_contains": "120Hz"
+      }
+    },
+    {
+      "query": "玩游戏发热吗 散热",
+      "expect": [
+        "web_review"
+      ]
+    },
+    {
+      "query": "鼠标 DPI",
+      "expect": [
+        "json_specs"
+      ],
+      "citation": {
+        "document_key": "json_specs",
+        "product_id": "p_seed_mouse",
+        "snippet_contains": "4000"
+      }
+    },
+    {
+      "query": "鼠标电池能用多久",
+      "expect": [
+        "json_specs"
+      ]
+    },
+    {
+      "query": "Nova 12 拍照",
+      "expect": [
+        "doc_seed_nova"
+      ]
+    },
+    {
+      "query": "七天无理由退货运费谁出",
+      "expect": [
+        "doc_seed_after_sales"
+      ]
+    },
+    {
+      "query": "音箱防水",
+      "absent": [
+        "speaker_hidden"
+      ]
+    },
+    {
+      "query": "量子纠缠超导材料",
+      "expect_none": true
+    },
+    {
+      "query": "台灯 显色指数",
+      "merchant_ids": [
+        "m_seed_digital"
+      ],
+      "absent": [
+        "lamp_guide"
+      ]
+    },
+    {
+      "query": "保修",
+      "doc_types": [
+        "faq"
+      ],
+      "absent": [
+        "doc_seed_after_sales",
+        "home_returns"
+      ]
+    },
+    {
+      "query": "Vista 视频能录 4K 吗",
+      "expect": [
+        "vista_camera"
+      ],
+      "held_out": true
+    },
+    {
+      "query": "第三方充电器能用吗",
+      "expect": [
+        "vista_battery"
+      ],
+      "held_out": true
+    },
+    {
+      "query": "耳机总共能用多少小时",
+      "expect": [
+        "earbuds_faq"
+      ],
+      "held_out": true
+    },
+    {
+      "query": "K8 怎么切换蓝牙设备",
+      "expect": [
+        "keyboard_guide"
+      ],
+      "held_out": true
+    },
+    {
+      "query": "用的什么快递",
+      "expect": [
+        "digital_shipping"
+      ],
+      "held_out": true
+    },
+    {
+      "query": "电子发票什么时候发",
+      "expect": [
+        "digital_invoice"
+      ],
+      "held_out": true
+    },
+    {
+      "query": "台灯离桌面多高合适",
+      "expect": [
+        "lamp_guide"
+      ],
+      "held_out": true
+    },
+    {
+      "query": "定制的家具能退吗",
+      "expect": [
+        "home_returns"
+      ],
+      "held_out": true
+    },
+    {
+      "query": "支持哪些支付方式",
+      "expect": [
+        "platform_payment"
+      ],
+      "held_out": true
+    },
+    {
+      "query": "部分退款优惠券退不退",
+      "expect": [
+        "platform_coupon"
+      ],
+      "held_out": true
+    },
+    {
+      "query": "手机屏幕多大",
+      "expect": [
+        "web_review"
+      ],
+      "held_out": true
+    },
+    {
+      "query": "M2 重量",
+      "expect": [
+        "json_specs"
+      ],
+      "held_out": true
+    }
+  ]
+}

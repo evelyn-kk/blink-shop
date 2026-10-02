@@ -1,5 +1,6 @@
 import type {
   CategoryNode,
+  Merchant,
   Page,
   ProductCard,
   ProductDetail,
@@ -53,3 +54,9 @@ export function listReviews(id: string, page: number): Promise<Page<PublicReview
 export function listPromotionsFor(productId: string): Promise<Page<Promotion>> {
   return request(`/promotions${query({ product_id: productId, page_size: 100 })}`);
 }
+
+/** 营业中的商家（公开接口），管理端用于选择采集的归属商家。 */
+export function listMerchants(): Promise<Page<Merchant>> {
+  return request('/merchants?page_size=100');
+}
+

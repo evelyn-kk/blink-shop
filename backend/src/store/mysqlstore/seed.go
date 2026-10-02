@@ -149,10 +149,10 @@ func (s *Store) insertDocument(ctx context.Context, d domain.KnowledgeDocument) 
 		return err
 	}
 	_, err = s.q(ctx).ExecContext(ctx, `INSERT INTO knowledge_documents
-		(document_id, merchant_id, title, doc_type, content, status, chunk_count, source_url, content_hash,
+		(document_id, merchant_id, product_id, title, doc_type, content, status, chunk_count, source_url, content_hash,
 		 metadata_json, error_reason, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		d.DocumentID, d.MerchantID, d.Title, d.DocType, d.Content, d.Status, d.ChunkCount, d.SourceURL, d.ContentHash,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.DocumentID, d.MerchantID, d.ProductID, d.Title, d.DocType, d.Content, d.Status, d.ChunkCount, d.SourceURL, d.ContentHash,
 		meta, d.ErrorReason, s.orNow(d.CreatedAt), s.orNow(d.UpdatedAt))
 	return mapErr(err)
 }

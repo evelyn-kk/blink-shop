@@ -158,7 +158,8 @@ type StoredFile struct {
 
 type KnowledgeDocument struct {
 	DocumentID  string         `json:"document_id"`
-	MerchantID  string         `json:"merchant_id"`
+	MerchantID  string         `json:"merchant_id"` // 空串表示平台资料
+	ProductID   string         `json:"product_id,omitempty"`
 	Title       string         `json:"title"`
 	DocType     string         `json:"doc_type"`
 	Content     string         `json:"content,omitempty"`

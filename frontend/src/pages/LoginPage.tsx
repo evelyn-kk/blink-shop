@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { login } from '../api/auth';
 import { ApiError } from '../api/http';
-import { navigate, productsHref, merchantProductsHref } from '../lib/router';
+import { documentsHref, navigate, productsHref, merchantProductsHref } from '../lib/router';
 import { saveSession } from '../lib/session';
 
 export function LoginPage({ next }: { next: string }) {
@@ -20,7 +20,8 @@ export function LoginPage({ next }: { next: string }) {
     try {
       const session = await login(username.trim(), password);
       saveSession(session);
-      const home = session.account.role === 'merchant' ? merchantProductsHref() : productsHref({});
+      const role = session.account.role;
+      const home = role === 'merchant' ? merchantProductsHref() : role === 'admin' ? documentsHref('admin') : productsHref({});
       navigate(next || home);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '登录失败，请稍后重试');

@@ -724,3 +724,135 @@ td {
   justify-content: flex-end;
   gap: 12px;
 }
+
+/* ---------- 知识资料 ---------- */
+
+.doc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.doc-row {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+}
+
+.doc-main {
+  min-width: 0;
+}
+
+.doc-title {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.doc-title a {
+  display: inline-block;
+  min-height: 44px;
+  line-height: 44px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+.doc-status-indexed {
+  color: var(--ok);
+}
+
+.doc-status-failed {
+  color: var(--bad);
+}
+
+.doc-status-uploaded,
+.doc-status-parsing,
+.doc-status-indexing {
+  color: var(--warn);
+}
+
+.doc-detail-title {
+  overflow-wrap: anywhere;
+}
+
+.doc-meta {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 16px;
+  margin: 0 0 16px;
+}
+
+.doc-meta dt {
+  color: var(--muted);
+}
+
+.doc-meta dd {
+  margin: 0;
+}
+
+.break-all {
+  word-break: break-all;
+}
+
+.chunk-list {
+  padding-left: 1.5em;
+  display: grid;
+  gap: 8px;
+}
+
+.chunk {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.chunk-title {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+.chunk-content {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.doc-content pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  max-height: 480px;
+  overflow: auto;
+}
+
+.doc-content summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+}
+
+.doc-form textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

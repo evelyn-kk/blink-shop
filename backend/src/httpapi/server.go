@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/configcenter"
+	"github.com/evelyn-kk/blink-shop/backend/src/ingest"
 	"github.com/evelyn-kk/blink-shop/backend/src/objectstore"
+	"github.com/evelyn-kk/blink-shop/backend/src/rag"
 	"github.com/evelyn-kk/blink-shop/backend/src/store"
 )
 
@@ -31,6 +33,10 @@ type Options struct {
 	Store     store.Store
 	// ObjectStore 保存私有上传文件；nil 表示未配置，文件接口返回 object_storage_unavailable。
 	ObjectStore objectstore.Store
+	// VectorIndex 是知识分块的向量索引；nil 表示只用关键词检索（Milvus 在 8.2 接入）。
+	VectorIndex rag.VectorIndex
+	// Fetcher 抓取知识采集的 URL；nil 时使用带 SSRF 防护的默认实现。测试可替换。
+	Fetcher ingest.URLFetcher
 	// AvatarDir 是头像文件目录，不存在时在首次上传时创建。
 	AvatarDir string
 	// PasswordCost 是 bcrypt 成本，0 表示 bcrypt.DefaultCost；测试可调低以提速。
@@ -45,6 +51,7 @@ type Server struct {
 	readiness      []ReadinessCheck
 	store          store.Store
 	objects        objectstore.Store
+	ingestor       *ingest.Service
 	avatars        avatarDir
 	passwords      *passwordHasher
 	now            func() time.Time
@@ -82,6 +89,11 @@ func NewServer(opts Options) *Server {
 	if s.logger == nil {
 		s.logger = slog.New(slog.DiscardHandler)
 	}
+	fetcher := opts.Fetcher
+	if fetcher == nil {
+		fetcher = ingest.NewFetcher(ingest.FetcherOptions{})
+	}
+	s.ingestor = ingest.NewService(s.store, opts.VectorIndex, fetcher, s.logger, s.now)
 	s.routes()
 	return s
 }
@@ -121,6 +133,15 @@ func (s *Server) routes() {
 	s.handle("GET /api/v1/merchant/products/{id}", accessMerchant, s.handleGetMerchantProduct)
 	s.handle("PATCH /api/v1/merchant/products/{id}", accessMerchant, s.handleUpdateMerchantProduct)
 	s.handle("DELETE /api/v1/merchant/products/{id}", accessMerchant, s.handleDeleteMerchantProduct)
+
+	s.handle("GET /api/v1/merchant/documents", accessMerchant, s.handleListMerchantDocuments)
+	s.handle("POST /api/v1/merchant/documents", accessMerchant, s.handleCreateMerchantDocument)
+	s.handle("GET /api/v1/merchant/documents/{id}", accessMerchant, s.handleGetMerchantDocument)
+	s.handle("POST /api/v1/merchant/unstructured-ingestions", accessMerchant, s.handleMerchantIngestion)
+
+	s.handle("GET /api/v1/admin/documents", accessAdmin, s.handleListAdminDocuments)
+	s.handle("GET /api/v1/admin/documents/{id}", accessAdmin, s.handleGetAdminDocument)
+	s.handle("POST /api/v1/admin/unstructured-ingestions", accessAdmin, s.handleAdminIngestion)
 }
 
 // Handler 返回带完整中间件链的 handler。顺序（外 → 内）：

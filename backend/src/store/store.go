@@ -106,6 +106,38 @@ type PublicReview struct {
 	ReviewerName string
 }
 
+// DocumentQuery 列出知识文档。AllMerchants 为 true 时不按商家过滤（管理员）；否则只返回 MerchantID 的文档（空串为平台资料）。
+// Status 为空表示全部；Keyword 按标题包含匹配。
+type DocumentQuery struct {
+	AllMerchants bool
+	MerchantID   string
+	Status       domain.DocumentStatus
+	Keyword      string
+	Page         Page
+}
+
+// KnowledgeQuery 是分块召回条件。Terms（标题、正文或文档标题包含任一词）与 ChunkIDs（按 ID 取回，用于向量结果）
+// 至少给一个，都为空时返回空结果。MerchantIDs / ProductIDs / DocTypes 为空表示不过滤；MerchantIDs 中的空串表示平台资料。
+// Limit 为 0 时取 DefaultKnowledgeLimit；结果按命中的检索词个数降序、chunk_id 升序（截断时保留命中多的），最终排名由 rag 包负责。
+type KnowledgeQuery struct {
+	Terms       []string
+	ChunkIDs    []string
+	MerchantIDs []string
+	ProductIDs  []string
+	DocTypes    []string
+	Limit       int
+}
+
+const DefaultKnowledgeLimit = 200
+
+// KnowledgeHit 是召回的分块及其所属文档的信息。
+type KnowledgeHit struct {
+	domain.KnowledgeChunk
+	DocumentTitle string
+	DocType       string
+	SourceURL     string
+}
+
 // PromotionQuery 查询某时刻有效的促销。ProductID 非空时只返回适用于该商品的促销：
 // 平台促销、该商品商家的促销、指定该商品的促销，以及作用于 CategoryIDs（商品分类及其父分类）的促销。
 type PromotionQuery struct {
@@ -185,6 +217,8 @@ type Store interface {
 
 	// 公开目录。“可见”= 商品 active 且所属商家 active；不可见的商品按不存在处理（ErrNotFound）。
 	ListActiveMerchants(ctx context.Context, page Page) ([]domain.Merchant, int, error)
+	// GetMerchant 不区分状态，供管理端校验使用。
+	GetMerchant(ctx context.Context, merchantID string) (domain.Merchant, error)
 	SearchVisibleProducts(ctx context.Context, q ProductSearch) ([]CatalogProduct, int, error)
 	GetVisibleProduct(ctx context.Context, productID string) (CatalogProduct, error)
 	// ListVisibleReviews 只返回 visible 评价，按 created_at、review_id 倒序。
@@ -204,6 +238,23 @@ type Store interface {
 	// 私有文件元数据。CreateStoredFile 前用 ValidateStoredFile 校验；FileID 为空时自动生成，object_key 重复返回 ErrConflict。
 	CreateStoredFile(ctx context.Context, f domain.StoredFile) (domain.StoredFile, error)
 	GetStoredFile(ctx context.Context, fileID string) (domain.StoredFile, error)
+
+	// 知识文档。商家只能看自己的文档由调用方保证；MerchantID 为空串表示平台资料。
+	// CreateDocument 插入新文档（DocumentID 为空时生成），同一商家内容 hash 重复返回 ErrConflict（键 KeyDocumentMerchantHash）。
+	CreateDocument(ctx context.Context, d domain.KnowledgeDocument) (domain.KnowledgeDocument, error)
+	GetDocument(ctx context.Context, documentID string) (domain.KnowledgeDocument, error)
+	GetDocumentByHash(ctx context.Context, merchantID, contentHash string) (domain.KnowledgeDocument, error)
+	// UpdateDocument 锁定文档交给 fn 修改后写回（不含分块）；状态变化必须符合 DocumentStatus 状态机，否则返回 ErrInvalid。
+	UpdateDocument(ctx context.Context, documentID string, fn func(d *domain.KnowledgeDocument) error) (domain.KnowledgeDocument, error)
+	// ReplaceDocumentChunks 在一个事务内用 chunks 替换文档的全部分块，并把文档从 indexing 改为 indexed、更新分块数。
+	// 文档不在 indexing 状态返回 ErrInvalid；chunk 的 ID、文档、商家、商品字段由这里填写。
+	ReplaceDocumentChunks(ctx context.Context, documentID string, chunks []domain.KnowledgeChunk) (domain.KnowledgeDocument, error)
+	// ListDocuments 按 updated_at、document_id 倒序，结果不含正文（Content 为空）。
+	ListDocuments(ctx context.Context, q DocumentQuery) ([]domain.KnowledgeDocument, int, error)
+	// ListDocumentChunks 按 chunk_index 顺序返回文档的全部分块。
+	ListDocumentChunks(ctx context.Context, documentID string) ([]domain.KnowledgeChunk, error)
+	// SearchKnowledge 召回可检索的分块：文档为 indexed，所属商家营业中（或平台资料），关联的商品（如有）公开可见。
+	SearchKnowledge(ctx context.Context, q KnowledgeQuery) ([]KnowledgeHit, error)
 
 	// ApplySeed 在一个事务内写入开发种子：按主键“不存在才插入”，可重复执行；违反其他唯一键时整体回滚并返回 ErrConflict。
 	ApplySeed(ctx context.Context, data SeedData) (SeedResult, error)
@@ -296,4 +347,50 @@ func isSHA256Hex(s string) bool {
 		}
 	}
 	return true
+}
+
+// ValidateDocument 是两种实现写入知识文档前共用的校验。
+func ValidateDocument(d domain.KnowledgeDocument) error {
+	switch {
+	case d.Title == "":
+		return fmt.Errorf("%w: 文档标题不能为空", ErrInvalid)
+	case d.DocType == "":
+		return fmt.Errorf("%w: 文档类型不能为空", ErrInvalid)
+	case !isSHA256Hex(d.ContentHash):
+		return fmt.Errorf("%w: content_hash 必须是 64 位小写 hex", ErrInvalid)
+	case !d.Status.Valid():
+		return fmt.Errorf("%w: 文档状态 %q 不合法", ErrInvalid, d.Status)
+	}
+	return nil
+}
+
+// CheckDocumentTransition 校验状态变化（相同状态视为未变化）。
+func CheckDocumentTransition(from, to domain.DocumentStatus) error {
+	if from == to {
+		return nil
+	}
+	if err := from.CanTransitionTo(to); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	return nil
+}
+
+// PrepareChunks 是两种实现写入分块前共用的处理：按顺序编号，补齐 ID、文档、商家、商品、来源和时间，并校验内容非空。
+func PrepareChunks(d domain.KnowledgeDocument, chunks []domain.KnowledgeChunk, now time.Time) ([]domain.KnowledgeChunk, error) {
+	if len(chunks) == 0 {
+		return nil, fmt.Errorf("%w: 文档至少要有一个分块", ErrInvalid)
+	}
+	out := make([]domain.KnowledgeChunk, len(chunks))
+	for i, c := range chunks {
+		if c.Content == "" || c.Title == "" {
+			return nil, fmt.Errorf("%w: 第 %d 个分块缺少标题或内容", ErrInvalid, i)
+		}
+		c.ChunkID = domain.NewID(domain.PrefixChunk)
+		c.DocumentID, c.MerchantID, c.ProductID, c.ChunkIndex, c.CreatedAt = d.DocumentID, d.MerchantID, d.ProductID, i, now
+		if c.Source == "" {
+			c.Source = d.Title
+		}
+		out[i] = c
+	}
+	return out, nil
 }

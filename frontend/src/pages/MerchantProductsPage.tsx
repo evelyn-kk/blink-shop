@@ -3,6 +3,7 @@ import { deleteMerchantProduct, listMerchantProducts } from '../api/merchant';
 import { ApiError } from '../api/http';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ProductImage } from '../components/ProductImage';
+import { PageLinks } from '../components/PageLinks';
 import { Empty, ErrorState, Loading } from '../components/StateView';
 import { StockBadge } from '../components/StockBadge';
 import { clearFlash, peekFlash } from '../lib/flash';
@@ -122,7 +123,7 @@ export function MerchantProductsPage({ query }: { query: URLSearchParams }) {
               </li>
             ))}
           </ul>
-          <MerchantPager
+          <PageLinks
             page={result.data.page}
             total={result.data.total}
             pageSize={result.data.page_size}
@@ -161,27 +162,5 @@ function KeywordForm({ keyword, status }: { keyword: string; status: string }) {
         查找
       </button>
     </form>
-  );
-}
-
-function MerchantPager(props: { page: number; total: number; pageSize: number; href: (n: number) => string }) {
-  const last = Math.max(1, Math.ceil(props.total / Math.max(props.pageSize, 1)));
-  if (last <= 1) return null;
-  return (
-    <nav className="pager" aria-label="分页">
-      {props.page > 1 && (
-        <a className="button" href={props.href(Math.min(props.page - 1, last))}>
-          上一页
-        </a>
-      )}
-      <span>
-        第 {Math.min(props.page, last)} / {last} 页
-      </span>
-      {props.page < last && (
-        <a className="button" href={props.href(props.page + 1)}>
-          下一页
-        </a>
-      )}
-    </nav>
   );
 }

@@ -1,0 +1,5 @@
+{
+  "description": "商家提交资料（与上游一致返回文档本身）：清洗、按问答切块后直接可检索；新建 201，相同内容再次提交 200 返回同一篇文档",
+  "request": {"method": "POST", "path": "/api/v1/merchant/documents", "as": "blink_merchant", "body": {"title": "Vista Pro 常见问题", "doc_type": "faq", "product_id": "p_seed_vista", "content": "问：防水吗？\n答：IP68 防水。\n\n问：支持无线充电吗？\n答：支持 50W 无线充电。", "metadata": {"lang": "zh"}}},
+  "response": {"status": 201, "body": {"document_id": "<document_id>", "merchant_id": "m_seed_digital", "product_id": "p_seed_vista", "title": "Vista Pro 常见问题", "doc_type": "faq", "status": "indexed", "chunk_count": 2, "source_url": "", "content_hash": "5436ecd96a7d1985385ca7bf0cff28cf78fd9e29e8e04901f33e1af5152b6d97", "metadata": {"lang": "zh"}, "error_reason": "", "created_at": "<timestamp>", "updated_at": "<timestamp>"}}
+}

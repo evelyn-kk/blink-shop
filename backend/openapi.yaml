@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Blink Shop API
-  version: 0.6.0
+  version: 0.7.0
   description: |
     Blink Shop 的单一接口契约。约定：
     - 所有路径前缀为 `/api/v1`，JSON 字段使用 snake_case。
@@ -40,6 +40,11 @@ tags:
     description: 商家后台。merchant_id 一律由登录账号决定；其他商家的资源 403，不存在或已删除 404
   - name: files
     description: 私有文件。只有上传者本人和管理员可以读取；对象存储未配置或不可用时返回 503 `object_storage_unavailable`
+  - name: knowledge
+    description: |
+      知识文档。入库流程：清洗 → 按商家去重（清洗后正文的 SHA-256）→ 切块 → 写分块 → 向量索引（未配置时跳过，检索走关键词）。
+      文档状态 uploaded → parsing → indexing → indexed，任一步失败为 failed（error_reason 说明原因），失败或已索引的文档可重新处理。
+      商家只能看和提交自己的资料；管理员可以看全部资料，并为任意商家或平台（merchant_id 为空）采集。
   - name: catalog
     description: 公开商品目录（无需登录）。只展示上架且商家营业中的商品；下架、风控、已删除商品按不存在处理
 paths:
@@ -462,6 +467,446 @@ paths:
                 message: 文件不存在
         "503":
           $ref: "#/components/responses/ObjectStorageUnavailable"
+  /merchant/documents:
+    get:
+      tags: [knowledge]
+      operationId: listMerchantDocuments
+      summary: 我的资料
+      description: 当前商家的资料，最近修改的在前。
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/DocumentStatus"
+        - name: keyword
+          in: query
+          required: false
+          description: 按标题包含匹配。
+          schema:
+            type: string
+            maxLength: 64
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 资料分页列表（不含正文）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/KnowledgeDocument"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [knowledge]
+      operationId: createMerchantDocument
+      summary: 提交资料
+      description: |
+        商家直接提交的文字资料（按纯文本清洗）。与上游一致返回文档本身：新建 201；清洗后内容与本店已有资料相同时 200 返回已有文档；
+        force_reindex=true 时用本次的标题、类型、商品和元数据重新处理同一篇文档（200）。doc_type 默认 product_detail；
+        faq 类型按“问：/Q:”切成问答块。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentInput"
+      responses:
+        "201":
+          description: 新建并索引成功
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeDocument"
+        "200":
+          description: 重复内容（返回已有文档）或重新处理了已有文档
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeDocument"
+        "400":
+          description: |
+            `invalid_argument`：字段不合法（field 指出字段：title、content、html、json_text、source_url、source_type、doc_type、product_id、merchant_id、metadata）；
+            `url_not_allowed`：source_url 不是 http(s)、带账号密码、端口不在 80/443/8080/8443，或解析到回环、内网、链路本地、云元数据等保留地址。
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: url_not_allowed
+                message: 不能访问内网或保留地址
+                field: source_url
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: 相同内容的资料正在处理（`document_processing`），稍后再试
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: document_processing
+                message: 相同内容的资料正在处理，请稍后再试
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          description: 写分块失败（`document_index_failed`），文档已记为 failed，可以重新提交相同内容重试
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: document_index_failed
+                message: 资料入库失败，已记录为失败状态，请稍后重新提交
+  /merchant/documents/{id}:
+    get:
+      tags: [knowledge]
+      operationId: getMerchantDocument
+      summary: 资料详情
+      description: 只能查看本店资料；其他商家和平台资料 403。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 资料详情，含清洗后的正文和全部分块
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeDocumentDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 资料不存在（`document_not_found`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: document_not_found
+                message: 资料不存在
+  /merchant/unstructured-ingestions:
+    post:
+      tags: [knowledge]
+      operationId: createMerchantIngestion
+      summary: 采集非结构化资料
+      description: |
+        content / html / json_text / source_url 四选一。html 去掉脚本、样式、导航等非正文元素，title 为空时取 <title>；
+        json_text 展开为“路径: 值”的行（键按名称排序，键顺序不同的同一份 JSON 视为重复）；source_url 由服务端抓取（SSRF 防护见 400 说明，
+        最多 3 次重定向，每次都重新检查，8 秒超时，最大 2MB）。清洗后超过 120000 字时截断（truncated=true）。
+        文档类型由来源决定：text → unstructured_note，html → web_article，json → structured_note。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngestionInput"
+      responses:
+        "201":
+          description: 新建并索引成功
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestionResult"
+        "200":
+          description: 内容与已索引的资料相同（duplicate=true，未重新处理），或重新处理了已有资料（force_reindex / 此前失败）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestionResult"
+        "400":
+          description: |
+            `invalid_argument`：字段不合法（field 指出字段：title、content、html、json_text、source_url、source_type、doc_type、product_id、merchant_id、metadata）；
+            `url_not_allowed`：source_url 不是 http(s)、带账号密码、端口不在 80/443/8080/8443，或解析到回环、内网、链路本地、云元数据等保留地址。
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: url_not_allowed
+                message: 不能访问内网或保留地址
+                field: source_url
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: 相同内容的资料正在处理（`document_processing`），稍后再试
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: document_processing
+                message: 相同内容的资料正在处理，请稍后再试
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          description: 写分块失败（`document_index_failed`），文档已记为 failed，可以重新提交相同内容重试
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: document_index_failed
+                message: 资料入库失败，已记录为失败状态，请稍后重新提交
+        "502":
+          description: 网页抓取失败（`source_fetch_failed`）：超时、对方非 2xx、超过 2MB、不是网页/JSON/纯文本或不是 UTF-8
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: source_fetch_failed
+                message: 网页抓取失败：对方返回状态码 404
+                field: source_url
+  /admin/documents:
+    get:
+      tags: [knowledge]
+      operationId: listAdminDocuments
+      summary: 全部资料
+      description: 管理员查看所有商家和平台的资料。
+      parameters:
+        - name: merchant_id
+          in: query
+          required: false
+          description: 不传时返回全部；传空值（`merchant_id=`）只返回平台资料；否则只返回该商家的资料。
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/DocumentStatus"
+        - name: keyword
+          in: query
+          required: false
+          description: 按标题包含匹配。
+          schema:
+            type: string
+            maxLength: 64
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 资料分页列表（不含正文）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/KnowledgeDocument"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /admin/documents/{id}:
+    get:
+      tags: [knowledge]
+      operationId: getAdminDocument
+      summary: 资料详情（管理员）
+      description: 管理员可以查看任何资料。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 资料详情，含清洗后的正文和全部分块
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeDocumentDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 资料不存在（`document_not_found`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: document_not_found
+                message: 资料不存在
+  /admin/unstructured-ingestions:
+    post:
+      tags: [knowledge]
+      operationId: createAdminIngestion
+      summary: 采集资料（管理员）
+      description: |
+        与商家采集相同，另可通过 merchant_id 指定商家（必须存在）；不传或为空时是平台资料，所有商家的导购都可以引用，
+        平台资料不能关联商品。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminIngestionInput"
+      responses:
+        "201":
+          description: 新建并索引成功
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestionResult"
+        "200":
+          description: 内容与已索引的资料相同（duplicate=true，未重新处理），或重新处理了已有资料（force_reindex / 此前失败）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestionResult"
+        "400":
+          description: |
+            `invalid_argument`：字段不合法（field 指出字段：title、content、html、json_text、source_url、source_type、doc_type、product_id、merchant_id、metadata）；
+            `url_not_allowed`：source_url 不是 http(s)、带账号密码、端口不在 80/443/8080/8443，或解析到回环、内网、链路本地、云元数据等保留地址。
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: url_not_allowed
+                message: 不能访问内网或保留地址
+                field: source_url
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: 相同内容的资料正在处理（`document_processing`），稍后再试
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: document_processing
+                message: 相同内容的资料正在处理，请稍后再试
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          description: 写分块失败（`document_index_failed`），文档已记为 failed，可以重新提交相同内容重试
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: document_index_failed
+                message: 资料入库失败，已记录为失败状态，请稍后重新提交
+        "502":
+          description: 网页抓取失败（`source_fetch_failed`）：超时、对方非 2xx、超过 2MB、不是网页/JSON/纯文本或不是 UTF-8
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: source_fetch_failed
+                message: 网页抓取失败：对方返回状态码 404
+                field: source_url
   /categories/tree:
     get:
       tags: [catalog]
@@ -1467,6 +1912,162 @@ components:
           type: integer
           minimum: 1
           maximum: 2097152
+    DocumentStatus:
+      type: string
+      enum: [uploaded, parsing, indexing, indexed, failed]
+    DocType:
+      type: string
+      enum: [product_detail, faq, policy, guide, web_article, structured_note, unstructured_note]
+    DocumentMetadata:
+      type: object
+      maxProperties: 20
+      description: 扁平的附加信息：键 1–64 字，值只能是字符串（≤500 字）、数字、布尔或 null，整体不超过 4KB。
+      additionalProperties:
+        oneOf:
+          - type: string
+            maxLength: 500
+          - type: number
+          - type: boolean
+          - type: "null"
+    KnowledgeDocument:
+      type: object
+      required: [document_id, merchant_id, product_id, title, doc_type, status, chunk_count, source_url, content_hash, metadata, error_reason, created_at, updated_at]
+      properties:
+        document_id:
+          type: string
+        merchant_id:
+          type: string
+          description: 空串表示平台资料。
+        product_id:
+          type: string
+          description: 关联的商品，可为空。
+        title:
+          type: string
+          maxLength: 120
+        doc_type:
+          $ref: "#/components/schemas/DocType"
+        status:
+          $ref: "#/components/schemas/DocumentStatus"
+        chunk_count:
+          type: integer
+          minimum: 0
+        source_url:
+          type: string
+          description: 采集网页时为最终地址（跟随重定向后）。
+        content_hash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: 清洗后正文的 SHA-256，同一商家内唯一。
+        metadata:
+          $ref: "#/components/schemas/DocumentMetadata"
+        error_reason:
+          type: string
+          description: status 为 failed 时的原因。
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    KnowledgeDocumentDetail:
+      allOf:
+        - $ref: "#/components/schemas/KnowledgeDocument"
+        - type: object
+          required: [content, chunks]
+          properties:
+            content:
+              type: string
+              description: 清洗后的正文。
+            chunks:
+              type: array
+              items:
+                type: object
+                required: [chunk_id, chunk_index, title, content]
+                properties:
+                  chunk_id:
+                    type: string
+                  chunk_index:
+                    type: integer
+                  title:
+                    type: string
+                  content:
+                    type: string
+                    maxLength: 800
+    DocumentInput:
+      type: object
+      required: [title, content]
+      properties:
+        merchant_id:
+          type: string
+          description: 只能为空或当前商家，其他值 400（field=merchant_id）。
+        title:
+          type: string
+          maxLength: 120
+          description: 单行，不能含换行或控制字符。
+        content:
+          type: string
+        doc_type:
+          $ref: "#/components/schemas/DocType"
+        product_id:
+          type: string
+          description: 必须是本店未删除的商品。
+        metadata:
+          $ref: "#/components/schemas/DocumentMetadata"
+        force_reindex:
+          type: boolean
+    IngestionInput:
+      type: object
+      description: content、html、json_text、source_url 必须且只能提供一个。
+      properties:
+        merchant_id:
+          type: string
+          description: 只能为空或当前商家。
+        title:
+          type: string
+          maxLength: 120
+          description: 为空时从 <title> 或正文第一行推断。
+        source_type:
+          type: string
+          enum: [text, html, json]
+          description: 指定 content 或抓取结果的解析方式；为空时按字段或响应 Content-Type 判断。
+        content:
+          type: string
+        html:
+          type: string
+        json_text:
+          type: string
+        source_url:
+          type: string
+          format: uri
+          maxLength: 1024
+        product_id:
+          type: string
+        metadata:
+          $ref: "#/components/schemas/DocumentMetadata"
+        force_reindex:
+          type: boolean
+    AdminIngestionInput:
+      allOf:
+        - $ref: "#/components/schemas/IngestionInput"
+        - type: object
+          properties:
+            merchant_id:
+              type: string
+              description: 为空或不传时是平台资料；否则必须是已存在的商家。
+    IngestionResult:
+      type: object
+      required: [document, duplicate, text_runes, truncated]
+      properties:
+        document:
+          $ref: "#/components/schemas/KnowledgeDocument"
+        duplicate:
+          type: boolean
+        text_runes:
+          type: integer
+          description: 清洗后正文的字数。
+        truncated:
+          type: boolean
+          description: 清洗后超过 120000 字被截断。
     FileUpload:
       type: object
       required: [file]

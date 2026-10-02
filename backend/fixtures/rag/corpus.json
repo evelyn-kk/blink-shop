@@ -1,0 +1,31 @@
+{
+  "description": "固定检索语料：经 ingest.Service 完整入库（清洗、去重、切块）后供 recall 测试使用；商家为种子数据中的商家，空串为平台资料。",
+  "documents": [
+    {"key": "vista_camera", "merchant_id": "m_seed_digital", "product_id": "p_seed_vista", "doc_type": "product_detail", "title": "Blink Vista Pro 影像说明",
+     "content": "Blink Vista Pro 搭载 1 英寸大底主摄和 3 倍潜望长焦，支持 4K 60 帧视频录制。\n\n夜景模式会自动多帧合成，弱光下噪点更少。人像模式支持 5 档虚化调节。\n\n长焦镜头适合拍摄演唱会和远处的风景，最高支持 30 倍数码变焦。"},
+    {"key": "vista_battery", "merchant_id": "m_seed_digital", "product_id": "p_seed_vista", "doc_type": "product_detail", "title": "Blink Vista Pro 充电与续航",
+     "content": "Blink Vista Pro 内置 5500mAh 硅碳负极电池，支持 90W 有线快充和 50W 无线充电。\n\n官方测试：30 分钟可充到 80%，重度使用约一天，轻度使用可达两天。\n\n建议使用原装充电器，第三方充电器只能以 PD 协议 27W 充电。"},
+    {"key": "earbuds_faq", "merchant_id": "m_seed_digital", "product_id": "p_seed_earbuds", "doc_type": "faq", "title": "Blink Air 降噪耳机常见问题",
+     "content": "问：降噪深度是多少？\n答：主动降噪最高 45dB，地铁和飞机舱噪音明显减弱。\n\n问：单次续航多久？\n答：开启降噪约 6 小时，搭配充电盒总续航 30 小时。\n\n问：支持哪些蓝牙编码？\n答：支持 AAC、SBC 和 LDAC，安卓手机可开启 LDAC 高清传输。\n\n问：耳机进水怎么办？\n答：耳机防护等级为 IPX4，可以防汗防溅，但不能泡水或游泳时佩戴。"},
+    {"key": "keyboard_guide", "merchant_id": "m_seed_digital", "product_id": "p_seed_keyboard", "doc_type": "guide", "title": "Blink 机械键盘 K8 连接与换轴指南",
+     "content": "K8 支持有线、2.4G 和蓝牙三种连接方式。按 Fn + 1/2/3 在三台蓝牙设备之间切换。\n\nK8 采用热插拔轴座，可以直接用拔轴器更换三脚或五脚机械轴，无需焊接。\n\nMac 用户请把侧面拨杆拨到 Mac 档，Command 和 Option 键位会自动对调。"},
+    {"key": "digital_shipping", "merchant_id": "m_seed_digital", "doc_type": "policy", "title": "Blink 数码发货与配送说明",
+     "content": "下单后 48 小时内从上海仓发货，默认顺丰快递，江浙沪次日达。\n\n偏远地区（新疆、西藏）配送时效约 5 到 7 天，暂不支持港澳台地区配送。\n\n发货后可在订单详情查看物流单号。"},
+    {"key": "digital_invoice", "merchant_id": "m_seed_digital", "doc_type": "policy", "title": "Blink 数码发票开具规则",
+     "content": "所有订单均可开具电子普通发票，确认收货后在订单详情页申请，1 个工作日内发送到邮箱。\n\n企业用户需要增值税专用发票时，请联系客服提供税号和开户行信息。"},
+    {"key": "lamp_guide", "merchant_id": "m_seed_home", "product_id": "p_seed_lamp", "doc_type": "guide", "title": "Blink 护眼台灯 L1 使用说明",
+     "content": "L1 采用全光谱 LED 灯珠，显色指数 Ra97，无频闪无蓝光危害（RG0 豁免级）。\n\n长按开关 3 秒进入阅读模式，色温固定 4000K；双击开关进入夜灯模式，亮度降到 5%。\n\n建议灯头距离桌面 40 厘米左右，照亮范围可覆盖 A3 纸张。"},
+    {"key": "home_returns", "merchant_id": "m_seed_home", "doc_type": "policy", "title": "Blink 家居退换货规则",
+     "content": "家居类商品签收后 15 天内可退换，需保留原包装和配件。\n\n灯具类商品如出现质量问题，一年内免费换新，运费由商家承担。\n\n定制类商品不支持无理由退货。"},
+    {"key": "platform_payment", "merchant_id": "", "doc_type": "policy", "title": "平台支付与退款说明",
+     "content": "平台支持微信支付、支付宝和银行卡支付，下单后 30 分钟内未支付的订单会自动取消。\n\n退款审核通过后，原路退回，微信和支付宝 1 到 3 个工作日到账，银行卡 3 到 7 个工作日到账。"},
+    {"key": "platform_coupon", "merchant_id": "", "doc_type": "faq", "title": "平台优惠券使用规则",
+     "content": "问：优惠券可以叠加使用吗？\n答：同一订单只能使用一张平台券，可以和店铺满减活动同时使用。\n\n问：优惠券过期了还能用吗？\n答：过期的优惠券会自动失效，不能延期或补发。\n\n问：退款后优惠券会退回吗？\n答：整单退款且优惠券仍在有效期内时退回账户；部分退款不退回优惠券。"},
+    {"key": "speaker_hidden", "merchant_id": "m_seed_digital", "product_id": "p_seed_speaker", "doc_type": "product_detail", "title": "Blink 便携音箱 S1 防水说明",
+     "content": "S1 音箱防水等级 IPX7，可以在泳池边使用，落水后捞起擦干即可继续播放。"},
+    {"key": "web_review", "merchant_id": "m_seed_digital", "source_type": "html", "title": "",
+     "html": "<html><head><title>Vista Pro 深度体验：屏幕与散热</title><script>track('x')</script></head><body><nav>首页 &gt; 评测</nav><h1>Vista Pro 深度体验</h1><p>屏幕采用 6.8 英寸 2K LTPO 面板，支持 1 到 120Hz 自适应刷新率，户外峰值亮度 3000 尼特。</p><p>散热方面使用了 5000 平方毫米的 VC 均热板，连续游戏一小时机身温度在 42 度左右。</p></body></html>"},
+    {"key": "json_specs", "merchant_id": "m_seed_digital", "product_id": "p_seed_mouse", "source_type": "json", "title": "M2 鼠标参数表",
+     "json_text": "{\"model\":\"M2\",\"sensor\":{\"dpi\":\"800-4000 四档可调\",\"type\":\"光电\"},\"weight\":\"68 克\",\"battery\":\"一节 AA 电池，续航约 18 个月\",\"compatible\":[\"Windows\",\"macOS\",\"iPadOS\"]}"}
+  ]
+}

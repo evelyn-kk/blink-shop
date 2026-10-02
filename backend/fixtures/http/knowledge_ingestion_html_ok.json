@@ -1,0 +1,5 @@
+{
+  "description": "非结构化采集（html / json_text / content / source_url 四选一）：去掉脚本、样式和导航，title 为空时取 <title>；返回文档、是否重复、清洗后字数、是否截断",
+  "request": {"method": "POST", "path": "/api/v1/merchant/unstructured-ingestions", "as": "blink_merchant", "body": {"html": "<html><head><title>Vista 评测</title><script>track()</script></head><body><nav>首页</nav><h1>屏幕</h1><p>2K 120Hz 屏幕。</p></body></html>"}},
+  "response": {"status": 201, "body": {"document": {"document_id": "<document_id>", "merchant_id": "m_seed_digital", "product_id": "", "title": "Vista 评测", "doc_type": "web_article", "status": "indexed", "chunk_count": 1, "source_url": "", "content_hash": "88e2bf5d01fde58ed1d9980bb150ae5aa960ff36f786ed5d12ebef5ec44ef089", "metadata": {}, "error_reason": "", "created_at": "<timestamp>", "updated_at": "<timestamp>"}, "duplicate": false, "text_runes": 16, "truncated": false}}
+}

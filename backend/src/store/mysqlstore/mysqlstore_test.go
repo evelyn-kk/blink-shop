@@ -53,7 +53,8 @@ func TestMigrateEmptyThenAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(applied, []string{"0001_init.sql", "0002_promotion_discount_rate_check.sql"}) {
+	if !reflect.DeepEqual(applied, []string{"0001_init.sql", "0002_promotion_discount_rate_check.sql",
+		"0003_knowledge_document_product.sql", "0004_backfill_knowledge_document_product.sql"}) {
 		t.Fatalf("first run applied %v", applied)
 	}
 	applied, err = s.Migrate(ctx, migrations.FS)
@@ -61,7 +62,7 @@ func TestMigrateEmptyThenAgain(t *testing.T) {
 		t.Fatalf("second run applied %v, err %v; want nothing", applied, err)
 	}
 	var count int
-	if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil || count != 2 {
+	if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil || count != 4 {
 		t.Fatalf("schema_migrations rows = %d, %v", count, err)
 	}
 }
@@ -373,7 +374,8 @@ func TestDiscountRateRange(t *testing.T) {
 	}
 }
 
-// 已在 0001 上并写入了数据的库，升级时只执行新增的 0002，原有数据不受影响。
+// 已在 0001 上并写入了数据的库，升级时只执行新增的迁移，原有数据不受影响；
+// 0004 按分块回填文档的 product_id（分块指向多个商品的文档保持为空）。
 func TestMigrateUpgradeFrom0001(t *testing.T) {
 	ctx := context.Background()
 	s := freshDB(t)
@@ -384,15 +386,39 @@ func TestMigrateUpgradeFrom0001(t *testing.T) {
 	if _, err := s.Migrate(ctx, fstest.MapFS{"0001_init.sql": {Data: init}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ApplySeed(ctx, storetest.DevSeed(t)); err != nil {
+	seedData := storetest.DevSeed(t)
+	seedData.Documents, seedData.Chunks = nil, nil // 0001 的表结构没有 product_id，知识数据用旧结构的 SQL 写入
+	if _, err := s.ApplySeed(ctx, seedData); err != nil {
 		t.Fatal(err)
 	}
+	db := s.DB()
+	for _, q := range []string{
+		`INSERT INTO knowledge_documents (document_id, merchant_id, title, doc_type, content, status, content_hash)
+		 VALUES ('doc_one', 'm_a', '单商品', 'product_detail', 'x', 'indexed', REPEAT('a', 64)),
+		        ('doc_mixed', 'm_a', '多商品', 'product_detail', 'y', 'indexed', REPEAT('b', 64)),
+		        ('doc_none', 'm_a', '无商品', 'policy', 'z', 'indexed', REPEAT('c', 64))`,
+		`INSERT INTO knowledge_chunks (chunk_id, document_id, merchant_id, product_id, chunk_index, title, content) VALUES
+		 ('ck_1', 'doc_one', 'm_a', 'p_1', 0, 't', 'x'), ('ck_2', 'doc_one', 'm_a', 'p_1', 1, 't', 'x'),
+		 ('ck_3', 'doc_mixed', 'm_a', 'p_1', 0, 't', 'y'), ('ck_4', 'doc_mixed', 'm_a', 'p_2', 1, 't', 'y'),
+		 ('ck_5', 'doc_none', 'm_a', '', 0, 't', 'z')`,
+	} {
+		if _, err := db.ExecContext(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
 	applied, err := s.Migrate(ctx, migrations.FS)
-	if err != nil || !reflect.DeepEqual(applied, []string{"0002_promotion_discount_rate_check.sql"}) {
+	want := []string{"0002_promotion_discount_rate_check.sql", "0003_knowledge_document_product.sql", "0004_backfill_knowledge_document_product.sql"}
+	if err != nil || !reflect.DeepEqual(applied, want) {
 		t.Fatalf("upgrade applied %v, %v", applied, err)
 	}
 	if p, err := s.GetProduct(ctx, "p_seed_nova"); err != nil || p.Price.String() != "2999.00" {
 		t.Fatalf("data after upgrade: %+v, %v", p, err)
+	}
+	for id, want := range map[string]string{"doc_one": "p_1", "doc_mixed": "", "doc_none": ""} {
+		var got string
+		if err := db.QueryRowContext(ctx, `SELECT product_id FROM knowledge_documents WHERE document_id = ?`, id).Scan(&got); err != nil || got != want {
+			t.Errorf("%s product_id = %q, %v; want %q", id, got, err, want)
+		}
 	}
 	if n, err := s.PendingMigrations(ctx, migrations.FS); err != nil || n != 0 {
 		t.Fatalf("pending after upgrade = %d, %v", n, err)
