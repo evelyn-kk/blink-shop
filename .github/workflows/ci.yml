@@ -32,8 +32,20 @@ jobs:
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pblink_ci_root --silent"
           --health-interval=5s --health-timeout=5s --health-retries=30
+      # 对象存储集成测试用；镜像与 deployments/docker-compose.yml 锁定的版本一致。
+      minio:
+        image: bitnamilegacy/minio:2025.4.22@sha256:50cec18ac4184af4671a78aedd5554942c8ae105d51a465fa82037949046da01
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd="curl -fsS http://127.0.0.1:9000/minio/health/live"
+          --health-interval=5s --health-timeout=5s --health-retries=30
     env:
       BLINK_TEST_MYSQL_DSN: root:blink_ci_root@tcp(127.0.0.1:3306)/
+      BLINK_TEST_MINIO_ENDPOINT: 127.0.0.1:9000
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -44,7 +56,7 @@ jobs:
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - name: go vet
         run: go vet ./...
-      - name: go test (race, with MySQL)
+      - name: go test (race, with MySQL and MinIO)
         run: go test -race ./...
       - name: seed twice on empty database
         shell: bash # 开启 pipefail，seed 失败不会被 tee 吞掉
@@ -112,9 +124,21 @@ jobs:
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pblink_ci_root --silent"
           --health-interval=5s --health-timeout=5s --health-retries=30
+      # 文件上传 E2E 用；镜像与 deployments/docker-compose.yml 锁定的版本一致。
+      minio:
+        image: bitnamilegacy/minio:2025.4.22@sha256:50cec18ac4184af4671a78aedd5554942c8ae105d51a465fa82037949046da01
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd="curl -fsS http://127.0.0.1:9000/minio/health/live"
+          --health-interval=5s --health-timeout=5s --health-retries=30
     env:
       MYSQL_DSN: root:blink_ci_root@tcp(127.0.0.1:3306)/blink_shop
       API_ADDR: 127.0.0.1:8080
+      MINIO_ENDPOINT: 127.0.0.1:9000
       # 所有用例来自同一 IP，放宽 IP 限流，避免误触 429。
       RATE_LIMIT_IP_PER_MINUTE: "6000"
       RATE_LIMIT_ACCOUNT_PER_MINUTE: "6000"

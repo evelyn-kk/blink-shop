@@ -40,6 +40,7 @@ const (
 	KeyReviewOrderItem      = "uk_product_reviews_order_item"
 	KeyDocumentMerchantHash = "uk_knowledge_documents_merchant_hash"
 	KeyChunkDocumentIndex   = "uk_knowledge_chunks_document_index"
+	KeyStoredFileObjectKey  = "uk_stored_files_object_key"
 	KeyPrimary              = "PRIMARY"
 )
 
@@ -200,6 +201,10 @@ type Store interface {
 	// 不在新列表中的删除。fn 返回错误或写回失败时整体回滚。商品不存在返回 ErrNotFound。
 	UpdateProduct(ctx context.Context, productID string, fn func(p *domain.Product) error) (domain.Product, error)
 
+	// 私有文件元数据。CreateStoredFile 前用 ValidateStoredFile 校验；FileID 为空时自动生成，object_key 重复返回 ErrConflict。
+	CreateStoredFile(ctx context.Context, f domain.StoredFile) (domain.StoredFile, error)
+	GetStoredFile(ctx context.Context, fileID string) (domain.StoredFile, error)
+
 	// ApplySeed 在一个事务内写入开发种子：按主键“不存在才插入”，可重复执行；违反其他唯一键时整体回滚并返回 ErrConflict。
 	ApplySeed(ctx context.Context, data SeedData) (SeedResult, error)
 }
@@ -260,4 +265,35 @@ func ValidatePromotion(p domain.PromotionRule) error {
 		return fmt.Errorf("%w: 促销 %s: %v", ErrInvalid, p.PromotionID, err)
 	}
 	return nil
+}
+
+// ValidateStoredFile 是两种实现写入文件元数据前共用的校验：一条记录必须完整描述一个已写入的对象。
+func ValidateStoredFile(f domain.StoredFile) error {
+	switch {
+	case f.AccountID == "":
+		return fmt.Errorf("%w: 文件缺少 account_id", ErrInvalid)
+	case f.ObjectKey == "":
+		return fmt.Errorf("%w: 文件缺少 object_key", ErrInvalid)
+	case f.MimeType == "":
+		return fmt.Errorf("%w: 文件缺少 mime_type", ErrInvalid)
+	case f.SizeBytes <= 0:
+		return fmt.Errorf("%w: 文件大小必须大于 0", ErrInvalid)
+	case !isSHA256Hex(f.ContentHash):
+		return fmt.Errorf("%w: content_hash 必须是 64 位小写 hex", ErrInvalid)
+	case f.StorageProvider == "":
+		return fmt.Errorf("%w: 文件缺少 storage_provider", ErrInvalid)
+	}
+	return nil
+}
+
+func isSHA256Hex(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, c := range s {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }

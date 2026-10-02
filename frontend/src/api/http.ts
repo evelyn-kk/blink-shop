@@ -22,6 +22,19 @@ export class ApiError extends Error {
 // 所有接口请求都经过这里，统一处理前缀、JSON、登录 token 和错误结构。
 // 带 token 的请求收到 401 时清除本地会话（页面随之回到登录）。
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await send(path, init);
+  if (res.status === 204) {
+    return undefined as T;
+  }
+  return (await res.json()) as T;
+}
+
+// requestBlob 用于返回文件字节的接口（如私有文件下载），错误处理与 request 相同。
+export async function requestBlob(path: string, init: RequestInit = {}): Promise<Blob> {
+  return (await send(path, init)).blob();
+}
+
+async function send(path: string, init: RequestInit): Promise<Response> {
   const headers = new Headers(init.headers);
   const session = getSession();
   if (session && !headers.has('Authorization')) {
@@ -34,7 +47,8 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, { ...init, headers });
-  } catch {
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err;
     throw new ApiError(0, { code: 'network_error', message: '网络连接失败，请稍后重试' });
   }
 
@@ -48,10 +62,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
       isApiErrorBody(body) ? body : { code: 'unknown_error', message: `请求失败（${res.status}）` },
     );
   }
-  if (res.status === 204) {
-    return undefined as T;
-  }
-  return (await res.json()) as T;
+  return res;
 }
 
 function isApiErrorBody(value: unknown): value is ApiErrorBody {

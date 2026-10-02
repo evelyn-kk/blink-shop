@@ -22,7 +22,8 @@ var (
 	KeyTrustedProxyCIDRs      = Key{Name: "http.trusted_proxy_cidrs", Env: "TRUSTED_PROXY_CIDRS"}
 	KeyTrustAllProxies        = Key{Name: "http.trust_all_proxies", Env: "TRUST_ALL_PROXIES", Default: "false"}
 	KeyMaxBodyBytes           = Key{Name: "http.max_body_bytes", Env: "HTTP_MAX_BODY_BYTES", Default: "1048576"}
-	KeyUploadMaxBytes         = Key{Name: "http.upload_max_bytes", Env: "UPLOAD_MAX_BYTES", Default: "10485760"}
+	KeyUploadMaxBytes         = Key{Name: "http.upload_max_bytes", Env: "UPLOAD_MAX_BYTES", Default: "10485760"} // 单个上传文件的上限
+	KeyUploadAllowedTypes     = Key{Name: "files.allowed_mime_types", Env: "UPLOAD_ALLOWED_MIME_TYPES", Default: "image/jpeg,image/png,image/webp,image/gif,application/pdf"}
 	KeyRequestTimeout         = Key{Name: "http.request_timeout", Env: "HTTP_REQUEST_TIMEOUT", Default: "30s"}
 	KeyRateLimitIPPerMin      = Key{Name: "http.rate_limit.ip_per_minute", Env: "RATE_LIMIT_IP_PER_MINUTE", Default: "120"}
 	KeyRateLimitAccountPerMin = Key{Name: "http.rate_limit.account_per_minute", Env: "RATE_LIMIT_ACCOUNT_PER_MINUTE", Default: "120"}
@@ -33,6 +34,13 @@ var (
 	KeyAuthTokenTTL        = Key{Name: "auth.token_ttl", Env: "AUTH_TOKEN_TTL", Default: "24h"}
 	KeyLoginAttemptsPerMin = Key{Name: "auth.login_attempts_per_minute", Env: "LOGIN_ATTEMPTS_PER_MINUTE", Default: "10"}
 	KeyAvatarUploadDir     = Key{Name: "uploads.avatar_dir", Env: "AVATAR_UPLOAD_DIR", Default: "uploads/avatar"} // 仅启动时读取
+)
+
+// 对象存储；仅启动时读取。MINIO_ENDPOINT 为空表示未配置，文件接口返回 object_storage_unavailable。
+var (
+	KeyMinIOEndpoint = Key{Name: "minio.endpoint", Env: "MINIO_ENDPOINT"}
+	KeyMinIOBucket   = Key{Name: "minio.bucket", Env: "MINIO_BUCKET", Default: "blink-shop"}
+	KeyMinIOUseSSL   = Key{Name: "minio.use_ssl", Env: "MINIO_USE_SSL", Default: "false"}
 )
 
 // 外部依赖连接与凭据。

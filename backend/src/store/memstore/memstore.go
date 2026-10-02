@@ -38,6 +38,7 @@ type state struct {
 	orderItems  map[string]domain.OrderItem
 	payments    map[string]domain.Payment
 	reviews     map[string]domain.ProductReview
+	files       map[string]domain.StoredFile
 }
 
 func newState() state {
@@ -46,7 +47,7 @@ func newState() state {
 		products: map[string]domain.Product{}, skus: map[string]domain.ProductSKU{}, documents: map[string]domain.KnowledgeDocument{},
 		chunks: map[string]domain.KnowledgeChunk{}, promotions: map[string]domain.PromotionRule{}, coupons: map[string]domain.Coupon{},
 		userCoupons: map[string]domain.UserCoupon{}, orders: map[string]domain.Order{}, orderItems: map[string]domain.OrderItem{},
-		payments: map[string]domain.Payment{}, reviews: map[string]domain.ProductReview{},
+		payments: map[string]domain.Payment{}, reviews: map[string]domain.ProductReview{}, files: map[string]domain.StoredFile{},
 	}
 }
 
@@ -57,7 +58,7 @@ func (s state) clone() state {
 		products: maps.Clone(s.products), skus: maps.Clone(s.skus), documents: maps.Clone(s.documents),
 		chunks: maps.Clone(s.chunks), promotions: maps.Clone(s.promotions), coupons: maps.Clone(s.coupons),
 		userCoupons: maps.Clone(s.userCoupons), orders: maps.Clone(s.orders), orderItems: maps.Clone(s.orderItems),
-		payments: maps.Clone(s.payments), reviews: maps.Clone(s.reviews),
+		payments: maps.Clone(s.payments), reviews: maps.Clone(s.reviews), files: maps.Clone(s.files),
 	}
 }
 

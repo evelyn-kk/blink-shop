@@ -26,6 +26,8 @@ var expectedRoutes = map[string]string{
 	"POST /api/v1/uploads/avatar":           "account",
 	"GET /api/v1/uploads/avatar/{name}":     "public",
 	"GET /api/v1/assets/{path...}":          "public",
+	"POST /api/v1/files":                    "account",
+	"GET /api/v1/files/{id}":                "account",
 	"GET /api/v1/categories/tree":           "public",
 	"GET /api/v1/merchants":                 "public",
 	"GET /api/v1/products":                  "public",
@@ -77,6 +79,7 @@ func TestRoutePrefixRoles(t *testing.T) {
 		{"/api/v1/agent/", "user"},
 		{"/api/v1/speech/", "user"},
 		{"/api/v1/account", "account"},
+		{"/api/v1/files", "account"},
 	}
 	ts := newTestServer(t, nil, nil, nil)
 	for pattern, a := range ts.routeAccess {

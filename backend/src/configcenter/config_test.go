@@ -2,6 +2,7 @@ package configcenter
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -62,8 +63,24 @@ func TestLoad(t *testing.T) {
 				if !strings.Contains(cfg.MySQLDSN, "blink:blink_dev_password@tcp(127.0.0.1:3306)/blink_shop") {
 					t.Fatalf("dev DSN should match compose defaults: %s", cfg.MySQLDSN)
 				}
+				// 对象存储默认不配置：必须显式给出 MINIO_ENDPOINT。
+				if cfg.MinIOEndpoint != "" || cfg.MinIOBucket != "blink-shop" || cfg.MinIOUseSSL {
+					t.Fatalf("unexpected object storage defaults: %+v", cfg)
+				}
 			},
 		},
+		{
+			name: "object storage",
+			env:  map[string]string{"MINIO_ENDPOINT": "minio.internal:9000", "MINIO_BUCKET": "blink-files.v2", "MINIO_USE_SSL": "true"},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.MinIOEndpoint != "minio.internal:9000" || cfg.MinIOBucket != "blink-files.v2" || !cfg.MinIOUseSSL {
+					t.Fatalf("object storage config: %+v", cfg)
+				}
+			},
+		},
+		{name: "invalid bucket name", env: map[string]string{"MINIO_ENDPOINT": "m:9000", "MINIO_BUCKET": "Blink_Shop"}, wantErr: []string{"MINIO_BUCKET"}},
+		{name: "bucket too short", env: map[string]string{"MINIO_ENDPOINT": "m:9000", "MINIO_BUCKET": "ab"}, wantErr: []string{"MINIO_BUCKET"}},
+		{name: "bucket ends with dash", env: map[string]string{"MINIO_ENDPOINT": "m:9000", "MINIO_BUCKET": "blink-"}, wantErr: []string{"MINIO_BUCKET"}},
 		{
 			name: "production turns off auto migration by default",
 			env:  map[string]string{"APP_ENV": "Production"},
@@ -86,13 +103,15 @@ func TestLoad(t *testing.T) {
 		{
 			name: "all invalid values reported together",
 			env: map[string]string{
-				"RUN_MIGRATIONS":           "maybe",
-				"HTTP_MAX_BODY_BYTES":      "-1",
-				"HTTP_REQUEST_TIMEOUT":     "soon",
-				"RATE_LIMIT_IP_PER_MINUTE": "0",
-				"TRUSTED_PROXY_CIDRS":      "10.0.0.0/33",
+				"RUN_MIGRATIONS":            "maybe",
+				"HTTP_MAX_BODY_BYTES":       "-1",
+				"HTTP_REQUEST_TIMEOUT":      "soon",
+				"RATE_LIMIT_IP_PER_MINUTE":  "0",
+				"TRUSTED_PROXY_CIDRS":       "10.0.0.0/33",
+				"MINIO_USE_SSL":             "sometimes",
+				"UPLOAD_ALLOWED_MIME_TYPES": "image/png,text/html",
 			},
-			wantErr: []string{"RUN_MIGRATIONS", "HTTP_MAX_BODY_BYTES", "HTTP_REQUEST_TIMEOUT", "RATE_LIMIT_IP_PER_MINUTE", "TRUSTED_PROXY_CIDRS"},
+			wantErr: []string{"RUN_MIGRATIONS", "HTTP_MAX_BODY_BYTES", "HTTP_REQUEST_TIMEOUT", "RATE_LIMIT_IP_PER_MINUTE", "TRUSTED_PROXY_CIDRS", "MINIO_USE_SSL", "UPLOAD_ALLOWED_MIME_TYPES"},
 		},
 	}
 	for _, tt := range tests {
@@ -224,6 +243,28 @@ func TestHTTPSettingsProvider(t *testing.T) {
 	s = p.Current(ctx)
 	if s.RateLimitIPPerMin != 120 || s.RequestTimeout != 30*time.Second {
 		t.Fatalf("invalid dynamic value should fall back to default: %+v", s)
+	}
+}
+
+func TestUploadAllowedTypes(t *testing.T) {
+	ctx := context.Background()
+	dynamic := NewMemorySource(nil)
+	p := NewHTTPSettingsProvider(NewResolver(envOf(nil), dynamic), false)
+	want := []string{"image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf"}
+	if got := p.Current(ctx).UploadAllowedTypes; !reflect.DeepEqual(got, want) {
+		t.Fatalf("default allowed types = %v", got)
+	}
+	// 大小写和空白规范化、去重。
+	dynamic.Set(KeyUploadAllowedTypes.Name, " IMAGE/PNG , image/png,application/pdf ")
+	if got := p.Current(ctx).UploadAllowedTypes; !reflect.DeepEqual(got, []string{"image/png", "application/pdf"}) {
+		t.Fatalf("normalized allowed types = %v", got)
+	}
+	// 任何一项超出可上传范围（或为空）整项退回默认值，不会部分放开。
+	for _, bad := range []string{"text/html", "image/png,image/svg+xml", "application/octet-stream", " , "} {
+		dynamic.Set(KeyUploadAllowedTypes.Name, bad)
+		if got := p.Current(ctx).UploadAllowedTypes; !reflect.DeepEqual(got, want) {
+			t.Errorf("%q: allowed types = %v, want default", bad, got)
+		}
 	}
 }
 

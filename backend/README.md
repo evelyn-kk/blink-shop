@@ -8,11 +8,12 @@ go run ./cmd/seed                    # 迁移 + 写入演示数据（可重复�
 go run ./cmd/api                     # http://localhost:8080/api/v1/health
 gofmt -l . && go vet ./... && go test ./...
 
-# MySQL 集成测试（每个用例自建临时库并删除；需要建库权限）
-BLINK_TEST_MYSQL_DSN='root:blink_dev_root@tcp(127.0.0.1:3306)/' go test ./...
+# MySQL / MinIO 集成测试（每个用例自建临时库和临时桶，结束后删除；需要建库权限）
+BLINK_TEST_MYSQL_DSN='root:blink_dev_root@tcp(127.0.0.1:3306)/' \
+BLINK_TEST_MINIO_ENDPOINT=127.0.0.1:9000 go test ./...
 ```
 
-未设置 `BLINK_TEST_MYSQL_DSN` 时，本地会跳过 MySQL 集成测试（内存实现的同一套契约测试照常运行）；CI 中会启动 MySQL 服务并强制运行。
+未设置 `BLINK_TEST_MYSQL_DSN` / `BLINK_TEST_MINIO_ENDPOINT` 时，本地会跳过对应的集成测试（内存实现的同一套契约测试照常运行）；CI 中会启动 MySQL 和 MinIO 服务并强制运行。MinIO 凭据默认 `minioadmin`，可用 `BLINK_TEST_MINIO_ACCESS_KEY` / `BLINK_TEST_MINIO_SECRET_KEY` 覆盖。
 
 ## 数据层
 
@@ -24,6 +25,7 @@ BLINK_TEST_MYSQL_DSN='root:blink_dev_root@tcp(127.0.0.1:3306)/' go test ./...
 | `src/store/mysqlstore` | MySQL 实现与迁移执行器；所有 SQL 参数化 |
 | `src/store/memstore` | 内存实现，供上层单测使用；实现同样的唯一约束和事务回滚 |
 | `src/store/storetest` | 两种实现共用的契约测试 |
+| `src/objectstore` | 私有文件的对象存储接口；MinIO 实现与测试用内存实现（可注入写入/读取失败） |
 | `src/seed`、`cmd/seed` | 开发演示数据与写入命令 |
 | `fixtures/domain/` | 领域对象 JSON 序列化样例；改了领域类型后用 `go test ./src/seed -update` 更新 |
 
@@ -60,7 +62,8 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 1. 读取配置并解析所有 HTTP 配置；任何格式错误直接退出，并一次列出全部问题。
 2. `APP_ENV=production` 时做危险配置检查（见下文），不通过则在监听端口前退出（exit 1）。
 3. 连接 MySQL。连不上只记 warn，进程照常启动：`/health` 仍为 200，`/ready` 返回 503，MySQL 恢复后自动变回就绪。`RUN_MIGRATIONS` 开启时在后台执行迁移（失败每 5 秒重试）；只要还有未执行的迁移，`/ready` 就是 503。
-4. 监听 `API_ADDR`；收到 SIGINT/SIGTERM 后最多等 10 秒处理完在途请求再退出。
+4. `MINIO_ENDPOINT` 非空时创建 MinIO 客户端（不在启动时连接，第一次上传时按需建桶）；为空时文件接口返回 503 `object_storage_unavailable`，其他功能不受影响。
+5. 监听 `API_ADDR`；收到 SIGINT/SIGTERM 后最多等 10 秒处理完在途请求再退出。
 
 ## 中间件链
 
@@ -73,7 +76,7 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 | 3 | recover | 捕获 panic：日志记录堆栈，客户端只收到 500 `internal_error` |
 | 4 | CORS | 按白名单回写 `Access-Control-Allow-Origin`；`OPTIONS` 一律 204 且不进入后续中间件 |
 | 5 | IP 限流 | 认证前一层，按客户端 IP 固定窗口计数；超限 429 + `Retry-After` |
-| 6 | 请求体限制 | multipart 用 `UPLOAD_MAX_BYTES`，其余用 `HTTP_MAX_BODY_BYTES`；声明长度超限直接 413，未声明长度时读取超限 413 |
+| 6 | 请求体限制 | multipart 用 `UPLOAD_MAX_BYTES` + 64 KiB 表单余量，其余用 `HTTP_MAX_BODY_BYTES`；声明长度超限直接 413，未声明长度时读取超限 413 |
 | 7 | 超时 | 给 context 设截止时间；handler 超时返回且未写响应时输出 504。`*:stream` 和 `/speech/realtime` 不设超时 |
 | 8 | 认证 | 解析 `Authorization: Bearer <token>`，把账户放进 context；只识别不拒绝，是否需要登录由路由的访问规则决定 |
 | 9 | 账号限流 | 认证后一层，已登录请求按账号计数；未登录请求只受 IP 层约束 |
@@ -88,18 +91,21 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 | 状态码 | code | 场景 |
 | --- | --- | --- |
 | 400 | `invalid_json` / `invalid_argument` | JSON 语法错误、空请求体、尾随内容 / 字段类型错误 |
+| 400 | `unsupported_file_type` | 上传文件的内容不是允许的类型 |
 | 401 | `unauthorized` | 未登录，或 token 过期、已登出、伪造 |
 | 401 | `invalid_credential` | 登录时账号或密码错误（含用户不存在、已注销） |
 | 403 | `forbidden` | 角色不符，或商家操作其他店铺的资源 |
 | 403 | `account_inactive` / `account_risk` | 账户状态不允许该操作，见“认证与权限” |
 | 404 | `not_found` | 路径不存在 |
+| 404 | `file_not_found` | 文件不存在（含记录在但对象已丢失） |
 | 409 | `username_exists` | 注册时用户名已存在 |
 | 405 | `method_not_allowed` | 方法不支持 |
-| 413 | `payload_too_large` | 请求体超限 |
+| 413 | `payload_too_large` | 请求体或上传文件超限 |
 | 415 | `unsupported_media_type` | JSON 接口收到非 `application/json` |
 | 429 | `rate_limited` | 触发限流 |
 | 500 | `internal_error` | 未预期错误或 panic |
 | 503 | `not_ready` | `/ready` 依赖不可用 |
+| 503 | `object_storage_unavailable` | 对象存储未配置或暂时不可用 |
 | 504 | `timeout` | 请求处理超时 |
 
 业务 handler 读请求体用 `decodeJSON`，返回错误用 `writeError`：`*APIError` 原样输出，其他 error 一律按 500 处理。
@@ -117,14 +123,22 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 - **归属**：merchant_id 一律取自登录账号，请求体里写别的商家 400；读改删其他商家的商品 403（与 RBAC 矩阵一致），不存在或已删除 404。归属与状态检查在 `Store.UpdateProduct` 的行锁回调里做，不会与并发删除交错。
 - **规格与派生字段**：SKU 是价格和库存的唯一来源。`domain.Product.SyncFromSKUs` 在每次写库前重算：售价 = 默认规格价格，库存 = 各规格之和，库存状态由数量推导；客户端传的 `stock_status` 忽略。请求可以提交 `skus`（整体替换：带 sku_id 更新、不带新增、未出现删除），或用上游的 `price` + `stock_quantity` 只维护默认规格。
 - **状态**：商家只能在 active / inactive 间切换；风控中的商品不能自行上下架（409 `product_under_review`），但能改资料；删除 = 状态改为 deleted（终态，软删）。
-- **校验**：失败返回 400 `invalid_argument`，`field` 指出字段（如 `skus[1].price`）。文本默认按单行校验（`checkText`，拒绝换行、制表符和 Unicode 行/段分隔符），只有商品介绍用 `checkMultiline` 允许多行。规则见 `openapi.yaml#/components/schemas/ProductInput`；图片只接受 https 或平台内已存在的图片，上传文件的归属校验在 3.1 补充。
+- **校验**：失败返回 400 `invalid_argument`，`field` 指出字段（如 `skus[1].price`）。文本默认按单行校验（`checkText`，拒绝换行、制表符和 Unicode 行/段分隔符），只有商品介绍用 `checkMultiline` 允许多行。规则见 `openapi.yaml#/components/schemas/ProductInput`；图片只接受 https 或平台内已存在的图片（内嵌资源）。私有文件（`/files/{id}`）只能由上传者本人读取，不能当作公开的商品图片，因此不接受。
 - **审计**：`product.created` / `product.updated` / `product.deleted`。
+
+## 私有文件
+
+- **上传** `POST /files`：multipart 字段 `file`，边接收边写临时文件，同时计算大小和 SHA-256，并用前 512 字节嗅探类型；客户端声明的 Content-Type 和文件名完全不用。允许的类型由 `UPLOAD_ALLOWED_MIME_TYPES` 配置，只能从 JPG/PNG/WebP/GIF/BMP/PDF 中挑选（HTML、SVG 等可执行内容无法放开）；单个文件上限 `UPLOAD_MAX_BYTES`。
+- **对象 key**：`uploads/<年>/<月>/<32 位随机 hex>.<扩展名>`（`objectstore.NewObjectKey`），不含账户、文件名等可推测内容，不返回给客户端；`file_id` 为 `file_` + 24 位随机 hex。元数据存 `stored_files`（owner、mime、大小、hash、key）。
+- **不留半条记录**：先写对象再写元数据。对象存储未配置 / 写入失败 → 503 `object_storage_unavailable`，不写元数据；元数据写入失败 → 删除刚写入的对象并返回 500。
+- **下载** `GET /files/{id}`：只有上传者本人和管理员可读，其他账号 403（先查归属再访问存储，存储不可用时越权请求仍是 403）。响应使用上传时嗅探出的类型，带 `nosniff`、`Content-Security-Policy: default-src 'none'; sandbox`，图片 inline、PDF attachment，`Cache-Control: private`，`ETag` 为内容 hash，支持 `If-None-Match` → 304。目前没有缩略图接口；预览也走同一个需要登录的地址。
+- **审计**：`file.uploaded`（file_id、类型、大小，不记录 object key）。
 
 ## 认证与权限
 
 - **token**：注册/登录返回 32 字节随机 token（base64url），`auth_tokens` 只存 SHA-256 摘要和过期时间。每个请求都按 token 重新读取账户，所以管理员改账户状态立即生效。登出撤销当前 token，注销撤销全部 token。
 - **密码**：bcrypt（`DefaultCost`）。兼容上游遗留的 SHA-256 hex 哈希，登录成功后自动升级；bcrypt 成本低于当前设置时同样升级。用户不存在时也做一次 bcrypt 比较，避免按响应时间枚举用户名。
-- **审计**：注册、登录成功/失败/被拒、登出、改资料、改联系方式、上传头像、注销、密码升级都写一条 `msg=audit` 日志，只含动作和 ID，不含密码、token、手机号、邮箱。
+- **审计**：注册、登录成功/失败/被拒、登出、改资料、改联系方式、上传头像、上传文件、注销、密码升级都写一条 `msg=audit` 日志，只含动作和 ID，不含密码、token、手机号、邮箱。
 - **头像**：`POST /uploads/avatar` 按内容嗅探（JPG/PNG/WebP，≤2MB），文件名为 `<account_id>_<随机 16 位 hex>.<ext>`；`PATCH /account/profile` 只接受本人上传且仍存在的头像地址。读取接口公开，经 `os.Root` 限定在头像目录内。
 
 ### 路由访问规则
@@ -156,9 +170,10 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 | `GET /uploads/avatar/{name}` | public |
 | `GET /categories/tree`、`GET /merchants`、`GET /products`、`GET /products/{id}`、`GET /products/{id}/skus`、`GET /products/{id}/reviews`、`GET /promotions` | public |
 | `GET /assets/{path...}` | public |
+| `POST /files`、`GET /files/{id}` | account（下载另做本人/管理员校验） |
 | `GET,POST /merchant/products`、`GET,PATCH,DELETE /merchant/products/{id}` | merchant（另做归属校验） |
 
-后续节点按前缀约定（`TestRoutePrefixRoles` 检查）：`/admin/*` → admin；`/merchant/*` → merchant；`/cart`、`/orders`、`/coupons/*`、`/agent/*`、`/speech/*` → user；分类/商家/商品读取 → public。
+后续节点按前缀约定（`TestRoutePrefixRoles` 检查）：`/admin/*` → admin；`/merchant/*` → merchant；`/cart`、`/orders`、`/coupons/*`、`/agent/*`、`/speech/*` → user；`/files` → account；分类/商家/商品读取 → public。
 
 | 场景 | 预期 |
 | --- | --- |
@@ -184,13 +199,17 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 | `TRUSTED_PROXY_CIDRS` | `http.trusted_proxy_cidrs` | 空 | 逗号分隔的 CIDR 或 IP |
 | `TRUST_ALL_PROXIES` | `http.trust_all_proxies` | `false` | 仅本地调试；生产始终视为 `false` |
 | `HTTP_MAX_BODY_BYTES` | `http.max_body_bytes` | `1048576` | JSON 请求体上限 |
-| `UPLOAD_MAX_BYTES` | `http.upload_max_bytes` | `10485760` | multipart 上传上限 |
+| `UPLOAD_MAX_BYTES` | `http.upload_max_bytes` | `10485760` | 单个上传文件上限（multipart 请求体另留 64 KiB 余量） |
+| `UPLOAD_ALLOWED_MIME_TYPES` | `files.allowed_mime_types` | `image/jpeg,image/png,image/webp,image/gif,application/pdf` | `POST /files` 允许的类型，只能从 JPG/PNG/WebP/GIF/BMP/PDF 中选；含其他值时整项退回默认 |
 | `HTTP_REQUEST_TIMEOUT` | `http.request_timeout` | `30s` | 非流式请求超时 |
 | `RATE_LIMIT_IP_PER_MINUTE` | `http.rate_limit.ip_per_minute` | `120` | 认证前 IP 限额 |
 | `RATE_LIMIT_ACCOUNT_PER_MINUTE` | `http.rate_limit.account_per_minute` | `120` | 认证后账号限额 |
 | `AUTH_TOKEN_TTL` | `auth.token_ttl` | `24h` | 登录 token 有效期（与上游一致） |
 | `LOGIN_ATTEMPTS_PER_MINUTE` | `auth.login_attempts_per_minute` | `10` | 同一用户名每分钟登录尝试上限 |
-| `AVATAR_UPLOAD_DIR` | — | `uploads/avatar` | 头像文件目录（相对启动目录）；3.1 接入对象存储后替换 |
+| `AVATAR_UPLOAD_DIR` | — | `uploads/avatar` | 头像文件目录（相对启动目录）。头像公开读取，与上游一致存本地，不进私有文件存储 |
+| `MINIO_ENDPOINT` | — | 空 | 对象存储地址（如 `127.0.0.1:9000`，不带协议）；为空表示未配置，文件接口返回 503 |
+| `MINIO_BUCKET` | — | `blink-shop` | 桶名（S3 命名规则），不存在时首次上传自动创建 |
+| `MINIO_USE_SSL` | — | `false` | 是否用 HTTPS 连接对象存储 |
 | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | — | `minioadmin` | 密钥类 |
 | `MILVUS_TOKEN` | — | 空 | 密钥类 |
 | `AI_API_KEY` | — | 空 | 密钥类 |

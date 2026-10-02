@@ -196,3 +196,22 @@ export interface ProductInput {
   status?: 'active' | 'inactive';
   skus?: SkuInput[];
 }
+
+// ---------- 私有文件（openapi tag: files） ----------
+
+export type FileMimeType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif' | 'image/bmp' | 'application/pdf';
+
+export interface StoredFile {
+  file_id: string;
+  /** 下载地址 /api/v1/files/{id}，需要登录，只有上传者本人和管理员可以读取。 */
+  url: string;
+  mime_type: FileMimeType;
+  size_bytes: number;
+  /** 内容 SHA-256（小写 hex）。 */
+  content_hash: string;
+  created_at: string;
+}
+
+export interface FileUpload {
+  file: StoredFile;
+}

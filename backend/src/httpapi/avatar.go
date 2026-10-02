@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"mime"
-	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -32,7 +31,7 @@ var avatarNamePattern = regexp.MustCompile(`^acct_[A-Za-z0-9_]{1,64}_[0-9a-f]{16
 
 var avatarTypes = map[string]string{"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 
-// avatarDir 把头像存在本地目录（与上游一致）。3.1 接入对象存储后替换这里的实现，URL 形式不变。
+// avatarDir 把头像存在本地目录（与上游一致）。头像是公开资源，不放进只允许本人读取的私有文件存储。
 // 所有文件操作经 os.Root 限定在 root 内，文件名即使绕过校验也无法逃出目录。
 type avatarDir struct {
 	root string
@@ -126,36 +125,18 @@ func (s *Server) handleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, avatarResponse{URL: avatarURLPrefix + name, MimeType: mimeType, Size: len(data)})
 }
 
-// readAvatarPart 流式读取第一个名为 file 的分段，最多 2MB；不把整个表单读进内存或临时文件。
-func readAvatarPart(r *http.Request) ([]byte, error) {
-	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "multipart/form-data" {
-		return nil, &APIError{Status: http.StatusUnsupportedMediaType, Code: "unsupported_media_type", Message: "请求体必须是 multipart/form-data"}
-	}
-	mr, err := r.MultipartReader()
-	if err != nil {
-		return nil, invalidArgument("头像上传请求不合法")
-	}
-	for {
-		part, err := mr.NextPart()
-		if errors.Is(err, io.EOF) {
-			return nil, ErrAvatarMissing
-		}
-		if err != nil {
-			return nil, mapUploadError(err)
-		}
-		if part.FormName() != "file" {
-			_ = part.Close()
-			continue
-		}
-		return readLimited(part)
-	}
-}
+var errAvatarRequest = invalidArgument("头像上传请求不合法")
 
-func readLimited(part *multipart.Part) ([]byte, error) {
+// readAvatarPart 流式读取第一个名为 file 的分段，最多 2MB。
+func readAvatarPart(r *http.Request) ([]byte, error) {
+	part, err := firstFilePart(r, ErrAvatarMissing, errAvatarRequest)
+	if err != nil {
+		return nil, err
+	}
 	defer part.Close()
 	data, err := io.ReadAll(io.LimitReader(part, avatarMaxBytes+1))
 	if err != nil {
-		return nil, mapUploadError(err)
+		return nil, mapMultipartError(err, errAvatarRequest)
 	}
 	if len(data) > avatarMaxBytes {
 		return nil, ErrAvatarTooLarge
@@ -164,14 +145,6 @@ func readLimited(part *multipart.Part) ([]byte, error) {
 		return nil, ErrAvatarMissing
 	}
 	return data, nil
-}
-
-func mapUploadError(err error) error {
-	var tooLarge *http.MaxBytesError
-	if errors.As(err, &tooLarge) {
-		return ErrPayloadTooLarge
-	}
-	return invalidArgument("头像上传请求不合法")
 }
 
 // handleGetAvatar 公开读取头像。文件名必须符合生成规则；响应禁止嗅探并带长缓存（文件名随机，内容不变）。

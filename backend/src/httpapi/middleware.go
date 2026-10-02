@@ -221,7 +221,7 @@ func setRetryAfter(w http.ResponseWriter, retryAfter time.Duration) {
 	w.Header().Set("Retry-After", strconv.Itoa(seconds))
 }
 
-// withBodyLimit 限制请求体：multipart 上传用 UploadMaxBytes，其余用 MaxBodyBytes。
+// withBodyLimit 限制请求体：multipart 上传用 UploadMaxBytes（单个文件上限）加表单余量，其余用 MaxBodyBytes。
 // 声明的 Content-Length 超限时直接 413；未声明长度的请求在读取超限时由 decodeJSON 等返回 413。
 func (s *Server) withBodyLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -229,7 +229,7 @@ func (s *Server) withBodyLimit(next http.Handler) http.Handler {
 			settings := settingsFromContext(r.Context())
 			limit := settings.MaxBodyBytes
 			if mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mediaType == "multipart/form-data" {
-				limit = settings.UploadMaxBytes
+				limit = settings.UploadMaxBytes + multipartOverhead
 			}
 			if r.ContentLength > limit {
 				writeError(w, ErrPayloadTooLarge)

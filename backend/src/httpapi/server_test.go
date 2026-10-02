@@ -18,6 +18,7 @@ import (
 
 	"github.com/evelyn-kk/blink-shop/backend/src/configcenter"
 	"github.com/evelyn-kk/blink-shop/backend/src/logging"
+	"github.com/evelyn-kk/blink-shop/backend/src/objectstore"
 	"github.com/evelyn-kk/blink-shop/backend/src/store/memstore"
 	"github.com/evelyn-kk/blink-shop/backend/src/store/storetest"
 )
@@ -30,7 +31,8 @@ type testServer struct {
 	handler http.Handler
 	logs    *bytes.Buffer
 	dynamic *configcenter.MemorySource
-	mem     *memstore.Store // 已写入开发种子
+	mem     *memstore.Store     // 已写入开发种子
+	objects *objectstore.Memory // 默认的对象存储；测试“未配置”时把 Server.objects 置为 nil
 }
 
 // newTestServer 用给定环境变量创建 Server；extra 在构建 handler 前注册测试路由。
@@ -44,8 +46,10 @@ func newTestServer(t *testing.T, env map[string]string, readiness []ReadinessChe
 	if _, err := mem.ApplySeed(context.Background(), storetest.DevSeed(t)); err != nil {
 		t.Fatal(err)
 	}
+	objects := objectstore.NewMemory()
 	s := NewServer(Options{
 		Logger:       logging.New(logs, slog.LevelDebug),
+		ObjectStore:  objects,
 		Settings:     configcenter.NewHTTPSettingsProvider(resolver, production),
 		Readiness:    readiness,
 		Store:        mem,
@@ -56,7 +60,7 @@ func newTestServer(t *testing.T, env map[string]string, readiness []ReadinessChe
 	if extra != nil {
 		extra(s.mux)
 	}
-	return &testServer{Server: s, handler: s.Handler(), logs: logs, dynamic: dynamic, mem: mem}
+	return &testServer{Server: s, handler: s.Handler(), logs: logs, dynamic: dynamic, mem: mem, objects: objects}
 }
 
 func (ts *testServer) do(r *http.Request) *httptest.ResponseRecorder {
@@ -338,9 +342,10 @@ func TestBodyLimitAndJSONDecoding(t *testing.T) {
 		{"json prefix is not json", "/test/echo", "application/json-foo", `{"name":"a"}`, false, 415, "unsupported_media_type"},
 		{"vendor json suffix is not json", "/test/echo", "application/vnd.api+json", `{"name":"a"}`, false, 415, "unsupported_media_type"},
 		{"malformed content type", "/test/echo", "application/json;;=", `{"name":"a"}`, false, 415, "unsupported_media_type"},
-		{"multipart uses upload limit", "/test/upload", "multipart/form-data; boundary=x", strings.Repeat("y", 200), false, 204, ""},
-		{"multipart over upload limit", "/test/upload", "multipart/form-data; boundary=x", strings.Repeat("y", 300), false, 413, "payload_too_large"},
-		{"chunked multipart over limit", "/test/upload", "multipart/form-data; boundary=x", strings.Repeat("y", 300), true, 413, "payload_too_large"},
+		// multipart 请求体上限 = UPLOAD_MAX_BYTES（单个文件上限）+ 64KB 表单余量。
+		{"multipart uses upload limit", "/test/upload", "multipart/form-data; boundary=x", strings.Repeat("y", 256+multipartOverhead), false, 204, ""},
+		{"multipart over upload limit", "/test/upload", "multipart/form-data; boundary=x", strings.Repeat("y", 257+multipartOverhead), false, 413, "payload_too_large"},
+		{"chunked multipart over limit", "/test/upload", "multipart/form-data; boundary=x", strings.Repeat("y", 257+multipartOverhead), true, 413, "payload_too_large"},
 	}
 	ts := newTestServer(t, env, nil, echoRoute)
 	for _, tt := range tests {

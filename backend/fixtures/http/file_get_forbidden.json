@@ -1,0 +1,6 @@
+{
+  "description": "读取他人上传的文件：403（只有上传者本人和管理员可以读取）；成功下载直接返回文件字节，不是 JSON",
+  "setup": {"as": "blink_user", "multipart": {"field": "file", "filename": "a.png", "content_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP438DwHwAGgAJ/EEwb4QAAAABJRU5ErkJggg=="}},
+  "request": {"method": "GET", "path": "/api/v1/files/{setup_file_id}", "as": "blink_user2"},
+  "response": {"status": 403, "body": {"code": "forbidden", "message": "无权访问该文件", "request_id": "<request_id>"}}
+}

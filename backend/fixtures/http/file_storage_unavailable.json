@@ -1,0 +1,5 @@
+{
+  "description": "未配置或无法连接对象存储：503 object_storage_unavailable，不写入文件记录",
+  "request": {"method": "POST", "path": "/api/v1/files", "as": "blink_user", "object_storage": "unavailable", "multipart": {"field": "file", "filename": "a.png", "content_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP438DwHwAGgAJ/EEwb4QAAAABJRU5ErkJggg=="}},
+  "response": {"status": 503, "body": {"code": "object_storage_unavailable", "message": "文件存储暂不可用，请稍后再试", "request_id": "<request_id>"}}
+}

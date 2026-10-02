@@ -20,6 +20,7 @@ import (
 	"github.com/evelyn-kk/blink-shop/backend/src/configcenter"
 	"github.com/evelyn-kk/blink-shop/backend/src/httpapi"
 	"github.com/evelyn-kk/blink-shop/backend/src/logging"
+	"github.com/evelyn-kk/blink-shop/backend/src/objectstore"
 	"github.com/evelyn-kk/blink-shop/backend/src/store/mysqlstore"
 )
 
@@ -73,11 +74,17 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 		go migrateUntilDone(ctx, st, logger)
 	}
 
+	objects, err := openObjectStore(cfg, logger)
+	if err != nil {
+		return err
+	}
+
 	server := httpapi.NewServer(httpapi.Options{
-		Logger:    logger,
-		Settings:  configcenter.NewHTTPSettingsProvider(resolver, cfg.IsProduction()),
-		Store:     st,
-		AvatarDir: cfg.AvatarUploadDir,
+		Logger:      logger,
+		Settings:    configcenter.NewHTTPSettingsProvider(resolver, cfg.IsProduction()),
+		Store:       st,
+		ObjectStore: objects,
+		AvatarDir:   cfg.AvatarUploadDir,
 		Readiness: []httpapi.ReadinessCheck{
 			{Name: "mysql", Check: func(ctx context.Context) error { return schemaReady(ctx, st) }},
 		},
@@ -113,6 +120,24 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 	}
 	logger.Info("api shutdown completed")
 	return nil
+}
+
+// openObjectStore 按配置创建对象存储；未配置 MINIO_ENDPOINT 时返回 nil，服务照常启动，文件接口返回 object_storage_unavailable。
+// MinIO 暂时连不上不影响启动，第一次上传时再建桶。
+func openObjectStore(cfg configcenter.Config, logger *slog.Logger) (objectstore.Store, error) {
+	if cfg.MinIOEndpoint == "" {
+		logger.Warn("object storage not configured, file upload disabled")
+		return nil, nil
+	}
+	minioStore, err := objectstore.NewMinIO(objectstore.MinIOConfig{
+		Endpoint: cfg.MinIOEndpoint, AccessKey: cfg.MinIOAccessKey, SecretKey: cfg.MinIOSecretKey,
+		Bucket: cfg.MinIOBucket, UseSSL: cfg.MinIOUseSSL,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("对象存储配置不合法: %w", err)
+	}
+	logger.Info("object storage configured", "endpoint", cfg.MinIOEndpoint, "bucket", cfg.MinIOBucket, "use_ssl", cfg.MinIOUseSSL)
+	return minioStore, nil
 }
 
 type mysqlDriverLogger struct{ logger *slog.Logger }

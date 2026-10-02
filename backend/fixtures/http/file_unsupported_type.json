@@ -1,0 +1,5 @@
+{
+  "description": "内容不是允许的类型（这里是伪装成 PNG 的纯文本）：400 unsupported_file_type，不写入任何数据",
+  "request": {"method": "POST", "path": "/api/v1/files", "as": "blink_user", "multipart": {"field": "file", "filename": "photo.png", "content_type": "image/png", "content_base64": "anVzdCBzb21lIHRleHQ="}},
+  "response": {"status": 400, "body": {"code": "unsupported_file_type", "message": "不支持该文件类型，仅支持 JPG、PNG、WEBP、GIF、PDF", "field": "file", "request_id": "<request_id>"}}
+}

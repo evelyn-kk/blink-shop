@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/configcenter"
+	"github.com/evelyn-kk/blink-shop/backend/src/objectstore"
 	"github.com/evelyn-kk/blink-shop/backend/src/store"
 )
 
@@ -28,6 +29,8 @@ type Options struct {
 	Settings  SettingsProvider
 	Readiness []ReadinessCheck
 	Store     store.Store
+	// ObjectStore 保存私有上传文件；nil 表示未配置，文件接口返回 object_storage_unavailable。
+	ObjectStore objectstore.Store
 	// AvatarDir 是头像文件目录，不存在时在首次上传时创建。
 	AvatarDir string
 	// PasswordCost 是 bcrypt 成本，0 表示 bcrypt.DefaultCost；测试可调低以提速。
@@ -41,6 +44,7 @@ type Server struct {
 	settings       SettingsProvider
 	readiness      []ReadinessCheck
 	store          store.Store
+	objects        objectstore.Store
 	avatars        avatarDir
 	passwords      *passwordHasher
 	now            func() time.Time
@@ -59,6 +63,7 @@ func NewServer(opts Options) *Server {
 		settings:       opts.Settings,
 		readiness:      opts.Readiness,
 		store:          opts.Store,
+		objects:        opts.ObjectStore,
 		avatars:        avatarDir{root: opts.AvatarDir},
 		passwords:      newPasswordHasher(opts.PasswordCost),
 		now:            opts.Now,
@@ -99,6 +104,9 @@ func (s *Server) routes() {
 	s.handle("POST /api/v1/uploads/avatar", accessAccount, s.handleUploadAvatar)
 	s.handle("GET /api/v1/uploads/avatar/{name}", accessPublic, s.handleGetAvatar)
 	s.handle("GET /api/v1/assets/{path...}", accessPublic, s.handleGetAsset)
+
+	s.handle("POST /api/v1/files", accessAccount, s.handleUploadFile)
+	s.handle("GET /api/v1/files/{id}", accessAccount, s.handleGetFile)
 
 	s.handle("GET /api/v1/categories/tree", accessPublic, s.handleCategoryTree)
 	s.handle("GET /api/v1/merchants", accessPublic, s.handleListMerchants)

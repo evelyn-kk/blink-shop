@@ -1,14 +1,14 @@
 openapi: 3.1.0
 info:
   title: Blink Shop API
-  version: 0.5.0
+  version: 0.6.0
   description: |
     Blink Shop 的单一接口契约。约定：
     - 所有路径前缀为 `/api/v1`，JSON 字段使用 snake_case。
     - 成功响应直接返回业务对象，不包 `data` 外层。
     - 失败响应统一为 `Error`；状态码含义见 `docs/03-api-contract.md`。
     - 每个响应都带 `X-Request-ID`；请求可携带 `X-Request-ID`（1–64 位字母、数字、`.`、`_`、`-`），否则由服务端生成。
-    - 请求体上限：JSON 默认 1 MiB，multipart 上传默认 10 MiB，超限返回 413。
+    - 请求体上限：JSON 默认 1 MiB；单个上传文件默认 10 MiB（`UPLOAD_MAX_BYTES`），multipart 请求体另留 64 KiB 给表单分隔符；超限返回 413。
     - 未登录请求按客户端 IP 限流，已登录请求另按账号限流，超限返回 429 并带 `Retry-After`。
     - 非流式请求默认 30 秒超时，超时返回 504。
     - 未知路径返回 404，路径存在但方法不支持返回 405（带 `Allow` 头），均为 `Error` JSON。
@@ -38,6 +38,8 @@ tags:
     description: 个人资料、联系方式、头像与注销
   - name: merchant
     description: 商家后台。merchant_id 一律由登录账号决定；其他商家的资源 403，不存在或已删除 404
+  - name: files
+    description: 私有文件。只有上传者本人和管理员可以读取；对象存储未配置或不可用时返回 503 `object_storage_unavailable`
   - name: catalog
     description: 公开商品目录（无需登录）。只展示上架且商家营业中的商品；下架、风控、已删除商品按不存在处理
 paths:
@@ -330,6 +332,136 @@ paths:
             image/webp: {}
         "404":
           $ref: "#/components/responses/NotFound"
+  /files:
+    post:
+      tags: [files]
+      operationId: uploadFile
+      summary: 上传私有文件
+      description: |
+        multipart 字段 `file`（其他字段忽略）。服务端边接收边计算大小和 SHA-256，按文件内容嗅探类型，
+        客户端声明的 Content-Type 和文件名一律忽略；默认允许 JPG、PNG、WebP、GIF、PDF
+        （`UPLOAD_ALLOWED_MIME_TYPES`，只能在 JPG/PNG/WebP/GIF/BMP/PDF 中选择），单个文件默认最大 10 MiB（`UPLOAD_MAX_BYTES`）。
+        文件保存到对象存储，key 随机生成且不对外返回；先写对象再写元数据，任一步失败都不会留下文件记录。
+        所有已登录角色可用；inactive / risk 账户不能上传。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  contentMediaType: application/octet-stream
+      responses:
+        "201":
+          description: 上传成功
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileUpload"
+        "400":
+          description: |
+            `invalid_argument`：缺少 `file` 分段、文件为空或 multipart 格式错误（field=file 表示文件本身的问题）；
+            `unsupported_file_type`：内容不是允许的类型（field=file）。
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: unsupported_file_type
+                message: 不支持该文件类型，仅支持 JPG、PNG、WEBP、GIF、PDF
+                field: file
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccountStatusForbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
+  /files/{id}:
+    get:
+      tags: [files]
+      operationId: getFile
+      summary: 下载私有文件
+      description: |
+        只有上传者本人和管理员可以读取，其他账号 403。成功时直接返回文件字节：`Content-Type` 为上传时嗅探出的类型，
+        带 `X-Content-Type-Options: nosniff`、`Content-Security-Policy: default-src 'none'; sandbox`，
+        图片 `Content-Disposition: inline`，其他类型 `attachment`；`Cache-Control: private, max-age=3600`，
+        `ETag` 为内容 SHA-256，带匹配的 `If-None-Match` 时返回 304。
+        Web 端 `<img>` 无法携带 Bearer token，需要用带 token 的请求取回内容后生成 blob URL（见 frontend/src/api/files.ts），
+        不能把 token 放进 URL。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^file_[A-Za-z0-9_]{1,64}$"
+        - name: If-None-Match
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 文件内容
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+            ETag:
+              schema:
+                type: string
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            image/jpeg: {}
+            image/png: {}
+            image/webp: {}
+            image/gif: {}
+            image/bmp: {}
+            application/pdf: {}
+        "304":
+          description: 内容未变化
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: 不是上传者本人也不是管理员（`forbidden`），或账户已停用（`account_inactive`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: forbidden
+                message: 无权访问该文件
+        "404":
+          description: 文件不存在（`file_not_found`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: file_not_found
+                message: 文件不存在
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
   /categories/tree:
     get:
       tags: [catalog]
@@ -1335,6 +1467,36 @@ components:
           type: integer
           minimum: 1
           maximum: 2097152
+    FileUpload:
+      type: object
+      required: [file]
+      properties:
+        file:
+          $ref: "#/components/schemas/StoredFile"
+    StoredFile:
+      type: object
+      required: [file_id, url, mime_type, size_bytes, content_hash, created_at]
+      properties:
+        file_id:
+          type: string
+          examples: [file_0123456789abcdef01234567]
+        url:
+          type: string
+          description: 下载地址（需要登录，见 `GET /files/{id}`）。
+          examples: [/api/v1/files/file_0123456789abcdef01234567]
+        mime_type:
+          type: string
+          enum: [image/jpeg, image/png, image/webp, image/gif, image/bmp, application/pdf]
+        size_bytes:
+          type: integer
+          minimum: 1
+        content_hash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: 内容的 SHA-256（小写 hex）。
+        created_at:
+          type: string
+          format: date-time
     OKResponse:
       type: object
       required: [ok]
@@ -1547,6 +1709,18 @@ components:
             code: conflict
             message: 当前状态不允许该操作
             request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
+    ObjectStorageUnavailable:
+      description: 对象存储未配置或暂时不可用（`object_storage_unavailable`）
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: object_storage_unavailable
+            message: 文件存储暂不可用，请稍后再试
     PayloadTooLarge:
       description: 请求体或文件过大
       headers:

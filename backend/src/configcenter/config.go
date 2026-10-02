@@ -19,8 +19,11 @@ type Config struct {
 	MySQLDSN             string
 	RunMigrations        bool
 	BootstrapVectorIndex bool
+	MinIOEndpoint        string // 为空表示未配置对象存储
 	MinIOAccessKey       string
 	MinIOSecretKey       string
+	MinIOBucket          string
+	MinIOUseSSL          bool
 	MilvusToken          string
 	AIAPIKey             string
 	AvatarUploadDir      string
@@ -42,8 +45,10 @@ func Load(ctx context.Context, r *Resolver) (Config, error) {
 		AppEnv:          strings.ToLower(r.Get(ctx, KeyAppEnv)),
 		APIAddr:         r.Get(ctx, KeyAPIAddr),
 		MySQLDSN:        r.Get(ctx, KeyMySQLDSN),
+		MinIOEndpoint:   r.Get(ctx, KeyMinIOEndpoint),
 		MinIOAccessKey:  r.Get(ctx, KeyMinIOAccessKey),
 		MinIOSecretKey:  r.Get(ctx, KeyMinIOSecretKey),
+		MinIOBucket:     r.Get(ctx, KeyMinIOBucket),
 		MilvusToken:     r.Get(ctx, KeyMilvusToken),
 		AIAPIKey:        r.Get(ctx, KeyAIAPIKey),
 		AvatarUploadDir: r.Get(ctx, KeyAvatarUploadDir),
@@ -62,6 +67,12 @@ func Load(ctx context.Context, r *Resolver) (Config, error) {
 	cfg.BootstrapVectorIndex = collect(&errs, KeyBootstrapVectorIndex, func() (bool, error) {
 		return parseBool(r.Get(ctx, KeyBootstrapVectorIndex), !cfg.IsProduction())
 	})
+	cfg.MinIOUseSSL = collect(&errs, KeyMinIOUseSSL, func() (bool, error) {
+		return parseBool(r.Get(ctx, KeyMinIOUseSSL), false)
+	})
+	if cfg.MinIOEndpoint != "" && !validBucketName(cfg.MinIOBucket) {
+		errs = append(errs, fmt.Errorf("%s: %q 不是合法的桶名（3–63 位小写字母、数字、点或连字符）", KeyMinIOBucket.Env, cfg.MinIOBucket))
+	}
 	if _, err := parseHTTPSettings(ctx, r); err != nil {
 		errs = append(errs, err)
 	}
@@ -122,7 +133,8 @@ type HTTPSettings struct {
 	TrustedProxies         []*net.IPNet
 	TrustAllProxies        bool
 	MaxBodyBytes           int64
-	UploadMaxBytes         int64
+	UploadMaxBytes         int64    // 单个上传文件的上限；multipart 请求体另留少量余量给表单分隔符
+	UploadAllowedTypes     []string // 上传文件允许的 MIME（按内容嗅探结果比较），是 UploadableTypes 的子集
 	RequestTimeout         time.Duration
 	RateLimitIPPerMin      int
 	RateLimitAccountPerMin int
@@ -160,6 +172,7 @@ func parseHTTPSettings(ctx context.Context, r *Resolver) (HTTPSettings, error) {
 	s.TrustAllProxies = parseOr(&errs, KeyTrustAllProxies, get, func(v string) (bool, error) { return parseBool(v, false) })
 	s.MaxBodyBytes = parseOr(&errs, KeyMaxBodyBytes, get, parsePositiveInt)
 	s.UploadMaxBytes = parseOr(&errs, KeyUploadMaxBytes, get, parsePositiveInt)
+	s.UploadAllowedTypes = parseOr(&errs, KeyUploadAllowedTypes, get, parseUploadTypes)
 	s.RequestTimeout = parseOr(&errs, KeyRequestTimeout, get, parsePositiveDuration)
 	s.RateLimitIPPerMin = int(parseOr(&errs, KeyRateLimitIPPerMin, get, parsePositiveInt))
 	s.RateLimitAccountPerMin = int(parseOr(&errs, KeyRateLimitAccountPerMin, get, parsePositiveInt))
@@ -231,6 +244,40 @@ func parseCIDRs(value string) ([]*net.IPNet, error) {
 		nets = append(nets, n)
 	}
 	return nets, nil
+}
+
+// UploadableTypes 是服务端能够嗅探并安全回传的文件类型。配置只能从中挑选，不能放开 HTML、SVG 等可执行内容。
+var UploadableTypes = []string{"image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp", "application/pdf"}
+
+func parseUploadTypes(value string) ([]string, error) {
+	var out []string
+	for _, item := range splitList(value) {
+		item = strings.ToLower(item)
+		if !contains(UploadableTypes, item) {
+			return nil, fmt.Errorf("%q 不在可上传类型 %s 中", item, strings.Join(UploadableTypes, ","))
+		}
+		if !contains(out, item) {
+			out = append(out, item)
+		}
+	}
+	if len(out) == 0 {
+		return nil, errors.New("至少允许一种文件类型")
+	}
+	return out, nil
+}
+
+// validBucketName 按 S3 桶命名规则的常用子集检查：3–63 位，小写字母/数字开头结尾，中间可有点和连字符。
+func validBucketName(name string) bool {
+	if len(name) < 3 || len(name) > 63 {
+		return false
+	}
+	for i, c := range name {
+		alnum := c >= 'a' && c <= 'z' || c >= '0' && c <= '9'
+		if !alnum && (i == 0 || i == len(name)-1 || (c != '.' && c != '-')) {
+			return false
+		}
+	}
+	return true
 }
 
 func splitList(value string) []string {

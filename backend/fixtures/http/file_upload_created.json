@@ -1,0 +1,5 @@
+{
+  "description": "上传私有文件：类型按内容嗅探（声明的 text/html 与文件名被忽略），返回 201 和文件元数据；object_key 不对外返回",
+  "request": {"method": "POST", "path": "/api/v1/files", "as": "blink_user", "multipart": {"field": "file", "filename": "../../photo.php", "content_type": "text/html", "content_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP438DwHwAGgAJ/EEwb4QAAAABJRU5ErkJggg=="}},
+  "response": {"status": 201, "body": {"file": {"file_id": "<file_id>", "url": "<file_url>", "mime_type": "image/png", "size_bytes": 70, "content_hash": "9f53a393e528fdbe12274d43223ec83480f91f39c49c9c69344ef1b26ad1196b", "created_at": "<timestamp>"}}}
+}

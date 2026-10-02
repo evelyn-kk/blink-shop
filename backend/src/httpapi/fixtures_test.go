@@ -2,9 +2,11 @@ package httpapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -17,8 +19,21 @@ import (
 	"github.com/evelyn-kk/blink-shop/backend/src/seed"
 )
 
+// fixtureMultipart 是一个 multipart 文件分段；ContentType 是客户端声明的类型（服务端不信任）。
+type fixtureMultipart struct {
+	Field         string `json:"field"`
+	Filename      string `json:"filename"`
+	ContentType   string `json:"content_type"`
+	ContentBase64 string `json:"content_base64"`
+}
+
 // fixture 是 backend/fixtures/http 下的请求/响应样例；Web 和 Android 的契约测试复用同一批文件。
 type fixture struct {
+	// Setup 在正式请求前以 As 账号上传一个文件，请求路径中的 {setup_file_id} 替换为它的 file_id。
+	Setup *struct {
+		As        string            `json:"as"`
+		Multipart *fixtureMultipart `json:"multipart"`
+	} `json:"setup"`
 	Request struct {
 		Method    string            `json:"method"`
 		Path      string            `json:"path"`
@@ -26,7 +41,10 @@ type fixture struct {
 		Body      json.RawMessage   `json:"body"`       // JSON 请求体，自动带 Content-Type: application/json
 		BodyBytes int               `json:"body_bytes"` // 或者：n 字节的填充内容（测请求体上限）
 		Repeat    int               `json:"repeat"`
-		As        string            `json:"as"` // 以该演示账号登录后发请求（密码为 seed.DevPassword）
+		As        string            `json:"as"`        // 以该演示账号登录后发请求（密码为 seed.DevPassword）
+		Multipart *fixtureMultipart `json:"multipart"` // multipart/form-data 请求体
+		// ObjectStorage 为 "unavailable" 时模拟未配置对象存储。
+		ObjectStorage string `json:"object_storage"`
 	} `json:"request"`
 	Response struct {
 		Status  int               `json:"status"`
@@ -58,6 +76,14 @@ var fixturePlaceholders = map[string]func(got any, rec *httptest.ResponseRecorde
 	"<sku_id>": func(got any, _ *httptest.ResponseRecorder) bool {
 		s, ok := got.(string)
 		return ok && strings.HasPrefix(s, "sku_") && len(s) == 28
+	},
+	"<file_id>": func(got any, _ *httptest.ResponseRecorder) bool {
+		s, ok := got.(string)
+		return ok && strings.HasPrefix(s, "file_") && len(s) == 29
+	},
+	"<file_url>": func(got any, _ *httptest.ResponseRecorder) bool {
+		s, ok := got.(string)
+		return ok && strings.HasPrefix(s, fileURLPrefix+"file_") && len(s) == len(fileURLPrefix)+29
 	},
 }
 
@@ -133,6 +159,20 @@ func TestHTTPFixtures(t *testing.T) {
 				dbErr = errors.New("connection refused")
 			}
 			ts := newTestServer(t, nil, []ReadinessCheck{{Name: "mysql", Check: func(context.Context) error { return dbErr }}}, nil)
+			if fx.Request.ObjectStorage == "unavailable" {
+				ts.Server.objects = nil
+			}
+
+			path := fx.Request.Path
+			if fx.Setup != nil {
+				req := fixtureUploadRequest(t, fx.Setup.Multipart)
+				req.Header.Set("Authorization", "Bearer "+ts.login(t, fx.Setup.As, seed.DevPassword).Token)
+				rec := ts.do(req)
+				if rec.Code != 201 {
+					t.Fatalf("setup upload: %d %s", rec.Code, rec.Body)
+				}
+				path = strings.ReplaceAll(path, "{setup_file_id}", decodeBody[uploadFileResponse](t, rec).File.FileID)
+			}
 
 			var rec *httptest.ResponseRecorder
 			token := ""
@@ -149,9 +189,12 @@ func TestHTTPFixtures(t *testing.T) {
 				default:
 					body = strings.NewReader("")
 				}
-				req := httptest.NewRequest(fx.Request.Method, fx.Request.Path, body)
+				req := httptest.NewRequest(fx.Request.Method, path, body)
 				if len(fx.Request.Body) > 0 {
 					req.Header.Set("Content-Type", "application/json")
+				}
+				if fx.Request.Multipart != nil {
+					req = fixtureUploadRequest(t, fx.Request.Multipart)
 				}
 				if token != "" {
 					req.Header.Set("Authorization", "Bearer "+token)
@@ -186,4 +229,16 @@ func TestHTTPFixtures(t *testing.T) {
 			}
 		})
 	}
+}
+
+func fixtureUploadRequest(t *testing.T, m *fixtureMultipart) *http.Request {
+	t.Helper()
+	data, err := base64.StdEncoding.DecodeString(m.ContentBase64)
+	if err != nil {
+		t.Fatalf("content_base64: %v", err)
+	}
+	body, ct := multipartBody(t, filePart{field: m.Field, filename: m.Filename, contentType: m.ContentType, data: data})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/files", body)
+	req.Header.Set("Content-Type", ct)
+	return req
 }

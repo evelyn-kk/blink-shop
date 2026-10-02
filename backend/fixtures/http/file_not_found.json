@@ -1,0 +1,5 @@
+{
+  "description": "文件不存在：404 file_not_found",
+  "request": {"method": "GET", "path": "/api/v1/files/file_0123456789abcdef01234567", "as": "blink_user"},
+  "response": {"status": 404, "body": {"code": "file_not_found", "message": "文件不存在", "request_id": "<request_id>"}}
+}
