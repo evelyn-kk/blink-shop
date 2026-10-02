@@ -9,13 +9,21 @@ import { useRequest } from '../lib/useRequest';
 import type { CategoryNode } from '../types/api';
 
 const PAGE_SIZE = 12;
-// 与服务端分页上限一致（backend readPage）：超出的页码按上限请求。
+// 与服务端 readPage 的规则一致（backend/src/httpapi/catalog.go queryInt）。
 const MAX_PAGE = 100000;
+const INT64_MAX = 9223372036854775807n;
 
-/** 读取地址栏页码：非整数按 1，再限定在 [1, MAX_PAGE]。 */
+/**
+ * 按服务端规则解析地址栏页码：去掉首尾空白后必须是可选正负号加十进制数字（Go strconv.Atoi），
+ * 否则（含 1e5、0x10、1.9、超出 int64）取第 1 页；合法整数限定在 [1, MAX_PAGE]。
+ */
 function parsePage(raw: string | null): number {
-  const n = Math.trunc(Number(raw));
-  return Number.isFinite(n) ? Math.min(Math.max(n, 1), MAX_PAGE) : 1;
+  const text = (raw ?? '').trim();
+  if (!/^[+-]?\d+$/.test(text)) return 1;
+  const n = BigInt(text);
+  if (n > INT64_MAX || n < -INT64_MAX - 1n) return 1;
+  if (n < 1n) return 1;
+  return n > BigInt(MAX_PAGE) ? MAX_PAGE : Number(n);
 }
 
 function flatten(tree: CategoryNode[]): { id: string; label: string }[] {

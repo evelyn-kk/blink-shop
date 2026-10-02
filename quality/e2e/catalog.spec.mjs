@@ -172,3 +172,28 @@ test('超出范围的页码以服务端实际页码为准，并能回到有效�
   await expect(pager.getByRole('link', { name: '上一页' })).toHaveAttribute('href', '#/products?page=2');
   await expect(pager.getByRole('link', { name: '下一页' })).toHaveCount(0);
 });
+
+// 地址栏里的各种页码写法：前端请求的页码必须与服务端直接收到原始参数时使用的页码一致。
+const rawPages = ['1e5', '0x10', '1.9', '99999999999999999999', '999999999', '-5', '+1', ' 2 ', 'abc', ''];
+
+test('非法页码按服务端规则处理', async ({ page, request }) => {
+  for (const raw of rawPages) {
+    const direct = await request.get(`/api/v1/products?page_size=12&page=${encodeURIComponent(raw)}`);
+    const expected = (await direct.json()).page;
+
+    // 每个值都从空白页重新加载应用：相同的实际页码在单页应用内不会重复请求。
+    await page.goto('about:blank');
+    const listResponse = page.waitForResponse((res) => isProductList(new URL(res.url())));
+    await page.goto(`/#/products?page=${encodeURIComponent(raw)}`);
+    const body = await (await listResponse).json();
+    expect(body.page, `page=${JSON.stringify(raw)} 前端请求的页码`).toBe(expected);
+
+    if (expected === 1) {
+      await expect(page.getByText('共 6 件商品')).toBeVisible();
+    } else {
+      await expect(page.getByText(`第 ${expected} 页没有商品，共 6 件`)).toBeVisible();
+    }
+    // 第 1 页（如 1e5、0x10）不能被当成第 100000 / 16 页。
+    if (['1e5', '0x10', '1.9', '99999999999999999999'].includes(raw)) expect(expected).toBe(1);
+  }
+});
