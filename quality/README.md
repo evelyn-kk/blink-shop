@@ -7,7 +7,8 @@
 
   ```bash
   cd backend && go run ./cmd/seed                              # 需要干净的演示数据
-  RATE_LIMIT_IP_PER_MINUTE=6000 go run ./cmd/api &             # 用例都来自同一 IP
+  RATE_LIMIT_IP_PER_MINUTE=6000 RATE_LIMIT_ACCOUNT_PER_MINUTE=6000 \
+    LOGIN_ATTEMPTS_PER_MINUTE=1000 go run ./cmd/api &         # 用例都来自同一 IP、同一批账号
   cd ../frontend && npx vite --port 5173 &
   cd ../quality && npx playwright install chromium && npm run e2e
   ```

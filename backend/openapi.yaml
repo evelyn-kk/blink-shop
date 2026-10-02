@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Blink Shop API
-  version: 0.4.0
+  version: 0.5.0
   description: |
     Blink Shop 的单一接口契约。约定：
     - 所有路径前缀为 `/api/v1`，JSON 字段使用 snake_case。
@@ -36,6 +36,8 @@ tags:
     description: 注册、登录、登出与当前会话
   - name: account
     description: 个人资料、联系方式、头像与注销
+  - name: merchant
+    description: 商家后台。merchant_id 一律由登录账号决定；其他商家的资源 403，不存在或已删除 404
   - name: catalog
     description: 公开商品目录（无需登录）。只展示上架且商家营业中的商品；下架、风控、已删除商品按不存在处理
 paths:
@@ -571,6 +573,194 @@ paths:
             image/png: {}
         "404":
           $ref: "#/components/responses/NotFound"
+  /merchant/products:
+    get:
+      tags: [merchant]
+      operationId: listMerchantProducts
+      summary: 我的商品
+      description: 当前商家的全部未删除商品（含下架、风控），最近修改的在前。上游没有这个接口（上游商家页从公开列表中筛选，看不到下架商品）。
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, inactive, risk]
+        - name: keyword
+          in: query
+          required: false
+          description: 按商品名称包含匹配。
+          schema:
+            type: string
+            maxLength: 64
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 商品分页列表
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/MerchantProduct"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [merchant]
+      operationId: createMerchantProduct
+      summary: 创建商品
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductInput"
+      responses:
+        "201":
+          description: 创建成功
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MerchantProduct"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+  /merchant/products/{id}:
+    get:
+      tags: [merchant]
+      operationId: getMerchantProduct
+      summary: 我的商品详情（含全部规格和状态）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 商品
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MerchantProduct"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/MerchantProductNotFound"
+    patch:
+      tags: [merchant]
+      operationId: updateMerchantProduct
+      summary: 修改商品（部分更新）
+      description: |
+        只修改请求中出现的字段。`status` 只能在 active / inactive 之间切换（上架/下架）；风控中的商品不能自行上下架（409），
+        但可以修改资料。`skus` 提交时整体替换规格列表：带 `sku_id` 的更新该规格（必须属于本商品），不带的新增，未出现的删除。
+        只提交 `price` / `stock_quantity` 时修改默认规格。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductInput"
+      responses:
+        "200":
+          description: 修改后的商品
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MerchantProduct"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/MerchantProductNotFound"
+        "409":
+          description: 风控审核中的商品不能自行上下架（`product_under_review`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: product_under_review
+                message: 商品正在风控审核，不能自行上下架
+                request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+    delete:
+      tags: [merchant]
+      operationId: deleteMerchantProduct
+      summary: 删除商品（软删）
+      description: 状态改为 deleted（终态）。公开目录和商家列表不再出现，订单快照不受影响。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 已删除
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [product_id, status]
+                properties:
+                  product_id:
+                    type: string
+                  status:
+                    type: string
+                    const: deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/MerchantProductNotFound"
 components:
   securitySchemes:
     bearerAuth:
@@ -613,6 +803,199 @@ components:
         maximum: 100
         default: 10
   schemas:
+    MerchantProduct:
+      type: object
+      description: 商家后台看到的商品：比公开结构多状态、全部规格和时间，不含商家名。
+      required: [product_id, merchant_id, category_id, name, brand, image_url, image_urls, price, market_price, stock_quantity,
+        stock_status, tags, selling_points, recommend_reason, risk_notes, attributes, suitable_for, not_suitable_for,
+        description, status, skus, created_at, updated_at]
+      properties:
+        product_id:
+          type: string
+        merchant_id:
+          type: string
+        category_id:
+          type: string
+        name:
+          type: string
+        brand:
+          type: string
+        image_url:
+          type: string
+        image_urls:
+          type: array
+          items:
+            type: string
+        price:
+          $ref: "#/components/schemas/Money"
+        market_price:
+          $ref: "#/components/schemas/Money"
+        stock_quantity:
+          type: integer
+        stock_status:
+          $ref: "#/components/schemas/StockStatus"
+        tags:
+          type: array
+          items:
+            type: string
+        selling_points:
+          type: array
+          items:
+            type: string
+        recommend_reason:
+          type: string
+        risk_notes:
+          type: array
+          items:
+            type: string
+        attributes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductAttribute"
+        suitable_for:
+          type: array
+          items:
+            type: string
+        not_suitable_for:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive, risk]
+        skus:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductSku"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    MoneyInput:
+      description: 金额，字符串（如 "12.30"）或数字；最多两位小数，不能为负，最大 99999999.99。
+      oneOf:
+        - type: string
+        - type: number
+    ProductInput:
+      type: object
+      description: |
+        创建/修改商品。修改时缺省字段不变；创建时 name、category_id 必填，并在 `skus` 与 `price`（+ `stock_quantity`）之间二选一。
+        字符串会去掉首尾空白；列表会去掉空白项和重复项。售价 = 默认规格价格，库存 = 各规格库存之和，库存状态由数量推导，不接受客户端指定。
+      properties:
+        merchant_id:
+          type: string
+          description: 只能省略或等于当前商家，否则 400。
+        name:
+          type: string
+          maxLength: 128
+        brand:
+          type: string
+          maxLength: 64
+        category_id:
+          type: string
+          description: 必须是已有分类。
+        image_url:
+          type: string
+          description: 主图。只接受 https 链接或平台内图片（`/api/v1/assets/...`，必须存在）；不在 image_urls 中时放到最前。
+        image_urls:
+          type: array
+          maxItems: 9
+          items:
+            type: string
+        price:
+          $ref: "#/components/schemas/MoneyInput"
+        market_price:
+          description: 0 表示不展示划线价；非 0 时不能低于售价。创建时缺省等于售价。
+          $ref: "#/components/schemas/MoneyInput"
+        stock_quantity:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        stock_status:
+          type: string
+          deprecated: true
+          description: 上游字段，忽略。
+        tags:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            maxLength: 16
+        selling_points:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            maxLength: 64
+        risk_notes:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            maxLength: 64
+        suitable_for:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            maxLength: 32
+        not_suitable_for:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            maxLength: 32
+        attributes:
+          type: array
+          maxItems: 30
+          description: key、value 必填（全空的行忽略），key ≤16、value ≤64、unit ≤8 个字符。
+          items:
+            $ref: "#/components/schemas/ProductAttribute"
+        recommend_reason:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 5000
+        status:
+          type: string
+          enum: [active, inactive]
+          description: 创建时缺省 active。
+        skus:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/SkuInput"
+    SkuInput:
+      type: object
+      required: [sku_name, price, stock_quantity]
+      properties:
+        sku_id:
+          type: string
+          description: 修改已有规格时填写，必须属于本商品；创建商品时不能填写。
+        sku_name:
+          type: string
+          maxLength: 64
+        price:
+          $ref: "#/components/schemas/MoneyInput"
+        stock_quantity:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        specs:
+          type: object
+          maxProperties: 10
+          additionalProperties:
+            type: string
+            maxLength: 32
+        is_default:
+          type: boolean
+          description: 至多一个；都不是时第一个为默认。
     Money:
       type: string
       pattern: "^[0-9]+\\.[0-9]{2}$"
@@ -987,12 +1370,16 @@ components:
             机器可读错误码。通用错误码：`invalid_argument`、`invalid_json`、`unauthorized`、`forbidden`、`not_found`、
             `method_not_allowed`、`conflict`、`payload_too_large`、`unsupported_media_type`、`rate_limited`、
             `internal_error`、`not_ready`、`timeout`。认证相关：`invalid_credential`、`username_exists`、
-            `account_inactive`、`account_risk`。目录：`product_not_found`。
+            `account_inactive`、`account_risk`。目录：`product_not_found`。商家：`product_under_review`。
           examples: [not_found]
         message:
           type: string
           description: 可直接展示给用户的中文说明。
           examples: [接口不存在]
+        field:
+          type: string
+          description: 校验失败的请求字段，如 `price`、`skus[1].sku_name`（数组下标从 0 开始）；与具体字段无关的错误不返回。
+          examples: ["skus[0].price"]
         request_id:
           type: string
           description: 请求追踪 ID，与响应头 `X-Request-ID` 一致。
@@ -1039,6 +1426,19 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Account"
+    MerchantProductNotFound:
+      description: 商品不存在或已删除（`product_not_found`）
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: product_not_found
+            message: 商品不存在或已删除
+            request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
     ProductNotFound:
       description: 商品不存在，或已下架/风控/删除，或所属商家已停用（`product_not_found`）
       headers:

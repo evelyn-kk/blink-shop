@@ -1,0 +1,5 @@
+{
+  "description": "删除商品：状态改为 deleted（软删），公开目录和商家列表不再出现",
+  "request": {"method": "DELETE", "path": "/api/v1/merchant/products/p_seed_mouse", "as": "blink_merchant"},
+  "response": {"status": 200, "body": {"product_id": "p_seed_mouse", "status": "deleted"}}
+}

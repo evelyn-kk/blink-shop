@@ -28,7 +28,7 @@ type okResponse struct {
 }
 
 func invalidArgument(message string) *APIError {
-	return &APIError{http.StatusBadRequest, "invalid_argument", message}
+	return &APIError{Status: http.StatusBadRequest, Code: "invalid_argument", Message: message}
 }
 
 // audit 写一条审计日志。只记录动作和标识，不记录密码、token、手机号、邮箱等内容。

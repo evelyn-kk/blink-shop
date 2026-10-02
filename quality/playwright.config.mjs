@@ -6,6 +6,8 @@ export default defineConfig({
   testDir: './e2e',
   outputDir: './reports/e2e/artifacts',
   fullyParallel: false,
+  // 串行执行：商家用例会临时创建商品，目录用例断言商品总数。
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: [['list'], ['html', { outputFolder: './reports/e2e/html', open: 'never' }]],

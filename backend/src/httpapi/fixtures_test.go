@@ -51,6 +51,14 @@ var fixturePlaceholders = map[string]func(got any, rec *httptest.ResponseRecorde
 		s, ok := got.(string)
 		return ok && strings.HasPrefix(s, "acct_")
 	},
+	"<product_id>": func(got any, _ *httptest.ResponseRecorder) bool {
+		s, ok := got.(string)
+		return ok && strings.HasPrefix(s, "p_") && len(s) == 26
+	},
+	"<sku_id>": func(got any, _ *httptest.ResponseRecorder) bool {
+		s, ok := got.(string)
+		return ok && strings.HasPrefix(s, "sku_") && len(s) == 28
+	},
 }
 
 // matchFixture 递归比较 fixture 期望值与实际 JSON，返回第一处不一致的路径。
@@ -76,6 +84,17 @@ func matchFixture(want, got any, rec *httptest.ResponseRecorder, path string) st
 		}
 		for k, v := range w {
 			if msg := matchFixture(v, g[k], rec, path+"."+k); msg != "" {
+				return msg
+			}
+		}
+		return ""
+	case []any:
+		g, ok := got.([]any)
+		if !ok || len(g) != len(w) {
+			return fmt.Sprintf("%s = %v, want %d items", path, got, len(w))
+		}
+		for i := range w {
+			if msg := matchFixture(w[i], g[i], rec, fmt.Sprintf("%s[%d]", path, i)); msg != "" {
 				return msg
 			}
 		}

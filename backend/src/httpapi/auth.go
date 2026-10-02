@@ -12,16 +12,16 @@ import (
 
 // 认证与授权相关错误。
 var (
-	ErrTokenInvalid      = &APIError{http.StatusUnauthorized, "unauthorized", "登录已失效，请重新登录"}
-	ErrInvalidCredential = &APIError{http.StatusUnauthorized, "invalid_credential", "账号或密码错误"}
-	ErrAccountInactive   = &APIError{http.StatusForbidden, "account_inactive", "账号已停用，请联系平台处理"}
-	ErrAccountRisk       = &APIError{http.StatusForbidden, "account_risk", "账号存在风险，暂时只能浏览"}
-	ErrLoginInactive     = &APIError{http.StatusForbidden, "account_inactive", "账号已停用，无法登录"}
-	ErrLoginRisk         = &APIError{http.StatusForbidden, "account_risk", "账号存在风险，暂时无法登录"}
-	ErrRoleForbidden     = &APIError{http.StatusForbidden, "forbidden", "当前账号无权访问"}
-	ErrNotResourceOwner  = &APIError{http.StatusForbidden, "forbidden", "不能操作其他商家的资源"}
-	ErrUsernameExists    = &APIError{http.StatusConflict, "username_exists", "账号已存在"}
-	ErrLoginRateLimited  = &APIError{http.StatusTooManyRequests, "rate_limited", "登录尝试过于频繁，请稍后再试"}
+	ErrTokenInvalid      = &APIError{Status: http.StatusUnauthorized, Code: "unauthorized", Message: "登录已失效，请重新登录"}
+	ErrInvalidCredential = &APIError{Status: http.StatusUnauthorized, Code: "invalid_credential", Message: "账号或密码错误"}
+	ErrAccountInactive   = &APIError{Status: http.StatusForbidden, Code: "account_inactive", Message: "账号已停用，请联系平台处理"}
+	ErrAccountRisk       = &APIError{Status: http.StatusForbidden, Code: "account_risk", Message: "账号存在风险，暂时只能浏览"}
+	ErrLoginInactive     = &APIError{Status: http.StatusForbidden, Code: "account_inactive", Message: "账号已停用，无法登录"}
+	ErrLoginRisk         = &APIError{Status: http.StatusForbidden, Code: "account_risk", Message: "账号存在风险，暂时无法登录"}
+	ErrRoleForbidden     = &APIError{Status: http.StatusForbidden, Code: "forbidden", Message: "当前账号无权访问"}
+	ErrNotResourceOwner  = &APIError{Status: http.StatusForbidden, Code: "forbidden", Message: "不能操作其他商家的资源"}
+	ErrUsernameExists    = &APIError{Status: http.StatusConflict, Code: "username_exists", Message: "账号已存在"}
+	ErrLoginRateLimited  = &APIError{Status: http.StatusTooManyRequests, Code: "rate_limited", Message: "登录尝试过于频繁，请稍后再试"}
 )
 
 // access 是一条路由的访问规则：谁能访问，以及非 active 账户能否访问。

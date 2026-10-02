@@ -1,0 +1,5 @@
+{
+  "description": "商家修改其他商家的商品：403（读取、删除同样 403）；不存在或已删除的商品为 404",
+  "request": {"method": "PATCH", "path": "/api/v1/merchant/products/p_seed_nova", "as": "blink_merchant2", "body": {"name": "篡改"}},
+  "response": {"status": 403, "body": {"code": "forbidden", "message": "不能操作其他商家的资源", "request_id": "<request_id>"}}
+}

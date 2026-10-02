@@ -21,10 +21,10 @@ const (
 )
 
 var (
-	ErrAvatarTooLarge = &APIError{http.StatusRequestEntityTooLarge, "payload_too_large", "头像不能超过 2MB"}
-	ErrAvatarType     = &APIError{http.StatusBadRequest, "invalid_argument", "头像仅支持 JPG、PNG 或 WebP"}
-	ErrAvatarMissing  = &APIError{http.StatusBadRequest, "invalid_argument", "请选择头像文件"}
-	ErrAvatarNotFound = &APIError{http.StatusNotFound, "not_found", "头像不存在"}
+	ErrAvatarTooLarge = &APIError{Status: http.StatusRequestEntityTooLarge, Code: "payload_too_large", Message: "头像不能超过 2MB"}
+	ErrAvatarType     = &APIError{Status: http.StatusBadRequest, Code: "invalid_argument", Message: "头像仅支持 JPG、PNG 或 WebP"}
+	ErrAvatarMissing  = &APIError{Status: http.StatusBadRequest, Code: "invalid_argument", Message: "请选择头像文件"}
+	ErrAvatarNotFound = &APIError{Status: http.StatusNotFound, Code: "not_found", Message: "头像不存在"}
 )
 
 // 头像文件名：<account_id>_<16 位 hex>.<ext>。账户 ID 是文件名前缀，用来校验头像归属。
@@ -129,7 +129,7 @@ func (s *Server) handleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 // readAvatarPart 流式读取第一个名为 file 的分段，最多 2MB；不把整个表单读进内存或临时文件。
 func readAvatarPart(r *http.Request) ([]byte, error) {
 	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "multipart/form-data" {
-		return nil, &APIError{http.StatusUnsupportedMediaType, "unsupported_media_type", "请求体必须是 multipart/form-data"}
+		return nil, &APIError{Status: http.StatusUnsupportedMediaType, Code: "unsupported_media_type", Message: "请求体必须是 multipart/form-data"}
 	}
 	mr, err := r.MultipartReader()
 	if err != nil {

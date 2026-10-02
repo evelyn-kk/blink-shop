@@ -1,4 +1,4 @@
-import type { Money, Promotion, StockStatus } from '../types/api';
+import type { Money, ProductStatus, Promotion, StockStatus } from '../types/api';
 
 const money = new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' });
 
@@ -38,4 +38,10 @@ export const scopeLabel: Record<Promotion['scope'], string> = {
   merchant: '店铺',
   product: '单品',
   category: '品类',
+};
+
+export const productStatusLabel: Record<ProductStatus, string> = {
+  active: '上架中',
+  inactive: '已下架',
+  risk: '风控审核中',
 };

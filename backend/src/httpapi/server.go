@@ -107,6 +107,12 @@ func (s *Server) routes() {
 	s.handle("GET /api/v1/products/{id}/skus", accessPublic, s.handleListSKUs)
 	s.handle("GET /api/v1/products/{id}/reviews", accessPublic, s.handleListReviews)
 	s.handle("GET /api/v1/promotions", accessPublic, s.handleListPromotions)
+
+	s.handle("GET /api/v1/merchant/products", accessMerchant, s.handleListMerchantProducts)
+	s.handle("POST /api/v1/merchant/products", accessMerchant, s.handleCreateMerchantProduct)
+	s.handle("GET /api/v1/merchant/products/{id}", accessMerchant, s.handleGetMerchantProduct)
+	s.handle("PATCH /api/v1/merchant/products/{id}", accessMerchant, s.handleUpdateMerchantProduct)
+	s.handle("DELETE /api/v1/merchant/products/{id}", accessMerchant, s.handleDeleteMerchantProduct)
 }
 
 // Handler 返回带完整中间件链的 handler。顺序（外 → 内）：
@@ -175,7 +181,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		if err := c.Check(ctx); err != nil {
 			s.logger.WarnContext(r.Context(), "readiness check failed",
 				"request_id", requestIDFromContext(r.Context()), "check", c.Name, "error", err)
-			writeError(w, &APIError{http.StatusServiceUnavailable, ErrNotReady.Code, "依赖 " + c.Name + " 不可用"})
+			writeError(w, &APIError{Status: http.StatusServiceUnavailable, Code: ErrNotReady.Code, Message: "依赖 " + c.Name + " 不可用"})
 			return
 		}
 		checks[c.Name] = "ok"

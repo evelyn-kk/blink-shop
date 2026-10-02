@@ -1,0 +1,29 @@
+{
+  "description": "商家创建商品：merchant_id 由登录账号决定；售价取默认规格、库存为各规格之和、库存状态由数量推导",
+  "request": {"method": "POST", "path": "/api/v1/merchant/products", "as": "blink_merchant", "body": {
+    "name": "Blink 轻薄键盘 K3", "brand": "Blink", "category_id": "c_keyboard",
+    "image_urls": ["/api/v1/assets/catalog/products/p_seed_keyboard.png"], "market_price": "299",
+    "tags": ["轻薄"], "selling_points": ["矮轴"], "attributes": [{"key": "键数", "value": "84", "unit": "键"}],
+    "skus": [
+      {"sku_name": "K3 白色", "price": "199", "stock_quantity": 30, "specs": {"颜色": "白"}, "is_default": true},
+      {"sku_name": "K3 黑色", "price": "209", "stock_quantity": 0, "specs": {"颜色": "黑"}}
+    ]
+  }},
+  "response": {"status": 201, "body": {
+    "product_id": "<product_id>", "merchant_id": "m_seed_digital", "category_id": "c_keyboard",
+    "name": "Blink 轻薄键盘 K3", "brand": "Blink",
+    "image_url": "/api/v1/assets/catalog/products/p_seed_keyboard.png",
+    "image_urls": ["/api/v1/assets/catalog/products/p_seed_keyboard.png"],
+    "price": "199.00", "market_price": "299.00", "stock_quantity": 30, "stock_status": "in_stock",
+    "tags": ["轻薄"], "selling_points": ["矮轴"], "recommend_reason": "", "risk_notes": [],
+    "attributes": [{"key": "键数", "value": "84", "unit": "键"}], "suitable_for": [], "not_suitable_for": [],
+    "description": "", "status": "active",
+    "skus": [
+      {"sku_id": "<sku_id>", "product_id": "<product_id>", "sku_name": "K3 白色", "price": "199.00", "stock_quantity": 30,
+       "stock_status": "in_stock", "specs": {"颜色": "白"}, "is_default": true},
+      {"sku_id": "<sku_id>", "product_id": "<product_id>", "sku_name": "K3 黑色", "price": "209.00", "stock_quantity": 0,
+       "stock_status": "out_of_stock", "specs": {"颜色": "黑"}, "is_default": false}
+    ],
+    "created_at": "<timestamp>", "updated_at": "<timestamp>"
+  }}
+}

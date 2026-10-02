@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // ---------- 身份 ----------
 
@@ -97,6 +100,33 @@ type Product struct {
 
 // Sellable 商品处于上架状态且有库存。
 func (p Product) Sellable() bool { return p.Status == ProductActive && p.StockQuantity > 0 }
+
+// ErrSKUInvariant 表示 SKU 列表不满足“至少一个、恰好一个默认、属于本商品”。
+var ErrSKUInvariant = errors.New("商品必须有至少一个 SKU，且恰好一个默认 SKU")
+
+// SyncFromSKUs 按 SKU 重新计算商品的派生字段：售价 = 默认 SKU 价格，库存 = 各 SKU 库存之和，
+// 库存状态由数量推导（商品和每个 SKU 都是）。写库前调用，保证这些字段不会与 SKU 不一致。
+func (p *Product) SyncFromSKUs() error {
+	defaults, total := 0, 0
+	for i := range p.SKUs {
+		sku := &p.SKUs[i]
+		if sku.ProductID != p.ProductID {
+			return ErrSKUInvariant
+		}
+		sku.StockStatus = StockStatusOf(sku.StockQuantity)
+		total += sku.StockQuantity
+		if sku.IsDefault {
+			defaults++
+			p.Price = sku.Price
+		}
+	}
+	if len(p.SKUs) == 0 || defaults != 1 {
+		return ErrSKUInvariant
+	}
+	p.StockQuantity = total
+	p.StockStatus = StockStatusOf(total)
+	return nil
+}
 
 // ProductSKU 是库存粒度：(product_id, sku_id)。
 type ProductSKU struct {

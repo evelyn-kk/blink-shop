@@ -14,7 +14,7 @@ import (
 	"github.com/evelyn-kk/blink-shop/backend/src/store"
 )
 
-var ErrProductNotFound = &APIError{http.StatusNotFound, "product_not_found", "商品不存在或已下架"}
+var ErrProductNotFound = &APIError{Status: http.StatusNotFound, Code: "product_not_found", Message: "商品不存在或已下架"}
 
 // ---------- 分页 ----------
 
@@ -377,7 +377,7 @@ func (s *Server) handleGetAsset(w http.ResponseWriter, r *http.Request) {
 	name := path.Clean(r.PathValue("path"))
 	info, err := fs.Stat(assets.FS, name)
 	if err != nil || info.IsDir() || !fs.ValidPath(name) {
-		writeError(w, &APIError{http.StatusNotFound, "not_found", "资源不存在"})
+		writeError(w, &APIError{Status: http.StatusNotFound, Code: "not_found", Message: "资源不存在"})
 		return
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")

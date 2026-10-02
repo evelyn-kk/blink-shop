@@ -1,0 +1,8 @@
+{
+  "description": "字段校验失败：400 invalid_argument，field 指出出错字段（数组下标从 0 开始），表单据此定位",
+  "request": {"method": "POST", "path": "/api/v1/merchant/products", "as": "blink_merchant", "body": {
+    "name": "坏价格", "category_id": "c_mouse",
+    "skus": [{"sku_name": "默认", "price": "1.234", "stock_quantity": 1}]
+  }},
+  "response": {"status": 400, "body": {"code": "invalid_argument", "message": "金额格式不正确，最多两位小数且不能为负", "field": "skus[0].price", "request_id": "<request_id>"}}
+}

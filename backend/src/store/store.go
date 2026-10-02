@@ -58,6 +58,41 @@ type ProductSearch struct {
 	Page       Page
 }
 
+// MerchantProductQuery 是商家查看自己商品的条件。Status 为空表示全部（不含 deleted）；Keyword 按名称包含匹配。
+type MerchantProductQuery struct {
+	MerchantID string
+	Status     domain.ProductStatus
+	Keyword    string
+	Page       Page
+}
+
+// PrepareProduct 是两种实现写入商品前共用的处理：补齐 ID、校验 SKU 不变量并重算派生字段。
+func PrepareProduct(p *domain.Product) error {
+	if p.ProductID == "" {
+		p.ProductID = domain.NewID(domain.PrefixProduct)
+	}
+	for i := range p.SKUs {
+		if p.SKUs[i].SkuID == "" {
+			p.SKUs[i].SkuID = domain.NewID(domain.PrefixSKU)
+		}
+		p.SKUs[i].ProductID = p.ProductID
+	}
+	if p.MerchantID == "" || p.CategoryID == "" || p.Name == "" {
+		return fmt.Errorf("%w: 商品缺少商家、分类或名称", ErrInvalid)
+	}
+	seen := map[string]bool{}
+	for _, sku := range p.SKUs {
+		if seen[sku.SkuID] {
+			return fmt.Errorf("%w: SKU %s 重复", ErrInvalid, sku.SkuID)
+		}
+		seen[sku.SkuID] = true
+	}
+	if err := p.SyncFromSKUs(); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	return nil
+}
+
 // CatalogProduct 是带商家名称的商品，SKUs 已加载（默认 SKU 在前）。
 type CatalogProduct struct {
 	domain.Product
@@ -155,6 +190,15 @@ type Store interface {
 	ListVisibleReviews(ctx context.Context, productID string, page Page) ([]PublicReview, int, error)
 	// ListActivePromotions 只返回 active、在有效期内且所属商家（如有）为 active 的促销，按 created_at、promotion_id 倒序。
 	ListActivePromotions(ctx context.Context, q PromotionQuery) ([]domain.PromotionRule, int, error)
+
+	// 商家商品管理。归属和状态规则由调用方校验；这里保证写入的商品与 SKU 一致（见 Product.SyncFromSKUs）。
+	// ListMerchantProducts 不含 deleted，按 updated_at、product_id 倒序，SKUs 已加载。
+	ListMerchantProducts(ctx context.Context, q MerchantProductQuery) ([]domain.Product, int, error)
+	// CreateProduct 在一个事务内写入商品及其 SKU；ProductID / SKU ID 为空时自动生成。
+	CreateProduct(ctx context.Context, p domain.Product) (domain.Product, error)
+	// UpdateProduct 在事务中锁定商品行并加载 SKU，交给 fn 修改后整体写回：SKU 按 ID 更新或新增，
+	// 不在新列表中的删除。fn 返回错误或写回失败时整体回滚。商品不存在返回 ErrNotFound。
+	UpdateProduct(ctx context.Context, productID string, fn func(p *domain.Product) error) (domain.Product, error)
 
 	// ApplySeed 在一个事务内写入开发种子：按主键“不存在才插入”，可重复执行；违反其他唯一键时整体回滚并返回 ErrConflict。
 	ApplySeed(ctx context.Context, data SeedData) (SeedResult, error)

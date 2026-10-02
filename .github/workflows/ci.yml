@@ -117,6 +117,8 @@ jobs:
       API_ADDR: 127.0.0.1:8080
       # 所有用例来自同一 IP，放宽 IP 限流，避免误触 429。
       RATE_LIMIT_IP_PER_MINUTE: "6000"
+      RATE_LIMIT_ACCOUNT_PER_MINUTE: "6000"
+      LOGIN_ATTEMPTS_PER_MINUTE: "1000"
       VITE_API_PROXY_TARGET: http://127.0.0.1:8080
     steps:
       - uses: actions/checkout@v4

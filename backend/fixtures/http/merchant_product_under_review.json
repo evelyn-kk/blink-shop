@@ -1,0 +1,5 @@
+{
+  "description": "风控审核中的商品不能自行上下架（可以修改资料）",
+  "request": {"method": "PATCH", "path": "/api/v1/merchant/products/p_seed_powerbank", "as": "blink_merchant", "body": {"status": "active"}},
+  "response": {"status": 409, "body": {"code": "product_under_review", "message": "商品正在风控审核，不能自行上下架", "request_id": "<request_id>"}}
+}
