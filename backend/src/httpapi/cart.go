@@ -366,16 +366,22 @@ func (s *Server) handleAddCartItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, ErrOutOfStock)
 		return
 	}
-	item, err := s.store.AddCartItem(r.Context(), acc.AccountID, product.ProductID, sku.SkuID, func(current, lines int) (int, error) {
-		if current == 0 && lines >= store.MaxCartLines {
+	// 商品和库存以事务内重新读取的状态为准（line），上面的检查只用于尽早给出提示。
+	item, err := s.store.AddCartItem(r.Context(), acc.AccountID, product.ProductID, sku.SkuID, func(line store.CartLine, lines int) (int, error) {
+		if line.Quantity == 0 && lines >= store.MaxCartLines {
 			return 0, ErrCartFull
 		}
-		next := current + qty
+		next := line.Quantity + qty
 		if next > maxLineQuantity {
 			return 0, quantityLimit()
 		}
-		if next > sku.StockQuantity {
-			return 0, insufficientStock(sku.StockQuantity, current)
+		switch reason := productReason(line); {
+		case reason == "已售罄":
+			return 0, ErrOutOfStock
+		case reason != "":
+			return 0, ErrProductNotFound
+		case next > line.StockQuantity:
+			return 0, insufficientStock(line.StockQuantity, line.Quantity)
 		}
 		return next, nil
 	})
@@ -433,23 +439,9 @@ func (s *Server) handleUpdateCartItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	lines, err := s.store.ListCartLines(r.Context(), acc.AccountID)
-	if err != nil {
-		s.storeFailed(w, r, "load cart", err)
-		return
-	}
-	var line *store.CartLine
-	for i := range lines {
-		if lines[i].CartItemID == id {
-			line = &lines[i]
-		}
-	}
-	if line == nil {
-		writeError(w, ErrCartItemNotFound)
-		return
-	}
-	updated, err := s.store.UpdateCartItem(r.Context(), acc.AccountID, id, func(it *domain.CartItem) error {
-		// 在行锁内按“更新后的状态”判断，并发修改不会绕过检查。
+	// line 是 Store 在购物车行锁所在的事务内重新读取（并加共享锁）的商品、店铺和规格状态：
+	// 商家并发修改商品要么已提交（这里能读到），要么等本事务结束，不会按过期状态放行。
+	updated, err := s.store.UpdateCartItem(r.Context(), acc.AccountID, id, func(it *domain.CartItem, line store.CartLine) error {
 		quantityChanged := in.Quantity != nil && *in.Quantity != it.Quantity
 		if in.Quantity != nil {
 			it.Quantity = *in.Quantity
@@ -459,7 +451,7 @@ func (s *Server) handleUpdateCartItem(w http.ResponseWriter, r *http.Request) {
 		}
 		// 改数量，或更新后仍为选中：商品必须可以购买，数量不能超过库存。只取消选中（或保持未选中）总是允许。
 		if quantityChanged || it.Selected {
-			return checkPurchasable(*line, it.Quantity)
+			return checkPurchasable(line, it.Quantity)
 		}
 		return nil
 	})

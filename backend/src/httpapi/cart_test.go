@@ -197,7 +197,7 @@ func TestAddCartItemRejected(t *testing.T) {
 	// 购物车满 100 种商品后不能再加新商品，但已有的商品仍可加数量。
 	full := ts.login(t, seed.User2Username, seed.DevPassword).Token
 	for i := 0; i < store.MaxCartLines; i++ {
-		if _, err := ts.mem.AddCartItem(context.Background(), seed.User2ID, fmt.Sprintf("p_filler_%d", i), "sku_x", func(int, int) (int, error) { return 1, nil }); err != nil {
+		if _, err := ts.mem.AddCartItem(context.Background(), seed.User2ID, fmt.Sprintf("p_filler_%d", i), "sku_x", func(store.CartLine, int) (int, error) { return 1, nil }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -506,4 +506,74 @@ func TestRelistedItemKeepsSelection(t *testing.T) {
 	if v := get(); !v.Selected || !v.Available || v.PayAmount.String() != "129.00" {
 		t.Fatalf("relisted = %+v", v)
 	}
+}
+
+// changeBeforeCartTx 在购物车事务开始前修改商品，模拟“处理器读取商品之后、购物车事务之前，商家改了商品”。
+// 处理器必须用 Store 在事务内重新读取的状态判断，而不是之前读到的快照（REV-009）。
+type changeBeforeCartTx struct {
+	store.Store
+	change func()
+}
+
+func (c *changeBeforeCartTx) AddCartItem(ctx context.Context, accountID, productID, skuID string, fn func(store.CartLine, int) (int, error)) (domain.CartItem, error) {
+	c.change()
+	return c.Store.AddCartItem(ctx, accountID, productID, skuID, fn)
+}
+
+func (c *changeBeforeCartTx) UpdateCartItem(ctx context.Context, accountID, id string, fn func(*domain.CartItem, store.CartLine) error) (domain.CartItem, error) {
+	c.change()
+	return c.Store.UpdateCartItem(ctx, accountID, id, fn)
+}
+
+func TestCartChecksFreshProductState(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range []struct {
+		name   string
+		change func(p *domain.Product)
+		code   string
+	}{
+		{"delisted", func(p *domain.Product) { p.Status = domain.ProductInactive }, "item_unavailable"},
+		{"sku removed", func(p *domain.Product) {
+			p.SKUs = []domain.ProductSKU{{SkuName: "替换", Price: domain.MustMoney("10"), StockQuantity: 9, IsDefault: true, Specs: map[string]string{}}}
+		}, "item_unavailable"},
+		{"sold out", func(p *domain.Product) { p.SKUs[0].StockQuantity = 0 }, "out_of_stock"},
+		{"stock lowered", func(p *domain.Product) { p.SKUs[0].StockQuantity = 1 }, "insufficient_stock"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ts := newTestServer(t, nil, nil, nil)
+			tok := ts.login(t, seed.UserUsername, seed.DevPassword).Token
+			item := itemOf(ts.addToCart(t, tok, map[string]any{"product_id": "p_seed_lamp", "quantity": 2}), "p_seed_lamp")
+			expectStatus(t, ts.call(t, http.MethodPatch, cartPath+"/items/"+item.CartItemID, tok, map[string]any{"selected": false}), 200, "")
+			once := sync.Once{}
+			ts.Server.store = &changeBeforeCartTx{Store: ts.mem, change: func() {
+				once.Do(func() {
+					if _, err := ts.mem.UpdateProduct(ctx, "p_seed_lamp", func(p *domain.Product) error { c.change(p); return nil }); err != nil {
+						t.Error(err)
+					}
+				})
+			}}
+			expectStatus(t, ts.call(t, http.MethodPatch, cartPath+"/items/"+item.CartItemID, tok, map[string]any{"selected": true}), http.StatusConflict, c.code)
+			lines, _ := ts.mem.ListCartLines(ctx, seed.UserID)
+			if len(lines) != 1 || lines[0].Selected || lines[0].Quantity != 2 {
+				t.Fatalf("cart changed: %+v", lines)
+			}
+		})
+	}
+
+	// 加购：处理器预检时库存充足，事务内读到库存已降低，按新库存拒绝且不写入。
+	ts := newTestServer(t, nil, nil, nil)
+	tok := ts.login(t, seed.UserUsername, seed.DevPassword).Token
+	ts.Server.store = &changeBeforeCartTx{Store: ts.mem, change: func() {
+		if _, err := ts.mem.UpdateProduct(ctx, "p_seed_mouse", func(p *domain.Product) error { p.SKUs[0].StockQuantity = 2; return nil }); err != nil {
+			t.Error(err)
+		}
+	}}
+	expectStatus(t, ts.call(t, http.MethodPost, cartPath+"/items", tok, map[string]any{"product_id": "p_seed_mouse", "quantity": 3}), http.StatusConflict, "insufficient_stock")
+	if lines, _ := ts.mem.ListCartLines(ctx, seed.UserID); len(lines) != 0 {
+		t.Fatalf("add wrote %+v", lines)
+	}
+	ts.Server.store = &changeBeforeCartTx{Store: ts.mem, change: func() {
+		_, _ = ts.mem.UpdateProduct(ctx, "p_seed_mouse", func(p *domain.Product) error { p.Status = domain.ProductInactive; return nil })
+	}}
+	expectStatus(t, ts.call(t, http.MethodPost, cartPath+"/items", tok, map[string]any{"product_id": "p_seed_mouse"}), http.StatusNotFound, "product_not_found")
 }

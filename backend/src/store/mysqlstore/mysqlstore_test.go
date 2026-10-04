@@ -472,7 +472,7 @@ func TestConcurrentAddCartNoDeadlock(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				_, errs[i] = s.AddCartItem(ctx, seed.UserID, "p_round", sku, func(current, _ int) (int, error) { return current + 1, nil })
+				_, errs[i] = s.AddCartItem(ctx, seed.UserID, "p_round", sku, func(line store.CartLine, _ int) (int, error) { return line.Quantity + 1, nil })
 			}()
 		}
 		wg.Wait()

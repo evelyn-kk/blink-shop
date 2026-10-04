@@ -17,17 +17,7 @@ func (s *Store) ListCartLines(ctx context.Context, accountID string) ([]store.Ca
 		if it.AccountID != accountID {
 			continue
 		}
-		l := store.CartLine{CartItem: it}
-		if p, ok := s.data.products[it.ProductID]; ok {
-			l.ProductName, l.ProductStatus, l.ImageURL, l.CategoryID, l.MerchantID = p.Name, p.Status, p.ImageURL, p.CategoryID, p.MerchantID
-			if m, ok := s.data.merchants[p.MerchantID]; ok {
-				l.MerchantName, l.MerchantStatus = m.Name, m.Status
-			}
-		}
-		if sku, ok := s.data.skus[it.SkuID]; ok && sku.ProductID == it.ProductID {
-			l.SkuFound, l.SkuName, l.UnitPrice, l.StockQuantity = true, sku.SkuName, sku.Price, sku.StockQuantity
-		}
-		out = append(out, l)
+		out = append(out, s.lineState(it))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
@@ -41,7 +31,22 @@ func (s *Store) ListCartLines(ctx context.Context, accountID string) ([]store.Ca
 	return out, nil
 }
 
-func (s *Store) AddCartItem(ctx context.Context, accountID, productID, skuID string, fn func(current, lines int) (int, error)) (domain.CartItem, error) {
+// lineState 返回购物车项及其商品、店铺、规格的当前状态。调用方持有锁。
+func (s *Store) lineState(it domain.CartItem) store.CartLine {
+	l := store.CartLine{CartItem: it}
+	if p, ok := s.data.products[it.ProductID]; ok {
+		l.ProductName, l.ProductStatus, l.ImageURL, l.CategoryID, l.MerchantID = p.Name, p.Status, p.ImageURL, p.CategoryID, p.MerchantID
+		if m, ok := s.data.merchants[p.MerchantID]; ok {
+			l.MerchantName, l.MerchantStatus = m.Name, m.Status
+		}
+	}
+	if sku, ok := s.data.skus[it.SkuID]; ok && sku.ProductID == it.ProductID {
+		l.SkuFound, l.SkuName, l.UnitPrice, l.StockQuantity = true, sku.SkuName, sku.Price, sku.StockQuantity
+	}
+	return l
+}
+
+func (s *Store) AddCartItem(ctx context.Context, accountID, productID, skuID string, fn func(line store.CartLine, lines int) (int, error)) (domain.CartItem, error) {
 	defer s.lock(ctx)()
 	if _, ok := s.data.accounts[accountID]; !ok {
 		return domain.CartItem{}, store.ErrNotFound
@@ -62,7 +67,7 @@ func (s *Store) AddCartItem(ctx context.Context, accountID, productID, skuID str
 	if existing != nil {
 		current = existing.Quantity
 	}
-	qty, err := fn(current, lines)
+	qty, err := fn(s.lineState(domain.CartItem{AccountID: accountID, ProductID: productID, SkuID: skuID, Quantity: current}), lines)
 	if err != nil {
 		return domain.CartItem{}, err
 	}
@@ -81,14 +86,14 @@ func (s *Store) AddCartItem(ctx context.Context, accountID, productID, skuID str
 	return it, nil
 }
 
-func (s *Store) UpdateCartItem(ctx context.Context, accountID, cartItemID string, fn func(item *domain.CartItem) error) (domain.CartItem, error) {
+func (s *Store) UpdateCartItem(ctx context.Context, accountID, cartItemID string, fn func(item *domain.CartItem, line store.CartLine) error) (domain.CartItem, error) {
 	defer s.lock(ctx)()
 	before, ok := s.data.cartItems[cartItemID]
 	if !ok || before.AccountID != accountID {
 		return domain.CartItem{}, store.ErrNotFound
 	}
 	it := before
-	if err := fn(&it); err != nil {
+	if err := fn(&it, s.lineState(before)); err != nil {
 		return domain.CartItem{}, err
 	}
 	if it.Quantity <= 0 {

@@ -298,12 +298,13 @@ type Store interface {
 	// 购物车。所有方法都按 accountID 限定，访问不到其他账户的购物车项（返回 ErrNotFound）。
 	// ListCartLines 按加入时间（同一毫秒加入的按商品、规格 ID）顺序返回购物车项及其商品、规格、店铺的当前信息（商品或规格可能已失效）。
 	ListCartLines(ctx context.Context, accountID string) ([]CartLine, error)
-	// AddCartItem 原子加购：在事务中锁定 (账户, 商品, 规格) 对应的行，fn 拿到当前数量（没有时为 0）和购物车现有行数，
-	// 返回新的数量；fn 出错时不做任何修改。同一账户的加购串行执行：并发加购同一规格不会产生重复行，数量也不会丢失。
-	// 账户不存在返回 ErrNotFound。
-	AddCartItem(ctx context.Context, accountID, productID, skuID string, fn func(current, lines int) (int, error)) (domain.CartItem, error)
-	// UpdateCartItem 锁定本人的购物车项交给 fn 修改数量和选中状态。
-	UpdateCartItem(ctx context.Context, accountID, cartItemID string, fn func(item *domain.CartItem) error) (domain.CartItem, error)
+	// AddCartItem 原子加购：在事务中锁定账户行和 (账户, 商品, 规格) 对应的购物车行，并在同一事务中重新读取商品、店铺和规格的
+	// 当前状态（MySQL 对这些行加共享锁，商家并发修改商品要等本事务结束，或在本事务读取前已提交）。fn 收到这一状态
+	// （line.Quantity 为当前数量，没有该行时为 0）和购物车现有行数，返回新的数量；fn 出错时不做任何修改。
+	// 同一账户的加购串行执行：不会产生重复行、丢失数量或死锁。账户不存在返回 ErrNotFound。
+	AddCartItem(ctx context.Context, accountID, productID, skuID string, fn func(line CartLine, lines int) (int, error)) (domain.CartItem, error)
+	// UpdateCartItem 锁定本人的购物车项，并在同一事务中重新读取（共享锁）其商品、店铺和规格的当前状态，交给 fn 修改数量和选中状态。
+	UpdateCartItem(ctx context.Context, accountID, cartItemID string, fn func(item *domain.CartItem, line CartLine) error) (domain.CartItem, error)
 	DeleteCartItem(ctx context.Context, accountID, cartItemID string) error
 
 	// 优惠券。ListClaimableCoupons 返回 at 时刻有效（active、在有效期内、店铺券的店铺营业中）的券，按 created_at、coupon_id 倒序。

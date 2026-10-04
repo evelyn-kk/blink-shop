@@ -41,8 +41,8 @@ func seeded(t *testing.T, s store.Store) {
 	}
 }
 
-func add(n int) func(current, lines int) (int, error) {
-	return func(current, _ int) (int, error) { return current + n, nil }
+func add(n int) func(line store.CartLine, lines int) (int, error) {
+	return func(line store.CartLine, _ int) (int, error) { return line.Quantity + n, nil }
 }
 
 func testCartAdd(t *testing.T, s store.Store) {
@@ -53,22 +53,28 @@ func testCartAdd(t *testing.T, s store.Store) {
 		t.Fatalf("first add = %+v, %v", first, err)
 	}
 	// 取消选中后再加购：数量累加、重新选中、仍是同一行。
-	if _, err := s.UpdateCartItem(ctx, seed.UserID, first.CartItemID, func(it *domain.CartItem) error { it.Selected = false; return nil }); err != nil {
+	if _, err := s.UpdateCartItem(ctx, seed.UserID, first.CartItemID, func(it *domain.CartItem, _ store.CartLine) error { it.Selected = false; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	var sawCurrent, sawLines int
-	second, err := s.AddCartItem(ctx, seed.UserID, "p_seed_mouse", "sku_seed_mouse_gray", func(current, lines int) (int, error) {
-		sawCurrent, sawLines = current, lines
-		return current + 3, nil
+	var saw store.CartLine
+	second, err := s.AddCartItem(ctx, seed.UserID, "p_seed_mouse", "sku_seed_mouse_gray", func(line store.CartLine, lines int) (int, error) {
+		sawCurrent, sawLines, saw = line.Quantity, lines, line
+		return line.Quantity + 3, nil
 	})
 	if err != nil || second.CartItemID != first.CartItemID || second.Quantity != 5 || !second.Selected || sawCurrent != 2 || sawLines != 1 {
 		t.Fatalf("second add = %+v (current %d, lines %d), %v", second, sawCurrent, sawLines, err)
 	}
+	// 回调收到的是事务内读取的商品、店铺和规格状态。
+	if !saw.SkuFound || saw.ProductStatus != domain.ProductActive || saw.MerchantStatus != domain.StatusActive || saw.StockQuantity != 150 ||
+		saw.UnitPrice.String() != "129.00" || saw.MerchantID != seed.DigitalMerchant || saw.ProductName == "" {
+		t.Fatalf("line state = %+v", saw)
+	}
 	// fn 返回错误或非正数时不修改。
-	if _, err := s.AddCartItem(ctx, seed.UserID, "p_seed_mouse", "sku_seed_mouse_gray", func(int, int) (int, error) { return 0, errBoom }); !errors.Is(err, errBoom) {
+	if _, err := s.AddCartItem(ctx, seed.UserID, "p_seed_mouse", "sku_seed_mouse_gray", func(store.CartLine, int) (int, error) { return 0, errBoom }); !errors.Is(err, errBoom) {
 		t.Fatalf("fn error = %v", err)
 	}
-	if _, err := s.AddCartItem(ctx, seed.UserID, "p_seed_nova", "sku_seed_nova_128", func(int, int) (int, error) { return 0, nil }); !errors.Is(err, store.ErrInvalid) {
+	if _, err := s.AddCartItem(ctx, seed.UserID, "p_seed_nova", "sku_seed_nova_128", func(store.CartLine, int) (int, error) { return 0, nil }); !errors.Is(err, store.ErrInvalid) {
 		t.Fatalf("zero quantity = %v", err)
 	}
 	lines, _ := s.ListCartLines(ctx, seed.UserID)
@@ -145,7 +151,7 @@ func testCartUpdateDelete(t *testing.T, s store.Store) {
 	ctx := context.Background()
 	seeded(t, s)
 	it, _ := s.AddCartItem(ctx, seed.UserID, "p_seed_mouse", "sku_seed_mouse_gray", add(1))
-	updated, err := s.UpdateCartItem(ctx, seed.UserID, it.CartItemID, func(x *domain.CartItem) error {
+	updated, err := s.UpdateCartItem(ctx, seed.UserID, it.CartItemID, func(x *domain.CartItem, _ store.CartLine) error {
 		x.Quantity, x.Selected = 4, false
 		x.ProductID = "p_seed_nova" // 不能借更新改商品
 		return nil
@@ -153,13 +159,13 @@ func testCartUpdateDelete(t *testing.T, s store.Store) {
 	if err != nil || updated.Quantity != 4 || updated.Selected || updated.ProductID != "p_seed_mouse" {
 		t.Fatalf("update = %+v, %v", updated, err)
 	}
-	if _, err := s.UpdateCartItem(ctx, seed.UserID, it.CartItemID, func(x *domain.CartItem) error { x.Quantity = 0; return nil }); !errors.Is(err, store.ErrInvalid) {
+	if _, err := s.UpdateCartItem(ctx, seed.UserID, it.CartItemID, func(x *domain.CartItem, _ store.CartLine) error { x.Quantity = 0; return nil }); !errors.Is(err, store.ErrInvalid) {
 		t.Fatalf("zero quantity = %v", err)
 	}
-	if _, err := s.UpdateCartItem(ctx, seed.UserID, it.CartItemID, func(x *domain.CartItem) error { x.Quantity = 9; return errBoom }); !errors.Is(err, errBoom) {
+	if _, err := s.UpdateCartItem(ctx, seed.UserID, it.CartItemID, func(x *domain.CartItem, _ store.CartLine) error { x.Quantity = 9; return errBoom }); !errors.Is(err, errBoom) {
 		t.Fatalf("fn error = %v", err)
 	}
-	_, err = s.UpdateCartItem(ctx, seed.User2ID, it.CartItemID, func(*domain.CartItem) error { return nil })
+	_, err = s.UpdateCartItem(ctx, seed.User2ID, it.CartItemID, func(*domain.CartItem, store.CartLine) error { return nil })
 	expectNotFound(t, err, "update other account's item")
 	expectNotFound(t, s.DeleteCartItem(ctx, seed.User2ID, it.CartItemID), "delete other account's item")
 	if lines, _ := s.ListCartLines(ctx, seed.UserID); len(lines) != 1 || lines[0].Quantity != 4 {

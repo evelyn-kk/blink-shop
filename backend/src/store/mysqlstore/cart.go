@@ -59,7 +59,7 @@ func retryable(err error) bool {
 	return errors.Is(err, store.ErrConflict) || (errors.As(err, &myErr) && (myErr.Number == 1213 || myErr.Number == 1205))
 }
 
-func (s *Store) AddCartItem(ctx context.Context, accountID, productID, skuID string, fn func(current, lines int) (int, error)) (domain.CartItem, error) {
+func (s *Store) AddCartItem(ctx context.Context, accountID, productID, skuID string, fn func(line store.CartLine, lines int) (int, error)) (domain.CartItem, error) {
 	var out domain.CartItem
 	var err error
 	for attempt := 0; attempt < 3; attempt++ {
@@ -80,7 +80,11 @@ func (s *Store) AddCartItem(ctx context.Context, accountID, productID, skuID str
 			if err := s.q(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM cart_items WHERE account_id = ?`, accountID).Scan(&lines); err != nil {
 				return mapErr(err)
 			}
-			qty, err := fn(existing.Quantity, lines)
+			line, err := s.lockLineState(ctx, domain.CartItem{AccountID: accountID, ProductID: productID, SkuID: skuID, Quantity: existing.Quantity})
+			if err != nil {
+				return err
+			}
+			qty, err := fn(line, lines)
 			if err != nil {
 				return err
 			}
@@ -114,7 +118,7 @@ func (s *Store) AddCartItem(ctx context.Context, accountID, productID, skuID str
 	return out, err
 }
 
-func (s *Store) UpdateCartItem(ctx context.Context, accountID, cartItemID string, fn func(item *domain.CartItem) error) (domain.CartItem, error) {
+func (s *Store) UpdateCartItem(ctx context.Context, accountID, cartItemID string, fn func(item *domain.CartItem, line store.CartLine) error) (domain.CartItem, error) {
 	var out domain.CartItem
 	err := s.WithTx(ctx, func(ctx context.Context) error {
 		it, err := scanCartItem(s.q(ctx).QueryRowContext(ctx, `SELECT `+cartItemColumns+` FROM cart_items c
@@ -123,7 +127,11 @@ func (s *Store) UpdateCartItem(ctx context.Context, accountID, cartItemID string
 			return err
 		}
 		before := it
-		if err := fn(&it); err != nil {
+		line, err := s.lockLineState(ctx, it)
+		if err != nil {
+			return err
+		}
+		if err := fn(&it, line); err != nil {
 			return err
 		}
 		if it.Quantity <= 0 {
@@ -139,6 +147,34 @@ func (s *Store) UpdateCartItem(ctx context.Context, accountID, cartItemID string
 		return nil
 	})
 	return out, err
+}
+
+// lockLineState 在当前事务中读取购物车项对应的商品、店铺和规格的最新状态，并对这些行加共享锁（FOR SHARE）：
+// 商家修改商品（UpdateProduct 对商品行加排他锁）要等本事务结束；已提交的修改在这里一定能读到。
+// 锁顺序固定为“账户 → 购物车行 → 商品 → 店铺 → 规格”，修改商品的事务不锁购物车，不会形成环。
+func (s *Store) lockLineState(ctx context.Context, it domain.CartItem) (store.CartLine, error) {
+	l := store.CartLine{CartItem: it}
+	err := s.q(ctx).QueryRowContext(ctx, `SELECT name, status, image_url, category_id, merchant_id FROM products WHERE product_id = ? FOR SHARE`,
+		it.ProductID).Scan(&l.ProductName, &l.ProductStatus, &l.ImageURL, &l.CategoryID, &l.MerchantID)
+	if err != nil && !errors.Is(mapErr(err), store.ErrNotFound) {
+		return store.CartLine{}, mapErr(err)
+	}
+	if l.MerchantID != "" {
+		err := s.q(ctx).QueryRowContext(ctx, `SELECT name, status FROM merchants WHERE merchant_id = ? FOR SHARE`, l.MerchantID).
+			Scan(&l.MerchantName, &l.MerchantStatus)
+		if err != nil && !errors.Is(mapErr(err), store.ErrNotFound) {
+			return store.CartLine{}, mapErr(err)
+		}
+	}
+	err = s.q(ctx).QueryRowContext(ctx, `SELECT sku_name, price, stock_quantity FROM product_skus WHERE sku_id = ? AND product_id = ? FOR SHARE`,
+		it.SkuID, it.ProductID).Scan(&l.SkuName, &l.UnitPrice, &l.StockQuantity)
+	switch {
+	case err == nil:
+		l.SkuFound = true
+	case !errors.Is(mapErr(err), store.ErrNotFound):
+		return store.CartLine{}, mapErr(err)
+	}
+	return l, nil
 }
 
 func (s *Store) DeleteCartItem(ctx context.Context, accountID, cartItemID string) error {
