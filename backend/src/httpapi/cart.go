@@ -138,6 +138,19 @@ func productReason(l store.CartLine) string {
 	return ""
 }
 
+// checkPurchasable 判断购物车项按 quantity 件能否购买，不能时返回对应的接口错误。
+func checkPurchasable(l store.CartLine, quantity int) error {
+	switch reason := productReason(l); {
+	case reason == "已售罄":
+		return ErrOutOfStock
+	case reason != "":
+		return ErrItemUnavailable
+	case quantity > l.StockQuantity:
+		return insufficientStock(l.StockQuantity, 0)
+	}
+	return nil
+}
+
 // unavailableReason 在 productReason 之外再检查数量是否超过当前库存。
 func unavailableReason(l store.CartLine) string {
 	if reason := productReason(l); reason != "" {
@@ -185,7 +198,8 @@ func (s *Server) priceCart(ctx context.Context, accountID string, couponChoice [
 		views[i] = cartItemView{
 			CartItemID: l.CartItemID, ProductID: l.ProductID, SkuID: l.SkuID, ProductName: l.ProductName, SkuName: l.SkuName,
 			ImageURL: l.ImageURL, MerchantID: l.MerchantID, MerchantName: l.MerchantName, UnitPrice: l.UnitPrice, Quantity: l.Quantity,
-			Selected: l.Selected, StockQuantity: l.StockQuantity, Available: reason == "", UnavailableReason: reason,
+			// 不可购买的项不显示为选中（与“不能选中”的规则一致）；保存的选中状态不变，商品恢复后仍是原来的选择。
+			Selected: l.Selected && reason == "", StockQuantity: l.StockQuantity, Available: reason == "", UnavailableReason: reason,
 			Amount: amount, PayAmount: amount,
 		}
 		if l.Selected && reason == "" {
@@ -400,8 +414,9 @@ type updateCartItemRequest struct {
 	Selected *bool `json:"selected"`
 }
 
-// handleUpdateCartItem 修改数量或选中状态。数量必须是 1–99 且不超过当前库存（0 和负数不会被当成删除）；
-// 已失效的商品只能取消选中或删除。
+// handleUpdateCartItem 修改数量或选中状态。数量必须是 1–99 且不超过当前库存（0 和负数不会被当成删除）。
+// 不可购买的项（下架、删除、规格失效、售罄、数量超库存）不能被选中，也不能保持选中去做其他修改：
+// 只能取消选中、删除，或把“库存不足”的数量改到库存以内（之后可以再选中）。
 func (s *Server) handleUpdateCartItem(w http.ResponseWriter, r *http.Request) {
 	acc, _ := accountFromContext(r.Context())
 	var in updateCartItemRequest
@@ -433,28 +448,26 @@ func (s *Server) handleUpdateCartItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, ErrCartItemNotFound)
 		return
 	}
-	if in.Quantity != nil && *in.Quantity != line.Quantity {
-		switch reason := productReason(*line); {
-		case reason == "已售罄":
-			writeError(w, ErrOutOfStock)
-			return
-		case reason != "":
-			writeError(w, ErrItemUnavailable)
-			return
-		case *in.Quantity > line.StockQuantity:
-			writeError(w, insufficientStock(line.StockQuantity, 0))
-			return
-		}
-	}
 	updated, err := s.store.UpdateCartItem(r.Context(), acc.AccountID, id, func(it *domain.CartItem) error {
+		// 在行锁内按“更新后的状态”判断，并发修改不会绕过检查。
+		quantityChanged := in.Quantity != nil && *in.Quantity != it.Quantity
 		if in.Quantity != nil {
 			it.Quantity = *in.Quantity
 		}
 		if in.Selected != nil {
 			it.Selected = *in.Selected
 		}
+		// 改数量，或更新后仍为选中：商品必须可以购买，数量不能超过库存。只取消选中（或保持未选中）总是允许。
+		if quantityChanged || it.Selected {
+			return checkPurchasable(*line, it.Quantity)
+		}
 		return nil
 	})
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		writeError(w, apiErr)
+		return
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, ErrCartItemNotFound)
 		return

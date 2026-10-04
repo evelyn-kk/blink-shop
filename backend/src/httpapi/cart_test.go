@@ -389,3 +389,121 @@ func TestCouponClaimConcurrentHTTP(t *testing.T) {
 		t.Fatalf("ok=%d soldOut=%d", ok, soldOut)
 	}
 }
+
+// REV-008：不可购买的项不能被选中，也不能保持选中去做其他修改；只允许取消选中、删除，
+// 或把“库存不足”的数量改到库存以内后再选中。被拒绝的请求不改变已保存的状态。
+func TestUnavailableItemCannotBeSelected(t *testing.T) {
+	ctx := context.Background()
+	setProduct := func(ts *testServer, id string, fn func(p *domain.Product)) {
+		t.Helper()
+		if _, err := ts.mem.UpdateProduct(ctx, id, func(p *domain.Product) error { fn(p); return nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stored := func(ts *testServer, id string) store.CartLine {
+		t.Helper()
+		lines, err := ts.mem.ListCartLines(ctx, seed.UserID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, l := range lines {
+			if l.CartItemID == id {
+				return l
+			}
+		}
+		t.Fatalf("cart item %s missing", id)
+		return store.CartLine{}
+	}
+	cases := []struct {
+		name     string
+		product  string
+		quantity int
+		break_   func(p *domain.Product)
+		code     string
+	}{
+		{"delisted", "p_seed_mouse", 2, func(p *domain.Product) { p.Status = domain.ProductInactive }, "item_unavailable"},
+		{"deleted", "p_seed_mouse", 2, func(p *domain.Product) { p.Status = domain.ProductDeleted }, "item_unavailable"},
+		{"sku removed", "p_seed_mouse", 2, func(p *domain.Product) {
+			p.SKUs = []domain.ProductSKU{{SkuName: "新规格", Price: domain.MustMoney("139"), StockQuantity: 10, IsDefault: true, Specs: map[string]string{}}}
+		}, "item_unavailable"},
+		{"sold out", "p_seed_lamp", 2, func(p *domain.Product) { p.SKUs[0].StockQuantity = 0 }, "out_of_stock"},
+		{"quantity over stock", "p_seed_lamp", 3, func(p *domain.Product) { p.SKUs[0].StockQuantity = 2 }, "insufficient_stock"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ts := newTestServer(t, nil, nil, nil)
+			tok := ts.login(t, seed.UserUsername, seed.DevPassword).Token
+			item := itemOf(ts.addToCart(t, tok, map[string]any{"product_id": c.product, "quantity": c.quantity}), c.product)
+			patch := func(body map[string]any) *httptest.ResponseRecorder {
+				return ts.call(t, http.MethodPatch, cartPath+"/items/"+item.CartItemID, tok, body)
+			}
+
+			// 失效时仍是选中状态：再次 selected:true、只改数量（保持选中）都被拒绝，状态不变。
+			setProduct(ts, c.product, c.break_)
+			if v := itemOf(decodeBody[cartResponse](t, ts.call(t, http.MethodGet, cartPath, tok, nil)), c.product); v.Selected || v.Available {
+				t.Fatalf("unavailable item shown as selected: %+v", v)
+			}
+			expectStatus(t, patch(map[string]any{"selected": true}), http.StatusConflict, c.code)
+			if l := stored(ts, item.CartItemID); !l.Selected || l.Quantity != c.quantity {
+				t.Fatalf("state changed after rejected select: %+v", l.CartItem)
+			}
+			// 取消选中总是允许；之后再选中被拒绝，状态保持未选中。
+			expectStatus(t, patch(map[string]any{"selected": false}), http.StatusOK, "")
+			rec := patch(map[string]any{"selected": true})
+			expectStatus(t, rec, http.StatusConflict, c.code)
+			if l := stored(ts, item.CartItemID); l.Selected || l.Quantity != c.quantity {
+				t.Fatalf("state changed after rejected reselect: %+v", l.CartItem)
+			}
+			if v := itemOf(decodeBody[cartResponse](t, ts.call(t, http.MethodGet, cartPath, tok, nil)), c.product); v.Selected || v.Available {
+				t.Fatalf("cart view = %+v", v)
+			}
+			// 删除仍然可以。
+			expectStatus(t, ts.call(t, http.MethodDelete, cartPath+"/items/"+item.CartItemID, tok, nil), http.StatusOK, "")
+		})
+	}
+
+	// 库存不足：把数量改到库存以内并同时选中可以；也可以先改数量再选中。
+	t.Run("quantity lowered then selected", func(t *testing.T) {
+		ts := newTestServer(t, nil, nil, nil)
+		tok := ts.login(t, seed.UserUsername, seed.DevPassword).Token
+		item := itemOf(ts.addToCart(t, tok, map[string]any{"product_id": "p_seed_lamp", "quantity": 3}), "p_seed_lamp")
+		expectStatus(t, ts.call(t, http.MethodPatch, cartPath+"/items/"+item.CartItemID, tok, map[string]any{"selected": false}), 200, "")
+		setProduct(ts, "p_seed_lamp", func(p *domain.Product) { p.SKUs[0].StockQuantity = 2 })
+		// 数量仍超库存时同时选中：拒绝。
+		expectStatus(t, ts.call(t, http.MethodPatch, cartPath+"/items/"+item.CartItemID, tok, map[string]any{"quantity": 3, "selected": true}), 409, "insufficient_stock")
+		rec := ts.call(t, http.MethodPatch, cartPath+"/items/"+item.CartItemID, tok, map[string]any{"quantity": 2, "selected": true})
+		expectStatus(t, rec, http.StatusOK, "")
+		if v := itemOf(decodeBody[cartResponse](t, rec), "p_seed_lamp"); !v.Selected || !v.Available || v.Quantity != 2 || v.PayAmount.String() != "468.00" { // 498 满 300 减 30
+			t.Fatalf("restored = %+v", v)
+		}
+		// 售罄后改数量也不行。
+		setProduct(ts, "p_seed_lamp", func(p *domain.Product) { p.SKUs[0].StockQuantity = 0 })
+		expectStatus(t, ts.call(t, http.MethodPatch, cartPath+"/items/"+item.CartItemID, tok, map[string]any{"quantity": 1, "selected": false}), 409, "out_of_stock")
+		if l := stored(ts, item.CartItemID); !l.Selected || l.Quantity != 2 {
+			t.Fatalf("state changed: %+v", l.CartItem)
+		}
+	})
+}
+
+// 不可购买时显示为未选中，但不改保存的选择：商品恢复上架后仍是原来的选中状态。
+func TestRelistedItemKeepsSelection(t *testing.T) {
+	ts := newTestServer(t, nil, nil, nil)
+	tok := ts.login(t, seed.UserUsername, seed.DevPassword).Token
+	ts.addToCart(t, tok, map[string]any{"product_id": "p_seed_mouse"})
+	set := func(st domain.ProductStatus) {
+		if _, err := ts.mem.UpdateProduct(context.Background(), "p_seed_mouse", func(p *domain.Product) error { p.Status = st; return nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	get := func() cartItemView {
+		return itemOf(decodeBody[cartResponse](t, ts.call(t, http.MethodGet, cartPath, tok, nil)), "p_seed_mouse")
+	}
+	set(domain.ProductInactive)
+	if v := get(); v.Selected || v.Available {
+		t.Fatalf("delisted = %+v", v)
+	}
+	set(domain.ProductActive)
+	if v := get(); !v.Selected || !v.Available || v.PayAmount.String() != "129.00" {
+		t.Fatalf("relisted = %+v", v)
+	}
+}

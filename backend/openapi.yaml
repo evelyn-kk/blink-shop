@@ -1291,7 +1291,11 @@ paths:
       tags: [cart]
       operationId: updateCartItem
       summary: 修改数量或选中状态
-      description: quantity 必须是 1–99 且不超过当前库存（0 和负数不会当作删除）；已失效的商品只能取消选中或删除。只能修改本人的购物车项，其他人的按不存在处理（404）。
+      description: |
+        quantity 必须是 1–99 且不超过当前库存（0 和负数不会当作删除）。按更新后的状态判断：改数量，或更新后为选中时，
+        商品必须可以购买且数量不超过库存，否则 409；因此不可购买的项不能被选中（selected:true 被拒绝），
+        只能取消选中、删除，或把“库存不足”的数量改到库存以内（可同时选中）。被拒绝的请求不改变购物车。
+        只能修改本人的购物车项，其他人的按不存在处理（404）。
       requestBody:
         required: true
         content:
@@ -1335,7 +1339,7 @@ paths:
                 code: cart_item_not_found
                 message: 购物车项不存在
         "409":
-          description: "`insufficient_stock` 超过库存；`out_of_stock` 已售罄；`item_unavailable` 商品已下架、删除或规格失效"
+          description: "`insufficient_stock` 数量超过库存；`out_of_stock` 已售罄；`item_unavailable` 商品已下架、删除或规格失效。改数量或要选中（含保持选中）时检查"
           headers:
             X-Request-ID:
               $ref: "#/components/headers/RequestID"
@@ -2442,6 +2446,7 @@ components:
           maximum: 99
         selected:
           type: boolean
+          description: 是否选中。不可购买（available=false）的项始终为 false；保存的选择不变，商品恢复后回到原来的状态。
         stock_quantity:
           type: integer
         available:
