@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Blink Shop API
-  version: 0.8.0
+  version: 0.9.0
   description: |
     Blink Shop 的单一接口契约。约定：
     - 所有路径前缀为 `/api/v1`，JSON 字段使用 snake_case。
@@ -50,6 +50,12 @@ tags:
       购物车、优惠试算与优惠券（仅普通用户）。金额由服务端计算，规则见 backend/README.md“营销规则”：
       活动按单品 → 品类 → 店铺 → 平台计算，不可叠加的活动只作用于未参加其他活动的商品且这些商品不再参加后续活动和用券；
       之后每个店铺最多用一张店铺券、整单最多一张平台券。discount_rate 为实付比例（0.95 = 9.5 折）。
+  - name: orders
+    description: |
+      订单、支付与评价（仅普通用户）。订单状态 pending_payment → paid → shipped → completed，只有待支付可以取消；
+      支付单 pending → paid | closed。所有状态变化只能由服务端按状态机执行，别人的订单一律 404。
+  - name: admin
+    description: 平台管理（仅管理员）
   - name: catalog
     description: 公开商品目录（无需登录）。只展示上架且商家营业中的商品；下架、风控、已删除商品按不存在处理
 paths:
@@ -1500,6 +1506,456 @@ paths:
               example:
                 code: coupon_limit_reached
                 message: 已达到这张券的领取上限
+  /orders:
+    get:
+      tags: [orders]
+      operationId: listMyOrders
+      summary: 我的订单
+      description: 按下单时间倒序，含订单项，不含支付单（详情里有）。
+      parameters:
+        - $ref: "#/components/parameters/OrderStatus"
+        - $ref: "#/components/parameters/OrderNo"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          $ref: "#/components/responses/OrderPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /orders:checkout:
+    post:
+      tags: [orders]
+      operationId: checkout
+      summary: 结算下单
+      description: |
+        把购物车中已选中的商品按店铺拆成多个订单，在一个数据库事务内完成：锁定购物车项、商品和规格库存、未使用的券 →
+        按最新价格、库存、活动和券重新计价（与 `GET /cart/discount-preview` 同一套计算）→ 创建订单、订单项和待支付的支付单 →
+        扣减库存 → 核销券 → 删除已结算的购物车项。任何一步不满足都整体失败：不创建订单、不扣库存、不核销券、不清购物车。
+
+        幂等：幂等键放在 `Idempotency-Key` 请求头或 `idempotency_key` 字段（必填；两处都给时必须相同）。同一账户同一个键成功下单后，
+        再次请求直接返回那次的订单（200，`replayed=true`，订单为当前状态），不会重复下单或扣库存；失败的请求不占用这个键。
+
+        下单后 30 分钟内未支付的订单自动关闭（库存回补、券退回）。平台券可以分摊到多个店铺的订单上，这些订单全部取消后才退回。
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: 幂等键，1–128 位字母、数字或 `.` `_` `:` `-`；也可以放在请求体。
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9._:-]{1,128}$"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckoutRequest"
+      responses:
+        "201":
+          description: 下单成功
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutResult"
+        "200":
+          description: 同一幂等键已经成功下过单，返回那次的订单
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutResult"
+        "400":
+          description: |
+            `invalid_argument`：缺少幂等键或格式不对（field=idempotency_key）、券 ID 超过 20 个；
+            `empty_cart`：购物车里没有选中的商品；`coupon_not_applicable`：指定的券不能用（field=user_coupon_ids）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: empty_cart
+                message: 请先在购物车选择要结算的商品
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: |
+            `item_unavailable`：选中的商品已下架、删除、规格失效、售罄或数量超过库存（不会悄悄跳过）；
+            `price_changed`：传了 expected_pay_amount 且与重新计算的实付金额不同（message 中给出新金额）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: item_unavailable
+                message: 「Blink 护眼台灯 L1」商品已下架，请先在购物车里处理
+  /orders/{id}:
+    get:
+      tags: [orders]
+      operationId: getMyOrder
+      summary: 订单详情
+      description: 含最新支付单和每件商品的评价 ID。不属于自己的订单 404。
+      parameters:
+        - $ref: "#/components/parameters/OrderID"
+      responses:
+        "200":
+          $ref: "#/components/responses/OrderResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/OrderNotFound"
+  /orders/{id}:pay:
+    post:
+      tags: [orders]
+      operationId: payOrder
+      summary: 模拟支付
+      description: |
+        与上游一致，动作写在路径段内（`/orders/o_xxx:pay`）。只能支付自己待支付的订单；支付成功后订单为 paid（待发货），支付单为 paid 并生成流水号。
+        已过支付期限的订单在这里关闭（库存回补、券退回）并返回 409 `order_expired`。
+      parameters:
+        - $ref: "#/components/parameters/OrderID"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                method:
+                  type: string
+                  enum: [mock_balance, mock_wechat, mock_alipay]
+                  default: mock_balance
+      responses:
+        "200":
+          description: 支付成功
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [order, payment]
+                properties:
+                  order:
+                    $ref: "#/components/schemas/Order"
+                  payment:
+                    $ref: "#/components/schemas/Payment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/OrderNotFound"
+        "409":
+          description: "`order_status_conflict` 订单不是待支付；`order_expired` 已超过支付期限，订单已关闭"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: order_expired
+                message: 订单已超过支付时间，已自动关闭
+  /orders/{id}:cancel:
+    post:
+      tags: [orders]
+      operationId: cancelOrder
+      summary: 取消订单
+      description: 只能取消自己待支付的订单（已支付的不能取消）。取消后支付单关闭，库存回补，店铺券退回；平台券在同一次结算的订单全部取消后退回。
+      parameters:
+        - $ref: "#/components/parameters/OrderID"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 200
+                  description: 不填为“用户取消”。
+      responses:
+        "200":
+          $ref: "#/components/responses/OrderResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/OrderNotFound"
+        "409":
+          $ref: "#/components/responses/OrderStatusConflict"
+  /orders/{id}:confirm-receipt:
+    post:
+      tags: [orders]
+      operationId: confirmReceipt
+      summary: 确认收货
+      description: 只能确认自己已发货的订单，确认后为 completed，可以评价。
+      parameters:
+        - $ref: "#/components/parameters/OrderID"
+      responses:
+        "200":
+          $ref: "#/components/responses/OrderResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/OrderNotFound"
+        "409":
+          $ref: "#/components/responses/OrderStatusConflict"
+  /orders/{id}/items/{item_id}:review:
+    post:
+      tags: [orders]
+      operationId: reviewOrderItem
+      summary: 评价订单商品
+      description: 只能评价自己已完成订单里的商品，每件商品只能评价一次。评价立即公开（`GET /products/{id}/reviews`）。
+      parameters:
+        - $ref: "#/components/parameters/OrderID"
+        - name: item_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rating, content]
+              properties:
+                rating:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+                content:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                  description: 去掉首尾空白后 1–500 个字。
+                tags:
+                  type: array
+                  maxItems: 5
+                  description: 去掉空白和重复后最多 5 个，每个最多 20 个字。
+                  items:
+                    type: string
+                    maxLength: 20
+      responses:
+        "201":
+          description: 评价成功
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyReview"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`order_not_found` 订单不存在或不属于自己；`order_item_not_found` 订单里没有这件商品"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: order_item_not_found
+                message: 订单里没有这件商品
+        "409":
+          description: "`order_not_completed` 订单还没有确认收货；`review_exists` 已经评价过"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: review_exists
+                message: 这件商品已经评价过了
+  /merchant/orders:
+    get:
+      tags: [merchant]
+      operationId: listMerchantOrders
+      summary: 本店订单
+      parameters:
+        - $ref: "#/components/parameters/OrderStatus"
+        - $ref: "#/components/parameters/OrderNo"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          $ref: "#/components/responses/OrderPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /merchant/orders/{id}:
+    get:
+      tags: [merchant]
+      operationId: getMerchantOrder
+      summary: 本店订单详情
+      description: 其他店铺的订单 404（与上游一致，不返回 403）。
+      parameters:
+        - $ref: "#/components/parameters/OrderID"
+      responses:
+        "200":
+          $ref: "#/components/responses/OrderResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/OrderNotFound"
+    patch:
+      tags: [merchant]
+      operationId: shipMerchantOrder
+      summary: 发货
+      description: 商家只能把本店已支付（待发货）的订单改为 shipped；其他店铺的订单 404。
+      parameters:
+        - $ref: "#/components/parameters/OrderID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [shipped]
+      responses:
+        "200":
+          $ref: "#/components/responses/OrderResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/OrderNotFound"
+        "409":
+          $ref: "#/components/responses/OrderStatusConflict"
+  /admin/orders:
+    get:
+      tags: [admin]
+      operationId: listAdminOrders
+      summary: 全部订单
+      parameters:
+        - $ref: "#/components/parameters/OrderStatus"
+        - $ref: "#/components/parameters/OrderNo"
+        - name: merchant_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: account_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          $ref: "#/components/responses/OrderPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /admin/orders/{id}:
+    get:
+      tags: [admin]
+      operationId: getAdminOrder
+      summary: 订单详情（管理员）
+      parameters:
+        - $ref: "#/components/parameters/OrderID"
+      responses:
+        "200":
+          $ref: "#/components/responses/OrderResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/OrderNotFound"
+    patch:
+      tags: [admin]
+      operationId: updateAdminOrder
+      summary: 代发货或取消订单
+      description: |
+        管理员可以代商家发货（paid → shipped），或取消待支付订单（库存回补、券退回）。管理员同样受订单状态机约束，
+        不能取消已支付的订单（上游允许管理员把订单改成任意状态）。
+      parameters:
+        - $ref: "#/components/parameters/OrderID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [shipped, cancelled]
+                reason:
+                  type: string
+                  maxLength: 200
+                  description: 取消原因，不填为“平台取消”。
+      responses:
+        "200":
+          $ref: "#/components/responses/OrderResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/OrderNotFound"
+        "409":
+          $ref: "#/components/responses/OrderStatusConflict"
   /merchant/products:
     get:
       tags: [merchant]
@@ -1729,6 +2185,25 @@ components:
         minimum: 1
         maximum: 100
         default: 10
+    OrderID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    OrderStatus:
+      name: status
+      in: query
+      required: false
+      schema:
+        $ref: "#/components/schemas/OrderStatus"
+    OrderNo:
+      name: order_no
+      in: query
+      required: false
+      description: 按订单号精确查找。
+      schema:
+        type: string
   schemas:
     MerchantProduct:
       type: object
@@ -2643,6 +3118,181 @@ components:
           format: date-time
         coupon:
           $ref: "#/components/schemas/Coupon"
+    OrderStatus:
+      type: string
+      enum: [pending_payment, paid, shipped, completed, cancelled]
+      description: pending_payment 待支付 → paid 待发货 → shipped 已发货 → completed 已完成；只有待支付可以取消（含超时关闭）。
+    PaymentStatus:
+      type: string
+      enum: [pending, paid, closed]
+    OrderItem:
+      type: object
+      required: [order_item_id, product_id, sku_id, name, sku_name, image_url, price, quantity, amount, review_id]
+      properties:
+        order_item_id:
+          type: string
+        product_id:
+          type: string
+        sku_id:
+          type: string
+        name:
+          type: string
+          description: 下单时的商品名称（冻结，之后商品改名不影响）。
+        sku_name:
+          type: string
+        image_url:
+          type: string
+        price:
+          $ref: "#/components/schemas/Money"
+          description: 下单时的单价（冻结）。
+        quantity:
+          type: integer
+          minimum: 1
+        amount:
+          $ref: "#/components/schemas/Money"
+          description: price × quantity。
+        review_id:
+          type: string
+          description: 该商品的评价 ID，未评价为空串；只有订单详情填写，列表中总是空串。
+    Payment:
+      type: object
+      required: [payment_id, amount, status, method, transaction_no, expires_at, paid_at]
+      properties:
+        payment_id:
+          type: string
+        amount:
+          $ref: "#/components/schemas/Money"
+        status:
+          $ref: "#/components/schemas/PaymentStatus"
+        method:
+          type: string
+          description: 支付方式，未支付时为空串。
+        transaction_no:
+          type: string
+          description: 模拟支付流水号（MOCK 开头），未支付时为空串。
+        expires_at:
+          type: string
+          format: date-time
+        paid_at:
+          type: [string, "null"]
+          format: date-time
+    Order:
+      type: object
+      required: [order_id, order_no, account_id, merchant_id, merchant_name, status, total_amount, discount_amount, pay_amount,
+        payment_deadline_at, paid_at, shipped_at, completed_at, closed_at, cancel_reason, items, created_at, updated_at]
+      properties:
+        order_id:
+          type: string
+        order_no:
+          type: string
+          description: BS + 下单时间（UTC，yyyyMMddHHmmss）+ 6 位数字。
+        account_id:
+          type: string
+        merchant_id:
+          type: string
+        merchant_name:
+          type: string
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+        total_amount:
+          $ref: "#/components/schemas/Money"
+        discount_amount:
+          $ref: "#/components/schemas/Money"
+          description: 活动和券分摊到本订单的优惠。
+        pay_amount:
+          $ref: "#/components/schemas/Money"
+        payment_deadline_at:
+          type: [string, "null"]
+          format: date-time
+        paid_at:
+          type: [string, "null"]
+          format: date-time
+        shipped_at:
+          type: [string, "null"]
+          format: date-time
+        completed_at:
+          type: [string, "null"]
+          format: date-time
+        closed_at:
+          type: [string, "null"]
+          format: date-time
+          description: 取消或超时关闭的时间。
+        cancel_reason:
+          type: string
+          description: 取消原因；超时关闭为“支付超时自动关闭”。
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderItem"
+        payment:
+          $ref: "#/components/schemas/Payment"
+          description: 最新的支付单；只在详情和订单操作的响应中出现，列表中没有。
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CheckoutRequest:
+      type: object
+      properties:
+        idempotency_key:
+          type: string
+          pattern: "^[A-Za-z0-9._:-]{1,128}$"
+          description: 幂等键；也可以放在 `Idempotency-Key` 请求头。
+        user_coupon_ids:
+          type: array
+          maxItems: 20
+          description: 不传时自动选最优券（与试算一致）；传了只用这些券，空数组表示不用券。
+          items:
+            type: string
+        expected_pay_amount:
+          $ref: "#/components/schemas/Money"
+          description: 确认页显示的实付金额；与重新计算的金额不同时返回 409 `price_changed`，不下单。
+    CheckoutResult:
+      type: object
+      required: [checkout_request_id, replayed, items]
+      properties:
+        checkout_request_id:
+          type: string
+        replayed:
+          type: boolean
+          description: true 表示同一幂等键已成功下过单，这里是那次的订单。
+        items:
+          type: array
+          description: 每个店铺一个订单，按购物车中的先后顺序。
+          items:
+            $ref: "#/components/schemas/Order"
+    MyReview:
+      type: object
+      required: [review_id, order_id, order_item_id, product_id, sku_id, rating, content, tags, status, created_at]
+      properties:
+        review_id:
+          type: string
+        order_id:
+          type: string
+        order_item_id:
+          type: string
+        product_id:
+          type: string
+        sku_id:
+          type: string
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        content:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [visible, hidden]
+        created_at:
+          type: string
+          format: date-time
     FileUpload:
       type: object
       required: [file]
@@ -2710,7 +3360,7 @@ components:
             机器可读错误码。通用错误码：`invalid_argument`、`invalid_json`、`unauthorized`、`forbidden`、`not_found`、
             `method_not_allowed`、`conflict`、`payload_too_large`、`unsupported_media_type`、`rate_limited`、
             `internal_error`、`not_ready`、`timeout`。认证相关：`invalid_credential`、`username_exists`、
-            `account_inactive`、`account_risk`。目录：`product_not_found`。商家：`product_under_review`。
+            `account_inactive`、`account_risk`。目录：`product_not_found`。商家：`product_under_review`。订单：`order_not_found`、`order_item_not_found`、`empty_cart`、`item_unavailable`、`price_changed`、`order_status_conflict`、`order_expired`、`order_not_completed`、`review_exists`。
           examples: [not_found]
         message:
           type: string
@@ -2885,6 +3535,56 @@ components:
             code: conflict
             message: 当前状态不允许该操作
             request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
+    OrderResponse:
+      description: 订单（含支付单）
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Order"
+    OrderPage:
+      description: 订单分页列表（按下单时间倒序，含订单项，不含支付单）
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/PageMeta"
+              - type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Order"
+    OrderNotFound:
+      description: 订单不存在，或不属于当前账户/店铺（`order_not_found`）
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: order_not_found
+            message: 订单不存在
+    OrderStatusConflict:
+      description: 订单当前状态不允许该操作（`order_status_conflict`）
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: order_status_conflict
+            message: 订单待发货，不能取消
     ObjectStorageUnavailable:
       description: 对象存储未配置或暂时不可用（`object_storage_unavailable`）
       headers:

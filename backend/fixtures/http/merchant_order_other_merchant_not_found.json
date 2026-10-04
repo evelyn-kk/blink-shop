@@ -1,0 +1,1 @@
+{"description": "其他店铺的订单按不存在处理（与上游一致返回 404）", "request": {"method": "PATCH", "path": "/api/v1/merchant/orders/o_seed_paid", "as": "blink_merchant2", "body": {"status": "shipped"}}, "response": {"status": 404, "body": {"code": "order_not_found", "message": "订单不存在", "request_id": "<request_id>"}}}

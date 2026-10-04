@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { logout } from './api/auth';
 import { Empty } from './components/StateView';
 import { RequireRole } from './components/RequireRole';
-import { documentsHref, loginHref, merchantProductsHref, navigate, productsHref, useRoute } from './lib/router';
+import { documentsHref, loginHref, merchantProductsHref, navigate, ordersHref, productsHref, useRoute } from './lib/router';
 import { clearSession, useSession } from './lib/session';
 import { DocumentDetailPage } from './pages/DocumentDetailPage';
 import { DocumentFormPage } from './pages/DocumentFormPage';
@@ -10,6 +10,8 @@ import { DocumentsPage } from './pages/DocumentsPage';
 import { LoginPage } from './pages/LoginPage';
 import { MerchantProductFormPage } from './pages/MerchantProductFormPage';
 import { MerchantProductsPage } from './pages/MerchantProductsPage';
+import { OrderDetailPage } from './pages/OrderDetailPage';
+import { OrdersPage } from './pages/OrdersPage';
 import { ProductDetailPage } from './pages/ProductDetailPage';
 import { ProductListPage } from './pages/ProductListPage';
 
@@ -52,6 +54,16 @@ export default function App() {
             <DocumentDetailPage key={`${route.scope}|${route.id}`} scope={route.scope} id={route.id} />
           </RequireRole>
         )}
+        {route.name === 'orders' && (
+          <RequireRole role={route.scope}>
+            <OrdersPage key={route.scope} scope={route.scope} query={route.query} />
+          </RequireRole>
+        )}
+        {route.name === 'order' && (
+          <RequireRole role={route.scope}>
+            <OrderDetailPage key={`${route.scope}|${route.id}`} scope={route.scope} id={route.id} />
+          </RequireRole>
+        )}
         {route.name === 'not_found' && (
           <Empty text="页面不存在">
             <a className="button" href={productsHref({})}>
@@ -91,10 +103,16 @@ function TopBar() {
         {session?.account.role === 'merchant' && (
           <>
             <a href={merchantProductsHref()}>我的商品</a>
+            <a href={ordersHref('merchant')}>订单</a>
             <a href={documentsHref('merchant')}>知识资料</a>
           </>
         )}
-        {session?.account.role === 'admin' && <a href={documentsHref('admin')}>知识资料</a>}
+        {session?.account.role === 'admin' && (
+          <>
+            <a href={ordersHref('admin')}>订单管理</a>
+            <a href={documentsHref('admin')}>知识资料</a>
+          </>
+        )}
       </nav>
       <div className="account">
         {session ? (

@@ -1,4 +1,4 @@
-import type { DocType, DocumentStatus, Money, ProductStatus, Promotion, StockStatus } from '../types/api';
+import type { DocType, DocumentStatus, Money, OrderStatus, PaymentStatus, ProductStatus, Promotion, StockStatus } from '../types/api';
 
 const money = new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' });
 
@@ -70,3 +70,23 @@ export function formatDateTime(iso: string): string {
   return d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
+
+export const orderStatusLabel: Record<OrderStatus, string> = {
+  pending_payment: '待支付',
+  paid: '待发货',
+  shipped: '已发货',
+  completed: '已完成',
+  cancelled: '已取消',
+};
+
+export const paymentStatusLabel: Record<PaymentStatus, string> = {
+  pending: '待支付',
+  paid: '已支付',
+  closed: '已关闭',
+};
+
+export const paymentMethodLabel: Record<string, string> = {
+  mock_balance: '余额（模拟）',
+  mock_wechat: '微信（模拟）',
+  mock_alipay: '支付宝（模拟）',
+};

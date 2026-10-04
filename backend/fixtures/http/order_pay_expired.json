@@ -1,0 +1,1 @@
+{"description": "超过支付期限后支付：订单在这里被关闭（库存回补、退券），返回 409 order_expired", "request": {"method": "POST", "path": "/api/v1/orders/o_seed_pending:pay", "as": "blink_user"}, "response": {"status": 409, "body": {"code": "order_expired", "message": "订单已超过支付时间，已自动关闭", "request_id": "<request_id>"}}}

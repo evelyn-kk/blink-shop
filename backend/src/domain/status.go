@@ -118,14 +118,14 @@ const (
 	StockOutOfStock StockStatus = "out_of_stock"
 )
 
-// lowStockThreshold 以下（含）视为库存紧张。
-const lowStockThreshold = 10
+// LowStockThreshold 以下（含）视为库存紧张。
+const LowStockThreshold = 10
 
 func StockStatusOf(quantity int) StockStatus {
 	switch {
 	case quantity <= 0:
 		return StockOutOfStock
-	case quantity <= lowStockThreshold:
+	case quantity <= LowStockThreshold:
 		return StockLow
 	default:
 		return StockInStock

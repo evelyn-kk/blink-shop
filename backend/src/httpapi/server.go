@@ -43,6 +43,8 @@ type Options struct {
 	PasswordCost int
 	// Now 返回当前时间（判断促销是否有效等），nil 表示 time.Now；测试用来固定时间。
 	Now func() time.Time
+	// PaymentTimeout 是下单后的支付期限，0 表示 DefaultPaymentTimeout（30 分钟）。
+	PaymentTimeout time.Duration
 }
 
 type Server struct {
@@ -55,6 +57,7 @@ type Server struct {
 	avatars        avatarDir
 	passwords      *passwordHasher
 	now            func() time.Time
+	paymentTimeout time.Duration
 	mux            *http.ServeMux
 	routeAccess    map[string]access // 路由 pattern → 访问规则，RBAC 矩阵测试据此核对
 	ipLimiter      *rateLimiter
@@ -74,6 +77,7 @@ func NewServer(opts Options) *Server {
 		avatars:        avatarDir{root: opts.AvatarDir},
 		passwords:      newPasswordHasher(opts.PasswordCost),
 		now:            opts.Now,
+		paymentTimeout: opts.PaymentTimeout,
 		mux:            http.NewServeMux(),
 		routeAccess:    map[string]access{},
 		ipLimiter:      newRateLimiter(time.Minute),
@@ -82,6 +86,9 @@ func NewServer(opts Options) *Server {
 	}
 	if s.now == nil {
 		s.now = time.Now
+	}
+	if s.paymentTimeout <= 0 {
+		s.paymentTimeout = DefaultPaymentTimeout
 	}
 	if s.store == nil {
 		panic("httpapi: Options.Store is required")
@@ -142,6 +149,20 @@ func (s *Server) routes() {
 	s.handle("GET /api/v1/coupons/available", accessUser, s.handleListAvailableCoupons)
 	s.handle("GET /api/v1/coupons/mine", accessUser, s.handleListMyCoupons)
 	s.handle("POST /api/v1/coupons/{action}", accessUser, s.handleCouponAction)
+
+	s.handle("GET /api/v1/orders", accessUser, s.handleListMyOrders)
+	s.handle("POST /api/v1/orders:checkout", accessUser, s.handleCheckout)
+	s.handle("GET /api/v1/orders/{id}", accessUser, s.handleGetMyOrder)
+	s.handle("POST /api/v1/orders/{action}", accessUser, s.handleOrderAction)
+	s.handle("POST /api/v1/orders/{id}/items/{action}", accessUser, s.handleOrderItemAction)
+
+	s.handle("GET /api/v1/merchant/orders", accessMerchant, s.handleListMerchantOrders)
+	s.handle("GET /api/v1/merchant/orders/{id}", accessMerchant, s.handleGetMerchantOrder)
+	s.handle("PATCH /api/v1/merchant/orders/{id}", accessMerchant, s.handleUpdateMerchantOrder)
+
+	s.handle("GET /api/v1/admin/orders", accessAdmin, s.handleListAdminOrders)
+	s.handle("GET /api/v1/admin/orders/{id}", accessAdmin, s.handleGetAdminOrder)
+	s.handle("PATCH /api/v1/admin/orders/{id}", accessAdmin, s.handleUpdateAdminOrder)
 
 	s.handle("GET /api/v1/merchant/documents", accessMerchant, s.handleListMerchantDocuments)
 	s.handle("POST /api/v1/merchant/documents", accessMerchant, s.handleCreateMerchantDocument)

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -35,6 +36,7 @@ type fixture struct {
 		Multipart *fixtureMultipart `json:"multipart"`
 	} `json:"setup"`
 	// SetupRequests 在正式请求前依次以 As 账号发送的 JSON 请求（如先加购再试算），每个都必须返回 2xx。
+	// 返回订单列表（结算）的准备请求会把请求路径中的 {setup_order_id} 替换为第一个订单的 ID。
 	SetupRequests []struct {
 		As     string          `json:"as"`
 		Method string          `json:"method"`
@@ -92,6 +94,19 @@ var fixturePlaceholders = map[string]func(got any, rec *httptest.ResponseRecorde
 		s, ok := got.(string)
 		return ok && strings.HasPrefix(s, "uc_") && len(s) == 27
 	},
+	"<order_id>":            idPlaceholder("o_"),
+	"<order_item_id>":       idPlaceholder("oi_"),
+	"<payment_id>":          idPlaceholder("pay_"),
+	"<checkout_request_id>": idPlaceholder("chk_"),
+	"<review_id>":           idPlaceholder("rv_"),
+	"<order_no>": func(got any, _ *httptest.ResponseRecorder) bool {
+		s, ok := got.(string)
+		return ok && orderNoPattern.MatchString(s)
+	},
+	"<transaction_no>": func(got any, _ *httptest.ResponseRecorder) bool {
+		s, ok := got.(string)
+		return ok && transactionNoPattern.MatchString(s)
+	},
 	"<document_id>": func(got any, _ *httptest.ResponseRecorder) bool {
 		s, ok := got.(string)
 		return ok && strings.HasPrefix(s, "doc_") && len(s) == 28
@@ -104,6 +119,20 @@ var fixturePlaceholders = map[string]func(got any, rec *httptest.ResponseRecorde
 		s, ok := got.(string)
 		return ok && strings.HasPrefix(s, fileURLPrefix+"file_") && len(s) == len(fileURLPrefix)+29
 	},
+}
+
+var (
+	orderNoPattern       = regexp.MustCompile(`^BS\d{20}$`)
+	transactionNoPattern = regexp.MustCompile(`^MOCK[0-9A-F]{20}$`)
+	randomIDPattern      = regexp.MustCompile(`^[0-9a-f]{24}$`)
+)
+
+// idPlaceholder 匹配 “前缀 + 24 位 hex” 的随机 ID（domain.NewID）。
+func idPlaceholder(prefix string) func(got any, _ *httptest.ResponseRecorder) bool {
+	return func(got any, _ *httptest.ResponseRecorder) bool {
+		s, ok := got.(string)
+		return ok && strings.HasPrefix(s, prefix) && randomIDPattern.MatchString(strings.TrimPrefix(s, prefix))
+	}
 }
 
 // matchFixture 递归比较 fixture 期望值与实际 JSON，返回第一处不一致的路径。
@@ -201,6 +230,15 @@ func TestHTTPFixtures(t *testing.T) {
 				rec := ts.call(t, sr.Method, sr.Path, ts.login(t, sr.As, seed.DevPassword).Token, body)
 				if rec.Code < 200 || rec.Code > 299 {
 					t.Fatalf("setup request %d: %d %s", i, rec.Code, rec.Body)
+				}
+				// 结算类的准备请求：请求路径中的 {setup_order_id} 替换为它创建的第一个订单。
+				var created struct {
+					Items []struct {
+						OrderID string `json:"order_id"`
+					} `json:"items"`
+				}
+				if json.Unmarshal(rec.Body.Bytes(), &created) == nil && len(created.Items) > 0 && created.Items[0].OrderID != "" {
+					path = strings.ReplaceAll(path, "{setup_order_id}", created.Items[0].OrderID)
 				}
 				time.Sleep(2 * time.Millisecond) // 时间精确到毫秒：隔开以保持加入顺序
 			}

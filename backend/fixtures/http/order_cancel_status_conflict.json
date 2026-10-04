@@ -1,0 +1,1 @@
+{"description": "已支付的订单不能取消", "request": {"method": "POST", "path": "/api/v1/orders/o_seed_paid:cancel", "as": "blink_user", "body": {"reason": "不想要了"}}, "response": {"status": 409, "body": {"code": "order_status_conflict", "message": "订单待发货，不能取消", "request_id": "<request_id>"}}}

@@ -162,34 +162,37 @@ func unavailableReason(l store.CartLine) string {
 	return ""
 }
 
-// priceCart 读取购物车并计价：只有选中且可购买的项参与计算。couponChoice 为 nil 时自动选券。
-func (s *Server) priceCart(ctx context.Context, accountID string, couponChoice []string) (pricedCart, error) {
-	now := s.now()
-	lines, err := s.store.ListCartLines(ctx, accountID)
-	if err != nil {
-		return pricedCart{}, err
-	}
+// pricingContext 是计价用到的、与购物车无关的数据：分类的上级关系和当前有效的促销。结算在事务前读取它。
+type pricingContext struct {
+	now    time.Time
+	parent map[string]string
+	promos []domain.PromotionRule
+}
+
+func (s *Server) loadPricingContext(ctx context.Context) (pricingContext, error) {
+	pc := pricingContext{now: s.now(), parent: map[string]string{}}
 	cats, err := s.store.ListCategories(ctx)
 	if err != nil {
-		return pricedCart{}, err
+		return pricingContext{}, err
 	}
-	parent := map[string]string{}
 	for _, c := range cats {
-		parent[c.CategoryID] = c.ParentID
+		pc.parent[c.CategoryID] = c.ParentID
 	}
-	promos, _, err := s.store.ListActivePromotions(ctx, store.PromotionQuery{At: now, Page: store.Page{Page: 1, PageSize: pricingPromotionLimit}})
+	pc.promos, _, err = s.store.ListActivePromotions(ctx, store.PromotionQuery{At: pc.now, Page: store.Page{Page: 1, PageSize: pricingPromotionLimit}})
 	if err != nil {
-		return pricedCart{}, err
+		return pricingContext{}, err
 	}
-	owned, _, err := s.store.ListUserCoupons(ctx, store.UserCouponQuery{AccountID: accountID, Status: domain.UserCouponUnused, At: now,
-		Page: store.Page{Page: 1, PageSize: pricingCouponLimit}})
-	if err != nil {
-		return pricedCart{}, err
-	}
+	return pc, nil
+}
 
-	in := pricing.Input{Promotions: promos, CouponChoice: couponChoice, Now: now}
+// price 计价：只有选中且可购买的项参与计算；owned 中只有未使用的券可用。couponChoice 为 nil 时自动选券。
+// 购物车试算和结算共用这一个函数，保证试算金额就是下单金额。
+func (pc pricingContext) price(lines []store.CartLine, owned []store.OwnedCoupon, couponChoice []string) (pricedCart, error) {
+	in := pricing.Input{Promotions: pc.promos, CouponChoice: couponChoice, Now: pc.now}
 	for _, oc := range owned {
-		in.Coupons = append(in.Coupons, pricing.OwnedCoupon{UserCouponID: oc.UserCouponID, Status: oc.Status, Coupon: oc.Coupon})
+		if oc.Status == domain.UserCouponUnused {
+			in.Coupons = append(in.Coupons, pricing.OwnedCoupon{UserCouponID: oc.UserCouponID, Status: oc.Status, Coupon: oc.Coupon})
+		}
 	}
 	views := make([]cartItemView, len(lines))
 	for i, l := range lines {
@@ -204,7 +207,7 @@ func (s *Server) priceCart(ctx context.Context, accountID string, couponChoice [
 		}
 		if l.Selected && reason == "" {
 			var ancestors []string
-			for c := l.CategoryID; c != "" && !contains(ancestors, c); c = parent[c] {
+			for c := l.CategoryID; c != "" && !contains(ancestors, c); c = pc.parent[c] {
 				ancestors = append(ancestors, c)
 			}
 			in.Lines = append(in.Lines, pricing.Line{CartItemID: l.CartItemID, ProductID: l.ProductID, MerchantID: l.MerchantID,
@@ -225,6 +228,24 @@ func (s *Server) priceCart(ctx context.Context, accountID string, couponChoice [
 		}
 	}
 	return pricedCart{lines: lines, views: views, result: res}, nil
+}
+
+// priceCart 读取购物车并计价。couponChoice 为 nil 时自动选券。
+func (s *Server) priceCart(ctx context.Context, accountID string, couponChoice []string) (pricedCart, error) {
+	pc, err := s.loadPricingContext(ctx)
+	if err != nil {
+		return pricedCart{}, err
+	}
+	lines, err := s.store.ListCartLines(ctx, accountID)
+	if err != nil {
+		return pricedCart{}, err
+	}
+	owned, _, err := s.store.ListUserCoupons(ctx, store.UserCouponQuery{AccountID: accountID, Status: domain.UserCouponUnused, At: pc.now,
+		Page: store.Page{Page: 1, PageSize: pricingCouponLimit}})
+	if err != nil {
+		return pricedCart{}, err
+	}
+	return pc.price(lines, owned, couponChoice)
 }
 
 func contains(list []string, v string) bool {

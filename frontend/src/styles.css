@@ -856,3 +856,43 @@ td {
 .doc-form textarea {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+/* ---------- 订单 ---------- */
+
+.order-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.order-items-line {
+  margin: 4px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-status-paid,
+.order-status-pending_payment {
+  color: var(--warn);
+}
+
+.order-status-shipped {
+  color: var(--brand);
+}
+
+.order-status-completed {
+  color: var(--ok);
+}
+
+.order-status-cancelled {
+  color: var(--muted);
+}
+
+@media (max-width: 640px) {
+  .order-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

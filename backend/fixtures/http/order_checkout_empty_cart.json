@@ -1,0 +1,1 @@
+{"description": "购物车没有选中的商品时不能下单", "request": {"method": "POST", "path": "/api/v1/orders:checkout", "as": "blink_user2", "headers": {"Idempotency-Key": "fixture-empty"}}, "response": {"status": 400, "body": {"code": "empty_cart", "message": "请先在购物车选择要结算的商品", "request_id": "<request_id>"}}}

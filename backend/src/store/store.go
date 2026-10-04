@@ -28,6 +28,9 @@ var (
 	ErrCouponUnavailable  = errors.New("store: coupon not claimable") // 停用、未开始、已结束或所属店铺停业
 	ErrCouponSoldOut      = errors.New("store: coupon sold out")
 	ErrCouponLimitReached = errors.New("store: coupon per-user limit reached")
+
+	// 评价失败的原因（CreateReview）。
+	ErrOrderItemNotFound = errors.New("store: order item not found")
 )
 
 // ConflictError 指出冲突的唯一键名（与 migration 中的 UNIQUE KEY 名一致）。
@@ -47,6 +50,7 @@ const (
 	KeyChunkDocumentIndex   = "uk_knowledge_chunks_document_index"
 	KeyStoredFileObjectKey  = "uk_stored_files_object_key"
 	KeyCartItem             = "uk_cart_items_account_product_sku"
+	KeyCheckoutKey          = "uk_checkout_requests_account_key"
 	KeyPrimary              = "PRIMARY"
 )
 
@@ -199,6 +203,158 @@ type ContactUpdate struct {
 	Email *string
 }
 
+// CheckoutState 是结算事务内读到并加锁的数据：账户已选中的购物车项（含商品、店铺、规格的当前状态，商品和规格行已加排他锁）
+// 和账户全部未使用的券（已加锁，Status 按结算时间计算，已过期的为 expired）。
+type CheckoutState struct {
+	Lines   []CartLine
+	Coupons []OwnedCoupon
+}
+
+// PlannedItem 是计划写入的订单项；CartItemID 是它来自的购物车项，结算成功后删除。
+type PlannedItem struct {
+	domain.OrderItem
+	CartItemID string
+}
+
+// PlannedOrder 是一个店铺的订单。ID、订单号、状态和时间由 Store 填写；UserCouponIDs 是用在这个订单上的券
+// （平台券可以同时用在多个订单上，记录在第一个订单上）。
+type PlannedOrder struct {
+	MerchantID     string
+	TotalAmount    domain.Money
+	DiscountAmount domain.Money
+	PayAmount      domain.Money
+	Items          []PlannedItem
+	UserCouponIDs  []string
+}
+
+// CheckoutPlan 是调用方根据 CheckoutState 算出的下单方案。
+type CheckoutPlan struct {
+	Orders          []PlannedOrder
+	PaymentDeadline time.Time
+}
+
+// CheckoutResult 是一次结算的结果。Replayed 为 true 表示同一幂等键已经成功结算过，Orders 是那次的订单（当前状态）。
+type CheckoutResult struct {
+	RequestID string
+	Replayed  bool
+	Orders    []OrderDetail
+}
+
+// OrderDetail 是订单及其订单项和店铺名称。Payment 是最新的支付单，ReviewIDs 是已评价订单项的评价 ID（order_item_id → review_id），
+// 只有 GetOrder / UpdateOrder 填写。
+type OrderDetail struct {
+	domain.Order
+	MerchantName string
+	Payment      *domain.Payment
+	ReviewIDs    map[string]string
+}
+
+// OrderQuery 列出订单。AccountID / MerchantID / Status / OrderNo 为空表示不按该项过滤。按 created_at、order_id 倒序。
+type OrderQuery struct {
+	AccountID  string
+	MerchantID string
+	Status     domain.OrderStatus
+	OrderNo    string
+	Page       Page
+}
+
+// MaxCheckoutLines 是一次结算最多的购物车项数，与购物车行数上限一致。
+const MaxCheckoutLines = MaxCartLines
+
+// ValidateCheckoutPlan 是两种实现写入订单前共用的校验：每个订单至少一项，订单项来自已选中的购物车项且不重复，
+// 数量和单价与加锁后读到的购物车项一致（单价即当前规格价），数量不超过库存，金额自洽（实付 = 原价 − 优惠，原价 = Σ 单价 × 数量），用到的券属于本账户且未使用（店铺券只用在本店订单上）。
+func ValidateCheckoutPlan(st CheckoutState, plan CheckoutPlan) error {
+	if len(plan.Orders) == 0 {
+		return fmt.Errorf("%w: 没有要创建的订单", ErrInvalid)
+	}
+	lines := map[string]CartLine{}
+	for _, l := range st.Lines {
+		lines[l.CartItemID] = l
+	}
+	coupons := map[string]OwnedCoupon{}
+	for _, c := range st.Coupons {
+		if c.Status == domain.UserCouponUnused {
+			coupons[c.UserCouponID] = c
+		}
+	}
+	usedItems, usedCoupons := map[string]bool{}, map[string]bool{}
+	for _, o := range plan.Orders {
+		if len(o.Items) == 0 || o.MerchantID == "" {
+			return fmt.Errorf("%w: 订单缺少店铺或商品", ErrInvalid)
+		}
+		var total domain.Money
+		for _, it := range o.Items {
+			l, ok := lines[it.CartItemID]
+			switch {
+			case !ok || usedItems[it.CartItemID]:
+				return fmt.Errorf("%w: 订单项 %s 不是未结算的已选购物车项", ErrInvalid, it.CartItemID)
+			case it.ProductID != l.ProductID || it.SkuID != l.SkuID || it.MerchantID != o.MerchantID || l.MerchantID != o.MerchantID:
+				return fmt.Errorf("%w: 订单项 %s 与购物车项不一致", ErrInvalid, it.CartItemID)
+			case it.Quantity != l.Quantity || it.Price != l.UnitPrice:
+				return fmt.Errorf("%w: 订单项 %s 的数量或单价与购物车当前数据不一致", ErrInvalid, it.CartItemID)
+			case it.Quantity <= 0 || !l.SkuFound || it.Quantity > l.StockQuantity:
+				return fmt.Errorf("%w: 订单项 %s 数量 %d 超过库存", ErrInvalid, it.CartItemID, it.Quantity)
+			}
+			usedItems[it.CartItemID] = true
+			total += it.Price.Mul(it.Quantity)
+		}
+		if total != o.TotalAmount || o.DiscountAmount < 0 || o.DiscountAmount > o.TotalAmount || o.PayAmount != o.TotalAmount-o.DiscountAmount {
+			return fmt.Errorf("%w: 订单金额不一致（原价 %s / %s，优惠 %s，实付 %s）", ErrInvalid, total, o.TotalAmount, o.DiscountAmount, o.PayAmount)
+		}
+		inOrder := map[string]bool{}
+		for _, id := range o.UserCouponIDs {
+			c, ok := coupons[id]
+			// 店铺券只能用在本店订单上且只用一次；平台券可以分摊到多个订单，但每个订单只记一次。
+			shopCoupon := c.Coupon.MerchantID != ""
+			if !ok || inOrder[id] || (shopCoupon && (usedCoupons[id] || c.Coupon.MerchantID != o.MerchantID)) {
+				return fmt.Errorf("%w: 券 %s 不可用", ErrInvalid, id)
+			}
+			inOrder[id], usedCoupons[id] = true, true
+		}
+	}
+	return nil
+}
+
+// NewOrderNo 生成订单号：BS + 下单时间（UTC，到秒）+ 6 位随机数字。唯一键冲突时由调用方重试。
+func NewOrderNo(at time.Time) string {
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	n := (uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])) % 1000000
+	return fmt.Sprintf("BS%s%06d", at.UTC().Format("20060102150405"), n)
+}
+
+// CheckOrderUpdate 校验 UpdateOrder 的修改：不可变字段不变，订单与支付单的状态变化符合状态机（相同状态视为未变）。
+func CheckOrderUpdate(before, after domain.Order, payBefore, payAfter *domain.Payment) error {
+	if before.OrderID != after.OrderID || before.OrderNo != after.OrderNo || before.AccountID != after.AccountID ||
+		before.MerchantID != after.MerchantID || before.CheckoutRequestID != after.CheckoutRequestID || before.TotalAmount != after.TotalAmount ||
+		before.DiscountAmount != after.DiscountAmount || before.PayAmount != after.PayAmount || !before.CreatedAt.Equal(after.CreatedAt) {
+		return fmt.Errorf("%w: 不能修改订单的归属、金额或编号", ErrInvalid)
+	}
+	if before.Status != after.Status {
+		if err := before.Status.CanTransitionTo(after.Status); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalid, err)
+		}
+	}
+	if payBefore != nil && payAfter != nil {
+		if payBefore.PaymentID != payAfter.PaymentID || payBefore.Amount != payAfter.Amount || payBefore.OrderID != payAfter.OrderID {
+			return fmt.Errorf("%w: 不能修改支付单的编号或金额", ErrInvalid)
+		}
+		if payBefore.Status != payAfter.Status {
+			if err := payBefore.Status.CanTransitionTo(payAfter.Status); err != nil {
+				return fmt.Errorf("%w: %v", ErrInvalid, err)
+			}
+		}
+	}
+	// 订单与支付单的状态必须同步：已支付的订单必须有已支付的支付单，取消的订单不能有已支付的支付单。
+	if payAfter != nil {
+		paidOrder := after.Status == domain.OrderPaid || after.Status == domain.OrderShipped || after.Status == domain.OrderCompleted
+		if paidOrder != (payAfter.Status == domain.PaymentPaid) {
+			return fmt.Errorf("%w: 订单状态 %s 与支付单状态 %s 不一致", ErrInvalid, after.Status, payAfter.Status)
+		}
+	}
+	return nil
+}
+
 // NewAuthToken 生成 32 字节随机 token（base64url，无填充）及其摘要。
 func NewAuthToken() (token, hash string) {
 	var b [32]byte
@@ -316,6 +472,26 @@ type Store interface {
 	// ClaimCoupon 在事务中锁定券行后检查有效期、总量和每人限领，写入领取记录并增加已领数量。
 	// 券不存在 ErrNotFound；不可领 ErrCouponUnavailable / ErrCouponSoldOut / ErrCouponLimitReached。
 	ClaimCoupon(ctx context.Context, accountID, couponID string, at time.Time) (OwnedCoupon, error)
+
+	// 订单。
+	// Checkout 结算下单，全部在一个事务内：锁定账户行（与加购串行）→ 按 (账户, 幂等键) 查找已成功的结算，有则直接返回
+	// 那次的订单（Replayed）→ 锁定已选中的购物车项、商品（排他锁，按 ID 顺序）、店铺（共享锁）、规格（排他锁）和账户未使用的券 →
+	// 交给 fn 计价并给出方案 → 用 ValidateCheckoutPlan 校验 → 写订单、订单项、支付单（pending，到期时间为方案的 PaymentDeadline）→
+	// 扣减规格库存并重算商品库存 → 标记券已使用 → 删除已结算的购物车项 → 记录结算请求。fn 或任何一步出错时整体回滚，什么都不写。
+	Checkout(ctx context.Context, accountID, idempotencyKey string, at time.Time, fn func(st CheckoutState) (CheckoutPlan, error)) (CheckoutResult, error)
+	// GetOrder 返回订单详情（含最新支付单和评价 ID），不检查归属。
+	GetOrder(ctx context.Context, orderID string) (OrderDetail, error)
+	ListOrders(ctx context.Context, q OrderQuery) ([]OrderDetail, int, error)
+	// UpdateOrder 锁定订单（同一次结算的订单先锁结算请求行）和最新支付单，交给 fn 修改状态和时间后写回；修改须通过 CheckOrderUpdate。
+	// 订单变为 cancelled 时在同一事务内：支付单改为 closed（由 fn 设置）、把订单项数量加回仍存在的规格并重算商品库存、退回只用在本订单上的
+	// 店铺券；平台券在同一次结算的订单全部取消后退回。订单不存在返回 ErrNotFound；fn 出错时不做任何修改。
+	UpdateOrder(ctx context.Context, orderID string, fn func(o *domain.Order, p *domain.Payment) error) (OrderDetail, error)
+	// ListExpiredOrderIDs 返回 at 时刻已过支付期限仍待支付的订单 ID，按期限先后，最多 limit 个。
+	ListExpiredOrderIDs(ctx context.Context, at time.Time, limit int) ([]string, error)
+	// CreateReview 为订单项写评价：锁定订单（共享锁）后交给 fn 检查订单状态并填写评价内容。订单不存在或不属于 accountID 返回 ErrNotFound，
+	// 订单项不属于该订单返回 ErrOrderItemNotFound，同一订单项已评价返回 ErrConflict（键 KeyReviewOrderItem）。
+	// 评价的 ID、订单、订单项、商品、规格、账户和时间由这里填写。
+	CreateReview(ctx context.Context, accountID, orderID, orderItemID string, fn func(o domain.Order, item domain.OrderItem) (domain.ProductReview, error)) (domain.ProductReview, error)
 
 	// ApplySeed 在一个事务内写入开发种子：按主键“不存在才插入”，可重复执行；违反其他唯一键时整体回滚并返回 ErrConflict。
 	ApplySeed(ctx context.Context, data SeedData) (SeedResult, error)

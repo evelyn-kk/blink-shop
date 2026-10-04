@@ -1,0 +1,1 @@
+{"description": "别人的订单按不存在处理", "request": {"method": "GET", "path": "/api/v1/orders/o_seed_pending", "as": "blink_user2"}, "response": {"status": 404, "body": {"code": "order_not_found", "message": "订单不存在", "request_id": "<request_id>"}}}

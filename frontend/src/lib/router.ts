@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { DocumentScope } from '../api/knowledge';
+import type { OrderScope } from '../api/orders';
 
 // 轻量 hash 路由：#/products?keyword=..、#/products/:id。5.1 接入登录与角色路由时再替换为正式路由。
 export type Route =
@@ -12,6 +13,8 @@ export type Route =
   | { name: 'documents'; scope: DocumentScope; query: URLSearchParams }
   | { name: 'document_new'; scope: DocumentScope }
   | { name: 'document'; scope: DocumentScope; id: string }
+  | { name: 'orders'; scope: OrderScope; query: URLSearchParams }
+  | { name: 'order'; scope: OrderScope; id: string }
   | { name: 'not_found' };
 
 export function parseRoute(hash: string): Route {
@@ -42,6 +45,11 @@ export function parseRoute(hash: string): Route {
     if (parts.length === 2) return { name: 'documents', scope, query: new URLSearchParams(search) };
     if (parts.length === 3 && parts[2] === 'new') return { name: 'document_new', scope };
     if (parts.length === 3) return { name: 'document', scope, id: decodeURIComponent(parts[2]) };
+  }
+  if ((parts[0] === 'merchant' || parts[0] === 'admin') && parts[1] === 'orders') {
+    const scope: OrderScope = parts[0];
+    if (parts.length === 2) return { name: 'orders', scope, query: new URLSearchParams(search) };
+    if (parts.length === 3) return { name: 'order', scope, id: decodeURIComponent(parts[2]) };
   }
   return { name: 'not_found' };
 }
@@ -122,3 +130,20 @@ export function newDocumentHref(scope: DocumentScope): string {
   return `#/${scope}/documents/new`;
 }
 
+
+export function ordersHref(
+  scope: OrderScope,
+  params: { status?: string; orderNo?: string; merchantId?: string; page?: number } = {},
+): string {
+  const q = new URLSearchParams();
+  if (params.status) q.set('status', params.status);
+  if (params.orderNo) q.set('order_no', params.orderNo);
+  if (scope === 'admin' && params.merchantId) q.set('merchant_id', params.merchantId);
+  if (params.page && params.page > 1) q.set('page', String(params.page));
+  const text = q.toString();
+  return `#/${scope}/orders${text ? `?${text}` : ''}`;
+}
+
+export function orderHref(scope: OrderScope, id: string): string {
+  return `#/${scope}/orders/${encodeURIComponent(id)}`;
+}

@@ -285,3 +285,56 @@ export interface IngestionResult {
   truncated: boolean;
 }
 
+
+// ---------- 订单（openapi tag: orders / merchant / admin） ----------
+
+export type OrderStatus = 'pending_payment' | 'paid' | 'shipped' | 'completed' | 'cancelled';
+export type PaymentStatus = 'pending' | 'paid' | 'closed';
+
+export interface OrderItem {
+  order_item_id: string;
+  product_id: string;
+  sku_id: string;
+  /** 下单时的名称、规格、图片和单价（冻结）。 */
+  name: string;
+  sku_name: string;
+  image_url: string;
+  price: Money;
+  quantity: number;
+  amount: Money;
+  /** 评价 ID，未评价为空串；只有详情填写。 */
+  review_id: string;
+}
+
+export interface Payment {
+  payment_id: string;
+  amount: Money;
+  status: PaymentStatus;
+  method: string;
+  transaction_no: string;
+  expires_at: string;
+  paid_at: string | null;
+}
+
+export interface Order {
+  order_id: string;
+  order_no: string;
+  account_id: string;
+  merchant_id: string;
+  merchant_name: string;
+  status: OrderStatus;
+  total_amount: Money;
+  discount_amount: Money;
+  pay_amount: Money;
+  payment_deadline_at: string | null;
+  paid_at: string | null;
+  shipped_at: string | null;
+  completed_at: string | null;
+  closed_at: string | null;
+  cancel_reason: string;
+  items: OrderItem[];
+  /** 只在详情和订单操作的响应中出现。 */
+  payment?: Payment;
+  created_at: string;
+  updated_at: string;
+}

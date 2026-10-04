@@ -24,7 +24,11 @@ import (
 	"github.com/evelyn-kk/blink-shop/backend/src/store/mysqlstore"
 )
 
-const shutdownTimeout = 10 * time.Second
+const (
+	shutdownTimeout = 10 * time.Second
+	// orderCloseInterval 是检查超时未支付订单的间隔。
+	orderCloseInterval = time.Minute
+)
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -89,6 +93,9 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 			{Name: "mysql", Check: func(ctx context.Context) error { return schemaReady(ctx, st) }},
 		},
 	})
+
+	// 关闭超过支付期限的订单（回补库存、退券）；支付接口也会在发现超时时顺带关闭。
+	go server.RunOrderCloser(ctx, orderCloseInterval)
 
 	httpServer := &http.Server{
 		Handler:           server.Handler(),
