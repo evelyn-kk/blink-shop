@@ -10,7 +10,7 @@ import (
 	"github.com/evelyn-kk/blink-shop/backend/src/store"
 )
 
-func (s *Store) Checkout(ctx context.Context, accountID, idempotencyKey string, at time.Time, fn func(st store.CheckoutState) (store.CheckoutPlan, error)) (store.CheckoutResult, error) {
+func (s *Store) Checkout(ctx context.Context, accountID, idempotencyKey string, fn func(ctx context.Context, st store.CheckoutState) (store.CheckoutPlan, error)) (store.CheckoutResult, error) {
 	var out store.CheckoutResult
 	err := s.WithTx(ctx, func(ctx context.Context) error {
 		if _, ok := s.data.accounts[accountID]; !ok {
@@ -47,7 +47,6 @@ func (s *Store) Checkout(ctx context.Context, accountID, idempotencyKey string, 
 				continue
 			}
 			c := s.data.coupons[uc.CouponID]
-			uc.Status = store.EffectiveCouponStatus(uc.Status, c, at.UTC())
 			st.Coupons = append(st.Coupons, store.OwnedCoupon{UserCoupon: uc, Coupon: c})
 		}
 		sort.Slice(st.Coupons, func(i, j int) bool {
@@ -58,7 +57,7 @@ func (s *Store) Checkout(ctx context.Context, accountID, idempotencyKey string, 
 			return a.UserCouponID > b.UserCouponID
 		})
 
-		plan, err := fn(st)
+		plan, err := fn(ctx, st)
 		if err != nil {
 			return err
 		}

@@ -33,7 +33,7 @@ func TestConcurrentTradeNoDeadlock(t *testing.T) {
 			}
 		}
 	}
-	plan := func(st store.CheckoutState) (store.CheckoutPlan, error) {
+	plan := func(_ context.Context, st store.CheckoutState) (store.CheckoutPlan, error) {
 		byMerchant := map[string]*store.PlannedOrder{}
 		var order []string
 		for _, l := range st.Lines {
@@ -75,7 +75,7 @@ func TestConcurrentTradeNoDeadlock(t *testing.T) {
 	var toCancel []string
 	for i := range 10 {
 		acc := newBuyer(fmt.Sprintf("early_%d", i), i%2 == 1)
-		res, err := s.Checkout(ctx, acc, "k", at, plan)
+		res, err := s.Checkout(ctx, acc, "k", plan)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -94,7 +94,7 @@ func TestConcurrentTradeNoDeadlock(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := s.Checkout(ctx, acc, "k", at, plan); err != nil {
+			if _, err := s.Checkout(ctx, acc, "k", plan); err != nil {
 				errs <- fmt.Errorf("checkout: %w", err)
 			}
 		}()
@@ -156,6 +156,55 @@ func TestConcurrentTradeNoDeadlock(t *testing.T) {
 		}
 		if p.StockQuantity != sum || p.StockStatus != domain.StockStatusOf(sum) {
 			t.Fatalf("%s product stock = %d (%s), skus sum = %d", it.product, p.StockQuantity, p.StockStatus, sum)
+		}
+	}
+}
+
+// TestConcurrentProductUpdatesNoDeadlock：多个商家同时修改不同商品（含删除规格）不会死锁，也不会碰到其他商品的规格。
+// 删除规格曾用 `product_id = ? AND sku_id NOT IN (…)`，被优化器走主键范围扫描，锁到其他商品的规格行。
+func TestConcurrentProductUpdatesNoDeadlock(t *testing.T) {
+	ctx := context.Background()
+	s := migrated(t)
+	if _, err := s.ApplySeed(ctx, storetest.DevSeed(t)); err != nil {
+		t.Fatal(err)
+	}
+	products := []string{"p_seed_nova", "p_seed_vista", "p_seed_earbuds", "p_seed_mouse", "p_seed_keyboard", "p_seed_lamp"}
+	before := map[string]int{}
+	for _, id := range products {
+		p, _ := s.GetProduct(ctx, id)
+		before[id] = len(p.SKUs)
+	}
+	for round := range 10 {
+		var wg sync.WaitGroup
+		errs := make(chan error, len(products))
+		for _, id := range products {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, err := s.UpdateProduct(ctx, id, func(p *domain.Product) error {
+					// 偶数轮加一个临时规格，奇数轮删掉它：两种写法都要覆盖“删除规格”。
+					if round%2 == 0 {
+						p.SKUs = append(p.SKUs, domain.ProductSKU{SkuName: "临时", Price: domain.MustMoney("1"), StockQuantity: 1, Specs: map[string]string{}})
+					} else {
+						p.SKUs = p.SKUs[:len(p.SKUs)-1]
+					}
+					return nil
+				})
+				if err != nil {
+					errs <- fmt.Errorf("%s round %d: %w", id, round, err)
+				}
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range products {
+		p, _ := s.GetProduct(ctx, id)
+		if len(p.SKUs) != before[id] {
+			t.Fatalf("%s has %d skus, want %d", id, len(p.SKUs), before[id])
 		}
 	}
 }

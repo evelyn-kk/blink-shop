@@ -44,7 +44,7 @@ func scanPayment(row rowScanner) (domain.Payment, error) {
 	return p, nil
 }
 
-func (s *Store) Checkout(ctx context.Context, accountID, idempotencyKey string, at time.Time, fn func(st store.CheckoutState) (store.CheckoutPlan, error)) (store.CheckoutResult, error) {
+func (s *Store) Checkout(ctx context.Context, accountID, idempotencyKey string, fn func(ctx context.Context, st store.CheckoutState) (store.CheckoutPlan, error)) (store.CheckoutResult, error) {
 	var out store.CheckoutResult
 	var err error
 	for attempt := 0; attempt < 3; attempt++ {
@@ -78,11 +78,13 @@ func (s *Store) Checkout(ctx context.Context, accountID, idempotencyKey string, 
 				return mapErr(err)
 			}
 
-			st, err := s.lockCheckoutState(ctx, accountID, at)
+			st, err := s.lockCheckoutState(ctx, accountID)
 			if err != nil {
 				return err
 			}
-			plan, err := fn(st)
+			// fn 在本事务内读取计价数据：事务的一致性读快照建立于上面的幂等键查询（已持有账户锁之后），
+			// 所以排队等锁期间已提交的活动和分类变化都能读到。
+			plan, err := fn(ctx, st)
 			if err != nil {
 				return err
 			}
@@ -166,8 +168,8 @@ func (s *Store) Checkout(ctx context.Context, accountID, idempotencyKey string, 
 
 // lockCheckoutState 读取并锁定结算所需的数据，调用方已持有账户行锁。
 // 用户券最先锁：取消订单退券也是“用户券 → 商品 → 规格”的顺序，两边不会互相等待。
-func (s *Store) lockCheckoutState(ctx context.Context, accountID string, at time.Time) (store.CheckoutState, error) {
-	coupons, err := s.lockUnusedCoupons(ctx, accountID, at)
+func (s *Store) lockCheckoutState(ctx context.Context, accountID string) (store.CheckoutState, error) {
+	coupons, err := s.lockUnusedCoupons(ctx, accountID)
 	if err != nil {
 		return store.CheckoutState{}, err
 	}
@@ -272,8 +274,8 @@ func (s *Store) lockCheckoutState(ctx context.Context, accountID string, at time
 	return st, nil
 }
 
-// lockUnusedCoupons 按主键逐张锁定账户未使用的券（状态按 at 计算），同样不做范围加锁。
-func (s *Store) lockUnusedCoupons(ctx context.Context, accountID string, at time.Time) ([]store.OwnedCoupon, error) {
+// lockUnusedCoupons 按主键逐张锁定账户未使用的券，同样不做范围加锁。是否已过期由调用方按事务内的时间判断。
+func (s *Store) lockUnusedCoupons(ctx context.Context, accountID string) ([]store.OwnedCoupon, error) {
 	ids, err := s.plainIDs(ctx, `SELECT user_coupon_id FROM user_coupons WHERE account_id = ? AND status = 'unused'`, accountID)
 	if err != nil {
 		return nil, err
@@ -300,7 +302,6 @@ func (s *Store) lockUnusedCoupons(ctx context.Context, accountID string, at time
 			return nil, err
 		}
 		oc.Coupon, oc.ClaimedAt, oc.UsedAt = c, oc.ClaimedAt.UTC(), timePtr(usedAt)
-		oc.Status = store.EffectiveCouponStatus(oc.Status, c, at)
 		out = append(out, oc)
 	}
 	sort.Slice(out, func(i, j int) bool {

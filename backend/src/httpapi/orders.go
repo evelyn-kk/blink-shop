@@ -228,14 +228,14 @@ func (s *Server) handleCheckout(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	pc, err := s.loadPricingContext(r.Context())
-	if err != nil {
-		s.storeFailed(w, r, "load pricing", err)
-		return
-	}
-	deadline := pc.now.Add(s.paymentTimeout)
-	res, err := s.store.Checkout(r.Context(), acc.AccountID, key, pc.now, func(st store.CheckoutState) (store.CheckoutPlan, error) {
-		return checkoutPlan(pc, st, choice, in.ExpectedPayAmount, deadline)
+	res, err := s.store.Checkout(r.Context(), acc.AccountID, key, func(ctx context.Context, st store.CheckoutState) (store.CheckoutPlan, error) {
+		// 已拿到账户、购物车、库存和券的锁之后，在同一事务里读取当前时间、分类和有效活动：排队等锁再久，
+		// 计价也按此刻生效的规则，支付期限也从订单真正创建时开始算。
+		pc, err := s.loadPricingContext(ctx)
+		if err != nil {
+			return store.CheckoutPlan{}, err
+		}
+		return checkoutPlan(pc, st, choice, in.ExpectedPayAmount, pc.now.Add(s.paymentTimeout))
 	})
 	var apiErr *APIError
 	var ce *pricing.CouponError
@@ -265,10 +265,16 @@ func (s *Server) handleCheckout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, out)
 }
 
-// checkoutPlan 根据事务内加锁读到的购物车和券计价并拆单。与试算用同一个 pricingContext.price。
+// checkoutPlan 根据事务内加锁读到的购物车和券、事务内读取的计价数据（pc）计价并拆单。与试算用同一个 pricingContext.price。
 func checkoutPlan(pc pricingContext, st store.CheckoutState, choice []string, expected *domain.Money, deadline time.Time) (store.CheckoutPlan, error) {
 	if len(st.Lines) == 0 {
 		return store.CheckoutPlan{}, ErrEmptyCheckout
+	}
+	// 券的过期按事务内的当前时间判断。
+	coupons := make([]store.OwnedCoupon, len(st.Coupons))
+	for i, c := range st.Coupons {
+		c.Status = store.EffectiveCouponStatus(c.Status, c.Coupon, pc.now)
+		coupons[i] = c
 	}
 	// 已选中的项必须全部可以购买：不悄悄跳过失效商品（上游会跳过并照样清掉它们）。
 	for _, l := range st.Lines {
@@ -281,7 +287,7 @@ func checkoutPlan(pc pricingContext, st store.CheckoutState, choice []string, ex
 				Message: fmt.Sprintf("「%s」%s，请先在购物车里处理", name, reason)}
 		}
 	}
-	priced, err := pc.price(st.Lines, st.Coupons, choice)
+	priced, err := pc.price(st.Lines, coupons, choice)
 	if err != nil {
 		return store.CheckoutPlan{}, err
 	}

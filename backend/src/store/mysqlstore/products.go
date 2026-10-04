@@ -101,10 +101,9 @@ func (s *Store) UpdateProduct(ctx context.Context, productID string, fn func(p *
 		if err := s.writeProduct(ctx, p); err != nil {
 			return err
 		}
-		keep := make([]any, 0, len(p.SKUs)+1)
-		keep = append(keep, productID)
+		kept := map[string]bool{}
 		for _, sku := range p.SKUs {
-			keep = append(keep, sku.SkuID)
+			kept[sku.SkuID] = true
 			sku.UpdatedAt = now
 			if existing[sku.SkuID] {
 				err = s.writeSKU(ctx, sku)
@@ -116,9 +115,17 @@ func (s *Store) UpdateProduct(ctx context.Context, productID string, fn func(p *
 				return err
 			}
 		}
-		_, err = s.q(ctx).ExecContext(ctx, `DELETE FROM product_skus WHERE product_id = ? AND sku_id NOT IN (?`+
-			strings.Repeat(`, ?`, len(keep)-2)+`)`, keep...)
-		return mapErr(err)
+		// 只按主键删除本商品被去掉的规格。`product_id = ? AND sku_id NOT IN (…)` 会被优化器走主键范围扫描，
+		// 锁住其他商品的规格行，两个商家同时改不同商品、或改商品与结算并发时会死锁。
+		for id := range existing {
+			if kept[id] {
+				continue
+			}
+			if _, err := s.q(ctx).ExecContext(ctx, `DELETE FROM product_skus WHERE sku_id = ? AND product_id = ?`, id, productID); err != nil {
+				return mapErr(err)
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return domain.Product{}, err

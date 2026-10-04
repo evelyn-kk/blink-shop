@@ -61,7 +61,7 @@ func planBy(st store.CheckoutState, discounts map[string]string, coupons map[str
 	return plan
 }
 
-func simplePlan(st store.CheckoutState) (store.CheckoutPlan, error) {
+func simplePlan(_ context.Context, st store.CheckoutState) (store.CheckoutPlan, error) {
 	return planBy(st, nil, nil), nil
 }
 
@@ -133,8 +133,12 @@ func testCheckoutFlow(t *testing.T, s store.Store) {
 	}
 
 	calls := 0
-	res, err := s.Checkout(ctx, seed.User2ID, "key-1", couponAt, func(st store.CheckoutState) (store.CheckoutPlan, error) {
+	res, err := s.Checkout(ctx, seed.User2ID, "key-1", func(txCtx context.Context, st store.CheckoutState) (store.CheckoutPlan, error) {
 		calls++
+		// fn 的 ctx 属于结算事务：计价数据在事务里读取（内存实现若不是同一事务会在全局锁上卡死）。
+		if promos, _, err := s.ListActivePromotions(txCtx, store.PromotionQuery{At: couponAt, Page: store.Page{Page: 1, PageSize: 100}}); err != nil || len(promos) == 0 {
+			return store.CheckoutPlan{}, fmt.Errorf("promotions in tx = %v, %v", promos, err)
+		}
 		if len(st.Lines) != 2 || st.Lines[0].ProductID != "p_seed_earbuds" || st.Lines[0].StockQuantity != 5 || st.Lines[1].MerchantName == "" {
 			return store.CheckoutPlan{}, fmt.Errorf("unexpected lines %+v", st.Lines)
 		}
@@ -187,7 +191,7 @@ func testCheckoutFlow(t *testing.T, s store.Store) {
 	}
 
 	// 同一幂等键：不再调用 fn，返回同一批订单。
-	again, err := s.Checkout(ctx, seed.User2ID, "key-1", couponAt, func(store.CheckoutState) (store.CheckoutPlan, error) {
+	again, err := s.Checkout(ctx, seed.User2ID, "key-1", func(context.Context, store.CheckoutState) (store.CheckoutPlan, error) {
 		t.Fatal("fn called on replay")
 		return store.CheckoutPlan{}, nil
 	})
@@ -195,7 +199,7 @@ func testCheckoutFlow(t *testing.T, s store.Store) {
 		t.Fatalf("replay = %+v, %v", again, err)
 	}
 	// 另一个账户用同一个键互不影响（购物车为空，fn 收到空列表）。
-	if _, err := s.Checkout(ctx, seed.UserID, "key-1", couponAt, func(st store.CheckoutState) (store.CheckoutPlan, error) {
+	if _, err := s.Checkout(ctx, seed.UserID, "key-1", func(_ context.Context, st store.CheckoutState) (store.CheckoutPlan, error) {
 		if len(st.Lines) != 0 {
 			t.Fatalf("other account lines = %+v", st.Lines)
 		}
@@ -303,7 +307,9 @@ func testCheckoutRollback(t *testing.T, s store.Store) {
 		}
 	}
 	boom := errors.New("boom")
-	if _, err := s.Checkout(ctx, seed.User2ID, "k", couponAt, func(store.CheckoutState) (store.CheckoutPlan, error) { return store.CheckoutPlan{}, boom }); !errors.Is(err, boom) {
+	if _, err := s.Checkout(ctx, seed.User2ID, "k", func(context.Context, store.CheckoutState) (store.CheckoutPlan, error) {
+		return store.CheckoutPlan{}, boom
+	}); !errors.Is(err, boom) {
 		t.Fatalf("fn error = %v", err)
 	}
 	unchanged("fn error")
@@ -345,7 +351,7 @@ func testCheckoutRollback(t *testing.T, s store.Store) {
 		}},
 	}
 	for _, c := range bad {
-		_, err := s.Checkout(ctx, seed.User2ID, "k", couponAt, func(st store.CheckoutState) (store.CheckoutPlan, error) {
+		_, err := s.Checkout(ctx, seed.User2ID, "k", func(_ context.Context, st store.CheckoutState) (store.CheckoutPlan, error) {
 			p := planBy(st, nil, nil)
 			for i := range p.Orders {
 				p.Orders[i].PayAmount = p.Orders[i].TotalAmount
@@ -364,7 +370,7 @@ func testCheckoutRollback(t *testing.T, s store.Store) {
 		unchanged(c.name)
 	}
 	// 失败的键可以再用：成功一次后才固定。
-	if res, err := s.Checkout(ctx, seed.User2ID, "k", couponAt, simplePlan); err != nil || res.Replayed || len(res.Orders) != 2 {
+	if res, err := s.Checkout(ctx, seed.User2ID, "k", simplePlan); err != nil || res.Replayed || len(res.Orders) != 2 {
 		t.Fatalf("checkout after failures = %+v, %v", res, err)
 	}
 }
@@ -391,13 +397,13 @@ func testCheckoutConcurrentStock(t *testing.T, s store.Store) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, results[i] = s.Checkout(ctx, acc, "buy", couponAt, func(st store.CheckoutState) (store.CheckoutPlan, error) {
+			_, results[i] = s.Checkout(ctx, acc, "buy", func(_ context.Context, st store.CheckoutState) (store.CheckoutPlan, error) {
 				for _, l := range st.Lines {
 					if l.Quantity > l.StockQuantity {
 						return store.CheckoutPlan{}, errSoldOut
 					}
 				}
-				return simplePlan(st)
+				return simplePlan(ctx, st)
 			})
 		}()
 	}
@@ -440,7 +446,7 @@ func testCheckoutSameKey(t *testing.T, s store.Store) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			res, err := s.Checkout(ctx, seed.User2ID, "same-key", couponAt, simplePlan)
+			res, err := s.Checkout(ctx, seed.User2ID, "same-key", simplePlan)
 			if err != nil {
 				t.Error(err)
 				return
@@ -548,7 +554,7 @@ func testExpiredOrders(t *testing.T, s store.Store) {
 	if _, err := s.AddCartItem(ctx, seed.User2ID, "p_seed_lamp", "sku_seed_lamp_white", add(1)); err != nil {
 		t.Fatal(err)
 	}
-	res, err := s.Checkout(ctx, seed.User2ID, "k", couponAt, simplePlan)
+	res, err := s.Checkout(ctx, seed.User2ID, "k", simplePlan)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -625,7 +631,7 @@ func testCheckoutItemOrder(t *testing.T, s store.Store) {
 		}
 		time.Sleep(2 * time.Millisecond) // 加入时间精确到毫秒
 	}
-	res, err := s.Checkout(ctx, seed.User2ID, "k", couponAt, simplePlan)
+	res, err := s.Checkout(ctx, seed.User2ID, "k", simplePlan)
 	if err != nil || len(res.Orders) != 1 {
 		t.Fatalf("checkout = %+v, %v", res, err)
 	}

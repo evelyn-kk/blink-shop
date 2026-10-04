@@ -204,7 +204,7 @@ type ContactUpdate struct {
 }
 
 // CheckoutState 是结算事务内读到并加锁的数据：账户已选中的购物车项（含商品、店铺、规格的当前状态，商品和规格行已加排他锁）
-// 和账户全部未使用的券（已加锁，Status 按结算时间计算，已过期的为 expired）。
+// 和账户全部未使用的券（已加锁，Status 是存储的状态 unused；是否已过期由调用方按事务内的当前时间判断）。
 type CheckoutState struct {
 	Lines   []CartLine
 	Coupons []OwnedCoupon
@@ -478,7 +478,9 @@ type Store interface {
 	// 那次的订单（Replayed）→ 锁定已选中的购物车项、商品（排他锁，按 ID 顺序）、店铺（共享锁）、规格（排他锁）和账户未使用的券 →
 	// 交给 fn 计价并给出方案 → 用 ValidateCheckoutPlan 校验 → 写订单、订单项、支付单（pending，到期时间为方案的 PaymentDeadline）→
 	// 扣减规格库存并重算商品库存 → 标记券已使用 → 删除已结算的购物车项 → 记录结算请求。fn 或任何一步出错时整体回滚，什么都不写。
-	Checkout(ctx context.Context, accountID, idempotencyKey string, at time.Time, fn func(st CheckoutState) (CheckoutPlan, error)) (CheckoutResult, error)
+	// fn 收到的 ctx 属于这个事务：计价要读的数据（分类、有效活动）和“当前时间”都应在 fn 里读取，与加锁后的购物车、库存、券一致，
+	// 支付期限也从这里开始计算，不受排队等锁的时间影响。
+	Checkout(ctx context.Context, accountID, idempotencyKey string, fn func(ctx context.Context, st CheckoutState) (CheckoutPlan, error)) (CheckoutResult, error)
 	// GetOrder 返回订单详情（含最新支付单和评价 ID），不检查归属。
 	GetOrder(ctx context.Context, orderID string) (OrderDetail, error)
 	ListOrders(ctx context.Context, q OrderQuery) ([]OrderDetail, int, error)
