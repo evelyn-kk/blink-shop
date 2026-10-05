@@ -59,4 +59,3 @@ export function listPromotionsFor(productId: string): Promise<Page<Promotion>> {
 export function listMerchants(): Promise<Page<Merchant>> {
   return request('/merchants?page_size=100');
 }
-

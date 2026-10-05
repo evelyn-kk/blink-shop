@@ -125,7 +125,7 @@ export function DocumentFormPage({ scope }: { scope: DocumentScope }) {
       if (form.kind === 'url') input.source_url = form.body.trim();
       const res = await ingestDocument(scope, input);
       const d = res.document;
-      notify('success', 
+      notify('success',
         res.duplicate
           ? `内容与已有资料「${d.title}」相同，没有重复入库`
           : `「${d.title}」已入库，共 ${d.chunk_count} 个片段${res.truncated ? '（内容过长，已截断）' : ''}`,

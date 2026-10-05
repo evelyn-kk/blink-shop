@@ -1,0 +1,2 @@
+# Windows 批处理脚本按惯例用 CRLF 换行，行尾的 \r 不算空白错误（git diff --check）。
+*.bat whitespace=cr-at-eol

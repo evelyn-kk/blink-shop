@@ -203,6 +203,9 @@ jobs:
         run: |
           npm ci
           npm run openapi:lint
+      - name: Whitespace
+        # 全仓库检查行尾空白、空格加制表符缩进、文件末尾多余空行（与 git show --check 同一规则）。
+        run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
       - name: Compose config
         run: docker compose -f deployments/docker-compose.yml config -q
       - name: Compose images pinned by digest
