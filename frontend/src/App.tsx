@@ -3,7 +3,7 @@ import { logout } from './api/auth';
 import { NoticeHost } from './components/NoticeHost';
 import { Empty } from './components/StateView';
 import { RequireRole } from './components/RequireRole';
-import { documentsHref, loginHref, merchantProductsHref, navigate, ordersHref, productsHref, useRoute } from './lib/router';
+import { documentsHref, loginHref, merchantProductsHref, navigate, ordersHref, productsHref, promotionsHref, reviewsHref, useRoute } from './lib/router';
 import { clearSession, useSession } from './lib/session';
 import { DocumentDetailPage } from './pages/DocumentDetailPage';
 import { DocumentFormPage } from './pages/DocumentFormPage';
@@ -15,6 +15,9 @@ import { OrderDetailPage } from './pages/OrderDetailPage';
 import { OrdersPage } from './pages/OrdersPage';
 import { ProductDetailPage } from './pages/ProductDetailPage';
 import { ProductListPage } from './pages/ProductListPage';
+import { PromotionFormPage } from './pages/PromotionFormPage';
+import { PromotionsPage } from './pages/PromotionsPage';
+import { ReviewsPage } from './pages/ReviewsPage';
 
 export default function App() {
   const route = useRoute();
@@ -39,6 +42,26 @@ export default function App() {
         {route.name === 'merchant_product_edit' && (
           <RequireRole role="merchant">
             <MerchantProductFormPage key={route.id} id={route.id} />
+          </RequireRole>
+        )}
+        {route.name === 'merchant_promotions' && (
+          <RequireRole role="merchant">
+            <PromotionsPage query={route.query} />
+          </RequireRole>
+        )}
+        {route.name === 'merchant_promotion_new' && (
+          <RequireRole role="merchant">
+            <PromotionFormPage />
+          </RequireRole>
+        )}
+        {route.name === 'merchant_promotion_edit' && (
+          <RequireRole role="merchant">
+            <PromotionFormPage key={route.id} id={route.id} />
+          </RequireRole>
+        )}
+        {route.name === 'merchant_reviews' && (
+          <RequireRole role="merchant">
+            <ReviewsPage query={route.query} />
           </RequireRole>
         )}
         {route.name === 'documents' && (
@@ -106,6 +129,8 @@ function TopBar() {
           <>
             <a href={merchantProductsHref()}>我的商品</a>
             <a href={ordersHref('merchant')}>订单</a>
+            <a href={promotionsHref()}>促销</a>
+            <a href={reviewsHref()}>评价</a>
             <a href={documentsHref('merchant')}>知识资料</a>
           </>
         )}
@@ -125,7 +150,7 @@ function TopBar() {
             </button>
           </>
         ) : (
-          <a className="button" href={loginHref(window.location.hash)}>
+          <a className="button" href={window.location.hash.startsWith('#/login') ? '#/login' : loginHref(window.location.hash)}>
             登录
           </a>
         )}

@@ -56,9 +56,14 @@ export function MerchantProductsPage({ query }: { query: URLSearchParams }) {
     <section aria-labelledby="mp-title">
       <div className="page-head">
         <h2 id="mp-title">我的商品</h2>
-        <a className="button primary" href="#/merchant/products/new">
-          新建商品
-        </a>
+        <div className="mp-actions">
+          <button type="button" className="button" onClick={reload}>
+            刷新
+          </button>
+          <a className="button primary" href="#/merchant/products/new">
+            新建商品
+          </a>
+        </div>
       </div>
       {deleteError && <ErrorState message={deleteError} />}
 

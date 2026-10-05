@@ -41,6 +41,9 @@ export function OrdersPage({ scope, query }: { scope: OrderScope; query: URLSear
     <section aria-labelledby="orders-title">
       <div className="page-head">
         <h2 id="orders-title">{scope === 'admin' ? '订单管理' : '订单'}</h2>
+        <button type="button" className="button" onClick={reload}>
+          刷新
+        </button>
       </div>
 
       <nav className="filter-tabs" aria-label="按状态筛选">

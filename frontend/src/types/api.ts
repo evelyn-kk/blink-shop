@@ -338,3 +338,48 @@ export interface Order {
   created_at: string;
   updated_at: string;
 }
+
+// ---------- 商家促销与评价（openapi tag: merchant） ----------
+
+export interface MerchantPromotion extends Promotion {
+  /** 单品促销为商品名，品类促销为分类名，全店为空串。 */
+  target_name: string;
+  /** 规则说明，与购物车优惠明细一致。 */
+  description: string;
+  status: 'active' | 'inactive';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PromotionInput {
+  name?: string;
+  scope?: 'merchant' | 'product' | 'category';
+  product_id?: string;
+  category_id?: string;
+  type?: 'full_reduction' | 'discount';
+  threshold_amount?: Money;
+  discount_amount?: Money;
+  /** 实付比例，0.95 = 9.5 折。 */
+  discount_rate?: string;
+  stackable?: boolean;
+  start_at?: string;
+  end_at?: string;
+  status?: 'active' | 'inactive';
+}
+
+export interface MerchantReview {
+  review_id: string;
+  order_id: string;
+  product_id: string;
+  product_name: string;
+  sku_id: string;
+  /** 脱敏后的显示名。 */
+  reviewer_name: string;
+  rating: number;
+  content: string;
+  tags: string[];
+  status: 'visible' | 'hidden';
+  merchant_reply: string;
+  merchant_replied_at: string | null;
+  created_at: string;
+}

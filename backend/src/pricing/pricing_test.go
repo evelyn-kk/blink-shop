@@ -274,7 +274,7 @@ func TestHintsAndDescriptions(t *testing.T) {
 			return p
 		}(): "满 199 打 9 折",
 	} {
-		if got := describePromotion(in); got != want {
+		if got := DescribePromotion(in); got != want {
 			t.Errorf("%s: %q, want %q", in.PromotionID, got, want)
 		}
 	}

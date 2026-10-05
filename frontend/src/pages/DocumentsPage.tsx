@@ -41,9 +41,14 @@ export function DocumentsPage({ scope, query }: { scope: DocumentScope; query: U
     <section aria-labelledby="docs-title">
       <div className="page-head">
         <h2 id="docs-title">{scope === 'admin' ? '知识资料（全部）' : '知识资料'}</h2>
-        <a className="button primary" href={newDocumentHref(scope)}>
-          {scope === 'admin' ? '采集资料' : '添加资料'}
-        </a>
+        <div className="mp-actions">
+          <button type="button" className="button" onClick={reload}>
+            刷新
+          </button>
+          <a className="button primary" href={newDocumentHref(scope)}>
+            {scope === 'admin' ? '采集资料' : '添加资料'}
+          </a>
+        </div>
       </div>
       <p className="muted small">导购助手回答问题时会检索这里已入库的资料，并在回复中注明出处。</p>
 

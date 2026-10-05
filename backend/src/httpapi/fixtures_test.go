@@ -99,6 +99,7 @@ var fixturePlaceholders = map[string]func(got any, rec *httptest.ResponseRecorde
 	"<payment_id>":          idPlaceholder("pay_"),
 	"<checkout_request_id>": idPlaceholder("chk_"),
 	"<review_id>":           idPlaceholder("rv_"),
+	"<promotion_id>":        idPlaceholder("promo_"),
 	"<order_no>": func(got any, _ *httptest.ResponseRecorder) bool {
 		s, ok := got.(string)
 		return ok && orderNoPattern.MatchString(s)

@@ -156,6 +156,13 @@ func (s *Server) routes() {
 	s.handle("POST /api/v1/orders/{action}", accessUser, s.handleOrderAction)
 	s.handle("POST /api/v1/orders/{id}/items/{action}", accessUser, s.handleOrderItemAction)
 
+	s.handle("GET /api/v1/merchant/promotions", accessMerchant, s.handleListMerchantPromotions)
+	s.handle("POST /api/v1/merchant/promotions", accessMerchant, s.handleCreateMerchantPromotion)
+	s.handle("GET /api/v1/merchant/promotions/{id}", accessMerchant, s.handleGetMerchantPromotion)
+	s.handle("PATCH /api/v1/merchant/promotions/{id}", accessMerchant, s.handleUpdateMerchantPromotion)
+	s.handle("GET /api/v1/merchant/reviews", accessMerchant, s.handleListMerchantReviews)
+	s.handle("POST /api/v1/merchant/reviews/{action}", accessMerchant, s.handleMerchantReviewAction)
+
 	s.handle("GET /api/v1/merchant/orders", accessMerchant, s.handleListMerchantOrders)
 	s.handle("GET /api/v1/merchant/orders/{id}", accessMerchant, s.handleGetMerchantOrder)
 	s.handle("PATCH /api/v1/merchant/orders/{id}", accessMerchant, s.handleUpdateMerchantOrder)

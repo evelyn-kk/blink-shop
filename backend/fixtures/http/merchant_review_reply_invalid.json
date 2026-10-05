@@ -1,0 +1,1 @@
+{"description": "回复内容为空：400，field 指向 reply（上游返回 404）", "request": {"method": "POST", "path": "/api/v1/merchant/reviews/rv_seed_mouse:reply", "as": "blink_merchant", "body": {"reply": "  "}}, "response": {"status": 400, "body": {"code": "invalid_argument", "message": "回复内容需要 1 到 500 个字", "field": "reply", "request_id": "<request_id>"}}}

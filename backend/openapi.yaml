@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Blink Shop API
-  version: 0.9.0
+  version: 0.10.0
   description: |
     Blink Shop 的单一接口契约。约定：
     - 所有路径前缀为 `/api/v1`，JSON 字段使用 snake_case。
@@ -1807,6 +1807,230 @@ paths:
               example:
                 code: review_exists
                 message: 这件商品已经评价过了
+  /merchant/promotions:
+    get:
+      tags: [merchant]
+      operationId: listMerchantPromotions
+      summary: 本店促销
+      description: 本店全部促销（含停用和已过期的），按创建时间倒序。
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, inactive]
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 促销分页列表
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/MerchantPromotion"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [merchant]
+      operationId: createMerchantPromotion
+      summary: 创建促销
+      description: |
+        范围为全店（默认）、本店的某个商品或某个品类（只作用于本店商品）；上游只能创建全店满减。规则见 backend/README.md“营销规则”。
+        不传开始时间为现在，不传结束时间为开始后 30 天；结束必须晚于开始和现在，最长 366 天。stackable 默认 true。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromotionInput"
+      responses:
+        "201":
+          $ref: "#/components/responses/MerchantPromotionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /merchant/promotions/{id}:
+    get:
+      tags: [merchant]
+      operationId: getMerchantPromotion
+      summary: 本店促销详情
+      description: 编辑页使用（上游没有这个接口）。其他店铺的促销 404。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/MerchantPromotionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 促销不存在或不属于本店（`promotion_not_found`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: promotion_not_found
+                message: 促销不存在
+    patch:
+      tags: [merchant]
+      operationId: updateMerchantPromotion
+      summary: 修改、停用或启用促销
+      description: |
+        只修改出现的字段，合并后整体按创建时的规则校验（时长上限只在改了时间时检查）。没有删除接口，停用即可（status=inactive）。
+        其他店铺的促销 404（与上游一致）；上游只能改 status。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromotionInput"
+      responses:
+        "200":
+          $ref: "#/components/responses/MerchantPromotionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 促销不存在或不属于本店（`promotion_not_found`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: promotion_not_found
+                message: 促销不存在
+  /merchant/reviews:
+    get:
+      tags: [merchant]
+      operationId: listMerchantReviews
+      summary: 本店商品收到的评价
+      description: 含平台隐藏的评价（status=hidden），按评价时间倒序。不返回评价人的账户 ID，评价人名称脱敏。
+      parameters:
+        - name: replied
+          in: query
+          required: false
+          description: true 只看已回复，false 只看未回复；不传为全部。
+          schema:
+            type: string
+            enum: ["true", "false"]
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 评价分页列表
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/MerchantReview"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /merchant/reviews/{id}:reply:
+    post:
+      tags: [merchant]
+      operationId: replyMerchantReview
+      summary: 回复评价
+      description: 与上游一致，动作写在路径段内。再次回复覆盖原来的内容。回复去掉首尾空白后 1–500 字，否则 400（上游空回复返回 404、超长静默截断）。其他店铺的评价 404。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reply]
+              properties:
+                reply:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+      responses:
+        "200":
+          description: 回复后的评价
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MerchantReview"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 评价不存在或不属于本店商品（`review_not_found`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: review_not_found
+                message: 评价不存在
   /merchant/orders:
     get:
       tags: [merchant]
@@ -3293,6 +3517,112 @@ components:
         created_at:
           type: string
           format: date-time
+    PromotionInput:
+      type: object
+      description: 创建时 name、减免金额或折扣率必填；修改时只改出现的字段。
+      properties:
+        name:
+          type: string
+          maxLength: 64
+        scope:
+          type: string
+          enum: [merchant, product, category]
+          default: merchant
+        merchant_id:
+          type: string
+          description: 只能是自己的店铺，或者不传。
+        product_id:
+          type: string
+          description: scope=product 时必填，必须是本店未删除的商品。
+        category_id:
+          type: string
+          description: scope=category 时必填。
+        type:
+          type: string
+          enum: [full_reduction, discount]
+          default: full_reduction
+        threshold_amount:
+          $ref: "#/components/schemas/MoneyInput"
+        discount_amount:
+          $ref: "#/components/schemas/MoneyInput"
+          description: 满减时必填，大于 0，门槛大于 0 时不能超过门槛。
+        discount_rate:
+          description: 折扣时必填，实付比例，大于 0 小于 1（0.95 = 9.5 折）。
+          oneOf:
+            - type: string
+            - type: number
+        stackable:
+          type: boolean
+          default: true
+        start_at:
+          type: string
+          format: date-time
+        end_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [active, inactive]
+          default: active
+    MerchantPromotion:
+      allOf:
+        - $ref: "#/components/schemas/Promotion"
+        - type: object
+          required: [target_name, description, status, created_at, updated_at]
+          properties:
+            target_name:
+              type: string
+              description: 单品促销为商品名，品类促销为分类名，全店促销为空串。
+            description:
+              type: string
+              description: 规则说明，与购物车优惠明细一致，例如“满 200 减 25”“9 折”。
+            status:
+              type: string
+              enum: [active, inactive]
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
+    MerchantReview:
+      type: object
+      required: [review_id, order_id, product_id, product_name, sku_id, reviewer_name, rating, content, tags, status, merchant_reply, merchant_replied_at, created_at]
+      properties:
+        review_id:
+          type: string
+        order_id:
+          type: string
+        product_id:
+          type: string
+        product_name:
+          type: string
+        sku_id:
+          type: string
+        reviewer_name:
+          type: string
+          description: 脱敏后的显示名（只保留第一个字）。
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        content:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [visible, hidden]
+        merchant_reply:
+          type: string
+        merchant_replied_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
     FileUpload:
       type: object
       required: [file]
@@ -3360,7 +3690,7 @@ components:
             机器可读错误码。通用错误码：`invalid_argument`、`invalid_json`、`unauthorized`、`forbidden`、`not_found`、
             `method_not_allowed`、`conflict`、`payload_too_large`、`unsupported_media_type`、`rate_limited`、
             `internal_error`、`not_ready`、`timeout`。认证相关：`invalid_credential`、`username_exists`、
-            `account_inactive`、`account_risk`。目录：`product_not_found`。商家：`product_under_review`。订单：`order_not_found`、`order_item_not_found`、`empty_cart`、`item_unavailable`、`price_changed`、`order_status_conflict`、`order_expired`、`order_not_completed`、`review_exists`。
+            `account_inactive`、`account_risk`。目录：`product_not_found`。商家：`product_under_review`。订单：`order_not_found`、`order_item_not_found`、`empty_cart`、`item_unavailable`、`price_changed`、`order_status_conflict`、`order_expired`、`order_not_completed`、`review_exists`。商家营销：`promotion_not_found`、`review_not_found`。
           examples: [not_found]
         message:
           type: string
@@ -3535,6 +3865,15 @@ components:
             code: conflict
             message: 当前状态不允许该操作
             request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
+    MerchantPromotionResponse:
+      description: 促销
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MerchantPromotion"
     OrderResponse:
       description: 订单（含支付单）
       headers:

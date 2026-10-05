@@ -191,6 +191,29 @@ type PromotionQuery struct {
 	Page        Page
 }
 
+// PromotionListQuery 列出促销（含停用和已过期的）。MerchantID 为空表示全部（管理员）；Status 为空表示全部。
+// 按 created_at、promotion_id 倒序。
+type PromotionListQuery struct {
+	MerchantID string
+	Status     domain.EntityStatus
+	Page       Page
+}
+
+// MerchantReviewQuery 列出某商家商品收到的评价（含隐藏的）。Replied 为 nil 表示不按是否已回复过滤。
+// 按 created_at、review_id 倒序。
+type MerchantReviewQuery struct {
+	MerchantID string
+	Replied    *bool
+	Page       Page
+}
+
+// MerchantReview 是商家看到的评价：带商品名称和评价人当前的显示名（账户已注销时为空）。
+type MerchantReview struct {
+	domain.ProductReview
+	ProductName  string
+	ReviewerName string
+}
+
 // ProfileUpdate 是个人资料的部分更新，nil 表示不修改。
 type ProfileUpdate struct {
 	DisplayName *string
@@ -495,6 +518,19 @@ type Store interface {
 	// 评价的 ID、订单、订单项、商品、规格、账户和时间由这里填写。
 	CreateReview(ctx context.Context, accountID, orderID, orderItemID string, fn func(o domain.Order, item domain.OrderItem) (domain.ProductReview, error)) (domain.ProductReview, error)
 
+	// 促销管理。CreatePromotion 写入前用 ValidatePromotion 校验，PromotionID 为空时生成。
+	CreatePromotion(ctx context.Context, p domain.PromotionRule) (domain.PromotionRule, error)
+	GetPromotion(ctx context.Context, promotionID string) (domain.PromotionRule, error)
+	// UpdatePromotion 锁定促销行交给 fn 修改后写回（ID、创建时间不变）；fn 出错不修改。不存在返回 ErrNotFound。
+	// fn 收到的 ctx 属于这个事务，fn 里的查询（如核对商品归属）要用它。
+	UpdatePromotion(ctx context.Context, promotionID string, fn func(ctx context.Context, p *domain.PromotionRule) error) (domain.PromotionRule, error)
+	ListPromotions(ctx context.Context, q PromotionListQuery) ([]domain.PromotionRule, int, error)
+
+	// 商家评价。只能看到和回复商品属于 merchantID 的评价，其他的按不存在处理（ErrNotFound）。
+	ListMerchantReviews(ctx context.Context, q MerchantReviewQuery) ([]MerchantReview, int, error)
+	// ReplyReview 写入（或覆盖）商家回复和回复时间。
+	ReplyReview(ctx context.Context, merchantID, reviewID, reply string, at time.Time) (MerchantReview, error)
+
 	// ApplySeed 在一个事务内写入开发种子：按主键“不存在才插入”，可重复执行；违反其他唯一键时整体回滚并返回 ErrConflict。
 	ApplySeed(ctx context.Context, data SeedData) (SeedResult, error)
 }
@@ -549,10 +585,43 @@ func ValidateNewAccount(in NewAccount) error {
 	return nil
 }
 
-// ValidatePromotion 是两种实现写入促销规则前共用的校验：折扣率必须在 [0, 1]。
+// ValidatePromotion 是两种实现写入促销规则前共用的校验：折扣率在 [0, 1]，名称、类型、状态、范围与对应 ID 一致，结束晚于开始，金额不为负。
 func ValidatePromotion(p domain.PromotionRule) error {
 	if err := p.DiscountRate.Validate(); err != nil {
 		return fmt.Errorf("%w: 促销 %s: %v", ErrInvalid, p.PromotionID, err)
+	}
+	bad := func(msg string) error { return fmt.Errorf("%w: 促销 %s: %s", ErrInvalid, p.PromotionID, msg) }
+	switch {
+	case p.Name == "":
+		return bad("名称为空")
+	case p.Type != domain.PromotionFullReduction && p.Type != domain.PromotionDiscount:
+		return bad("类型不合法")
+	case p.Status != domain.StatusActive && p.Status != domain.StatusInactive:
+		return bad("状态只能是 active 或 inactive")
+	case !p.EndAt.After(p.StartAt):
+		return bad("结束时间必须晚于开始时间")
+	case p.ThresholdAmount < 0 || p.DiscountAmount < 0:
+		return bad("金额不能为负")
+	}
+	switch p.Scope {
+	case domain.ScopePlatform:
+		if p.MerchantID != "" || p.ProductID != "" || p.CategoryID != "" {
+			return bad("平台促销不能指定店铺、商品或分类")
+		}
+	case domain.ScopeMerchant:
+		if p.MerchantID == "" || p.ProductID != "" || p.CategoryID != "" {
+			return bad("店铺促销只能指定店铺")
+		}
+	case domain.ScopeProduct:
+		if p.ProductID == "" || p.CategoryID != "" {
+			return bad("单品促销必须指定商品")
+		}
+	case domain.ScopeCategory:
+		if p.CategoryID == "" || p.ProductID != "" {
+			return bad("品类促销必须指定分类")
+		}
+	default:
+		return bad("范围不合法")
 	}
 	return nil
 }

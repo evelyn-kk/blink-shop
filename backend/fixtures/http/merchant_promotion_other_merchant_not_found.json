@@ -1,0 +1,1 @@
+{"description": "修改其他店铺的促销按不存在处理（与上游一致返回 404）", "request": {"method": "PATCH", "path": "/api/v1/merchant/promotions/promo_seed_digital", "as": "blink_merchant2", "body": {"status": "inactive"}}, "response": {"status": 404, "body": {"code": "promotion_not_found", "message": "促销不存在", "request_id": "<request_id>"}}}

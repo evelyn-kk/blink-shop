@@ -60,7 +60,8 @@ h3 {
 
 .topnav {
   display: flex;
-  gap: 16px;
+  flex-wrap: wrap;
+  column-gap: 16px;
   flex: 1 1 auto;
 }
 
@@ -68,6 +69,7 @@ h3 {
   display: inline-flex;
   align-items: center;
   min-height: 44px;
+  white-space: nowrap; /* 只在链接之间换行，不把“商品巡检”拆成两行 */
 }
 
 .account {
@@ -1028,4 +1030,66 @@ td {
   .data-table .num {
     text-align: end;
   }
+}
+
+/* ---------- 促销与评价 ---------- */
+
+.row-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rating {
+  color: var(--warn);
+  letter-spacing: 1px;
+}
+
+.review-content {
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+
+.merchant-reply {
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 8px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.merchant-reply p {
+  margin: 0 0 4px;
+}
+
+.reply-form {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.reply-form textarea {
+  width: 100%;
+  font: inherit;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.link-button {
+  border: 0;
+  background: none;
+  color: var(--brand);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  min-height: var(--tap);
+}
+
+/* 评价回复的按钮行：列表里每条都有，不能用表单页那种吸底的 .form-actions。 */
+.reply-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
 }

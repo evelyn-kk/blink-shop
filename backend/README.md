@@ -289,6 +289,17 @@ sequenceDiagram
 | 未设置的时间输出 `0001-01-01T00:00:00Z` | 输出 `null` |
 | 评价内容和标签没有长度限制 | 内容 ≤500 字，标签 ≤5 个、每个 ≤20 字 |
 
+## 商家促销与评价回复
+
+接口：`GET,POST /merchant/promotions`、`GET,PATCH /merchant/promotions/{id}`（GET 详情是新增的，供编辑页使用）、`GET /merchant/reviews`、`POST /merchant/reviews/{id}:reply`（路径与上游一致）。
+
+- **促销**：范围为全店（默认）、本店的某个商品（必须是本店未删除的商品）或某个品类（只作用于本店商品，见“营销规则”第 2 条）；类型为满减（减免金额 > 0，有门槛时不超过门槛）或折扣（折扣率为实付比例，0 < 比例 < 1）。不传开始时间为现在，不传结束时间为开始后 30 天；结束必须晚于开始和现在，最长 366 天（只在创建或改时间时检查，历史数据可以照常停用）。stackable 默认 true。修改只改出现的字段，合并后整体重新校验；没有删除，停用即可。保存后立即参与计价（试算和下单在事务内读取当前有效的活动）。`Store.UpdatePromotion` 锁定促销行，回调收到事务 ctx，归属和商品检查在同一事务里做。
+- **评价**：列出本店商品收到的全部评价（含平台隐藏的），可按是否已回复筛选；不返回评价人账户 ID，名称脱敏。回复 1–500 字，再次回复覆盖；回复不改变评价的可见性。
+- **归属**：他店的促销和评价按不存在处理（404，与上游一致）。
+- **审计**：`promotion.created`、`promotion.updated`、`review.replied`。
+
+与上游的差异：上游商家只能建全店满减，商品/品类字段存了也不参与计价，几乎不校验（金额、时间、类型都不查），默认 stackable=false，PATCH 只能改状态；回复为空返回 404、超长静默截断到 1000 字。这里按上面的规则校验并定位到字段。
+
 ## 认证与权限
 
 - **token**：注册/登录返回 32 字节随机 token（base64url），`auth_tokens` 只存 SHA-256 摘要和过期时间。每个请求都按 token 重新读取账户，所以管理员改账户状态立即生效。登出撤销当前 token，注销撤销全部 token。
@@ -331,6 +342,7 @@ sequenceDiagram
 | `GET,POST /merchant/products`、`GET,PATCH,DELETE /merchant/products/{id}` | merchant（另做归属校验） |
 | `GET,POST /merchant/documents`、`GET /merchant/documents/{id}`、`POST /merchant/unstructured-ingestions` | merchant（另做归属校验） |
 | `GET /merchant/orders`、`GET,PATCH /merchant/orders/{id}` | merchant（只看本店订单，他店订单 404） |
+| `GET,POST /merchant/promotions`、`GET,PATCH /merchant/promotions/{id}`、`GET /merchant/reviews`、`POST /merchant/reviews/{id}:reply` | merchant（只看本店促销和本店商品的评价，他店的 404） |
 | `GET /admin/documents`、`GET /admin/documents/{id}`、`POST /admin/unstructured-ingestions` | admin |
 | `GET /admin/orders`、`GET,PATCH /admin/orders/{id}` | admin |
 

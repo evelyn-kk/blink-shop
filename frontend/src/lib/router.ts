@@ -14,6 +14,10 @@ export type Route =
   | { name: 'documents'; scope: DocumentScope; query: URLSearchParams }
   | { name: 'document_new'; scope: DocumentScope }
   | { name: 'document'; scope: DocumentScope; id: string }
+  | { name: 'merchant_promotions'; query: URLSearchParams }
+  | { name: 'merchant_promotion_new' }
+  | { name: 'merchant_promotion_edit'; id: string }
+  | { name: 'merchant_reviews'; query: URLSearchParams }
   | { name: 'orders'; scope: OrderScope; query: URLSearchParams }
   | { name: 'order'; scope: OrderScope; id: string }
   | { name: 'not_found' };
@@ -46,6 +50,14 @@ export function parseRoute(hash: string): Route {
     if (parts.length === 2) return { name: 'documents', scope, query: new URLSearchParams(search) };
     if (parts.length === 3 && parts[2] === 'new') return { name: 'document_new', scope };
     if (parts.length === 3) return { name: 'document', scope, id: decodeURIComponent(parts[2]) };
+  }
+  if (parts[0] === 'merchant' && parts[1] === 'promotions') {
+    if (parts.length === 2) return { name: 'merchant_promotions', query: new URLSearchParams(search) };
+    if (parts.length === 3 && parts[2] === 'new') return { name: 'merchant_promotion_new' };
+    if (parts.length === 4 && parts[3] === 'edit') return { name: 'merchant_promotion_edit', id: decodeURIComponent(parts[2]) };
+  }
+  if (parts[0] === 'merchant' && parts[1] === 'reviews' && parts.length === 2) {
+    return { name: 'merchant_reviews', query: new URLSearchParams(search) };
   }
   if ((parts[0] === 'merchant' || parts[0] === 'admin') && parts[1] === 'orders') {
     const scope: OrderScope = parts[0];
@@ -154,4 +166,24 @@ export function homeHref(role: Role): string {
   if (role === 'merchant') return merchantProductsHref();
   if (role === 'admin') return documentsHref('admin');
   return productsHref({});
+}
+
+export function promotionsHref(params: { status?: string; page?: number } = {}): string {
+  const q = new URLSearchParams();
+  if (params.status) q.set('status', params.status);
+  if (params.page && params.page > 1) q.set('page', String(params.page));
+  const text = q.toString();
+  return `#/merchant/promotions${text ? `?${text}` : ''}`;
+}
+
+export function promotionEditHref(id: string): string {
+  return `#/merchant/promotions/${encodeURIComponent(id)}/edit`;
+}
+
+export function reviewsHref(params: { replied?: string; page?: number } = {}): string {
+  const q = new URLSearchParams();
+  if (params.replied) q.set('replied', params.replied);
+  if (params.page && params.page > 1) q.set('page', String(params.page));
+  const text = q.toString();
+  return `#/merchant/reviews${text ? `?${text}` : ''}`;
 }

@@ -57,8 +57,10 @@ test('token 在服务端被撤销：提示登录已失效并回到登录页，�
   await signedIn(page, session);
   await page.goto('/#/admin/orders');
   await expect(page.getByRole('heading', { name: '订单管理' })).toBeVisible();
+  // 等页面的请求（订单、店铺下拉）都完成，再撤销 token：否则还没发出的请求会先拿到 401，页面提前回到登录页。
+  await page.waitForLoadState('networkidle');
 
-  // 在别处退出（撤销 token），本页刷新后请求返回 401。
+  // 在别处退出（撤销 token），本页再发请求时返回 401。
   const out = await request.post('/api/v1/auth/logout', { headers: { Authorization: `Bearer ${session.token}` } });
   expect(out.ok()).toBeTruthy();
   await page.getByRole('link', { name: '待支付' }).click();

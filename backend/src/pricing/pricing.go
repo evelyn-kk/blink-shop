@@ -156,7 +156,7 @@ func Compute(in Input) (Result, error) {
 			}
 			res.Lines = append(res.Lines, DiscountLine{
 				Type: "promotion", ID: p.PromotionID, Name: p.Name, Scope: p.Scope, MerchantID: p.MerchantID,
-				Amount: bestDiscount, Description: describePromotion(p), CartItemIDs: ids(eligible),
+				Amount: bestDiscount, Description: DescribePromotion(p), CartItemIDs: ids(eligible),
 			})
 			remaining = append(remaining[:bestIdx:bestIdx], remaining[bestIdx+1:]...)
 		}
@@ -445,7 +445,8 @@ func contains(list []string, v string) bool {
 	return false
 }
 
-func describePromotion(p domain.PromotionRule) string {
+// DescribePromotion 返回促销的简短说明，例如“满 300 减 30”“9.5 折”“满 500 打 9 折”。
+func DescribePromotion(p domain.PromotionRule) string {
 	if p.Type == domain.PromotionDiscount {
 		zhe := strings.TrimRight(strings.TrimRight(fmt.Sprintf("%d.%03d", p.DiscountRate/1000, p.DiscountRate%1000), "0"), ".")
 		if p.ThresholdAmount > 0 {
