@@ -4,9 +4,11 @@ import { listOrders, type OrderScope } from '../api/orders';
 import { OrderActions } from '../components/OrderActions';
 import { PageLinks } from '../components/PageLinks';
 import { Empty, ErrorState, Loading } from '../components/StateView';
-import { formatDateTime, formatMoney, orderStatusLabel } from '../lib/format';
+import { formatDateTime, formatMoney, orderStatusLabel, orderStatusTone } from '../lib/format';
 import { parsePage } from '../lib/paging';
 import { orderHref, ordersHref } from '../lib/router';
+import { notify } from '../lib/notice';
+import { StatusBadge } from '../components/StatusBadge';
 import { useRequest } from '../lib/useRequest';
 
 const PAGE_SIZE = 20;
@@ -26,7 +28,6 @@ export function OrdersPage({ scope, query }: { scope: OrderScope; query: URLSear
   const orderNo = query.get('order_no') ?? '';
   const merchantId = scope === 'admin' ? (query.get('merchant_id') ?? '') : '';
   const page = parsePage(query.get('page'));
-  const [notice, setNotice] = useState<{ ok: boolean; message: string } | null>(null);
   const [result, reload] = useRequest(`orders|${scope}|${status}|${orderNo}|${merchantId}|${page}`, () =>
     listOrders(scope, { status, orderNo, merchantId, page, pageSize: PAGE_SIZE }),
   );
@@ -41,11 +42,6 @@ export function OrdersPage({ scope, query }: { scope: OrderScope; query: URLSear
       <div className="page-head">
         <h2 id="orders-title">{scope === 'admin' ? '订单管理' : '订单'}</h2>
       </div>
-      {notice && (
-        <p className={notice.ok ? 'flash' : 'field-error'} role={notice.ok ? 'status' : 'alert'}>
-          {notice.message}
-        </p>
-      )}
 
       <nav className="filter-tabs" aria-label="按状态筛选">
         {statusFilters.map((f) => (
@@ -84,7 +80,7 @@ export function OrdersPage({ scope, query }: { scope: OrderScope; query: URLSear
                     <a href={orderHref(scope, o.order_id)}>订单 {o.order_no}</a>
                   </h3>
                   <p className="tag-row">
-                    <span className={`status order-status-${o.status}`}>{orderStatusLabel[o.status]}</span>
+                    <StatusBadge tone={orderStatusTone[o.status]}>{orderStatusLabel[o.status]}</StatusBadge>
                     {scope === 'admin' && <span className="tag">{o.merchant_name || o.merchant_id}</span>}
                     <span className="muted small">下单于 {formatDateTime(o.created_at)}</span>
                   </p>
@@ -98,7 +94,7 @@ export function OrdersPage({ scope, query }: { scope: OrderScope; query: URLSear
                     scope={scope}
                     order={o}
                     onDone={(r) => {
-                      setNotice(r);
+                      notify(r.ok ? 'success' : 'error', r.message);
                       reload();
                     }}
                   />

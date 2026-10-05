@@ -1,15 +1,12 @@
-import { useEffect, useState } from 'react';
 import { getDocument, type DocumentScope } from '../api/knowledge';
 import { ErrorState, Loading } from '../components/StateView';
-import { clearFlash, peekFlash } from '../lib/flash';
-import { docStatusLabel, docTypeLabel, formatDateTime } from '../lib/format';
+import { docStatusLabel, docStatusTone, docTypeLabel, formatDateTime } from '../lib/format';
 import { documentsHref } from '../lib/router';
+import { StatusBadge } from '../components/StatusBadge';
 import { useRequest } from '../lib/useRequest';
 
 // 资料详情：状态、来源、清洗后的正文和切出的片段（导购检索和引用的最小单位）。
 export function DocumentDetailPage({ scope, id }: { scope: DocumentScope; id: string }) {
-  const [flash] = useState(peekFlash);
-  useEffect(() => clearFlash(), []);
   const [result, reload] = useRequest(`doc|${scope}|${id}`, () => getDocument(scope, id));
 
   return (
@@ -17,11 +14,6 @@ export function DocumentDetailPage({ scope, id }: { scope: DocumentScope; id: st
       <p>
         <a href={documentsHref(scope)}>← 返回资料列表</a>
       </p>
-      {flash && (
-        <p className="flash" role="status">
-          {flash}
-        </p>
-      )}
       {result.status === 'loading' && <Loading />}
       {result.status === 'error' && <ErrorState message={result.message} onRetry={reload} />}
       {result.status === 'ok' && (
@@ -30,7 +22,7 @@ export function DocumentDetailPage({ scope, id }: { scope: DocumentScope; id: st
             {result.data.title}
           </h2>
           <p className="tag-row">
-            <span className={`status doc-status-${result.data.status}`}>{docStatusLabel[result.data.status]}</span>
+            <StatusBadge tone={docStatusTone[result.data.status]}>{docStatusLabel[result.data.status]}</StatusBadge>
             <span className="tag">{docTypeLabel[result.data.doc_type] ?? result.data.doc_type}</span>
             {scope === 'admin' && <span className="tag">{result.data.merchant_id || '平台资料'}</span>}
           </p>

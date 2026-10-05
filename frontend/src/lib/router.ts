@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { DocumentScope } from '../api/knowledge';
 import type { OrderScope } from '../api/orders';
+import type { Role } from '../types/api';
 
 // 轻量 hash 路由：#/products?keyword=..、#/products/:id。5.1 接入登录与角色路由时再替换为正式路由。
 export type Route =
@@ -146,4 +147,11 @@ export function ordersHref(
 
 export function orderHref(scope: OrderScope, id: string): string {
   return `#/${scope}/orders/${encodeURIComponent(id)}`;
+}
+
+/** 登录后按角色进入的默认页面：商家进“我的商品”，管理员进“知识资料（全部）”，普通用户回到商品巡检。 */
+export function homeHref(role: Role): string {
+  if (role === 'merchant') return merchantProductsHref();
+  if (role === 'admin') return documentsHref('admin');
+  return productsHref({});
 }

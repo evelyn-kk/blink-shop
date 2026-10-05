@@ -1,3 +1,4 @@
+import type { BadgeTone } from '../components/StatusBadge';
 import type { DocType, DocumentStatus, Money, OrderStatus, PaymentStatus, ProductStatus, Promotion, StockStatus } from '../types/api';
 
 const money = new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' });
@@ -89,4 +90,27 @@ export const paymentMethodLabel: Record<string, string> = {
   mock_balance: '余额（模拟）',
   mock_wechat: '微信（模拟）',
   mock_alipay: '支付宝（模拟）',
+};
+
+// 状态标签的颜色（文字才是状态本身，颜色只做辅助）。
+export const orderStatusTone: Record<OrderStatus, BadgeTone> = {
+  pending_payment: 'warn',
+  paid: 'info',
+  shipped: 'info',
+  completed: 'ok',
+  cancelled: 'muted',
+};
+
+export const productStatusTone: Record<ProductStatus, BadgeTone> = {
+  active: 'ok',
+  inactive: 'muted',
+  risk: 'bad',
+};
+
+export const docStatusTone: Record<DocumentStatus, BadgeTone> = {
+  uploaded: 'warn',
+  parsing: 'warn',
+  indexing: 'warn',
+  indexed: 'ok',
+  failed: 'bad',
 };

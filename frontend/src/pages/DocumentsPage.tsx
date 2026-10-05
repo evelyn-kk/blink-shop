@@ -1,12 +1,12 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { listMerchants } from '../api/catalog';
 import { listDocuments, type DocumentScope } from '../api/knowledge';
 import { PageLinks } from '../components/PageLinks';
 import { Empty, ErrorState, Loading } from '../components/StateView';
-import { clearFlash, peekFlash } from '../lib/flash';
-import { docStatusLabel, docTypeLabel, formatDateTime } from '../lib/format';
+import { docStatusLabel, docStatusTone, docTypeLabel, formatDateTime } from '../lib/format';
 import { parsePage } from '../lib/paging';
 import { documentHref, documentsHref, newDocumentHref } from '../lib/router';
+import { StatusBadge } from '../components/StatusBadge';
 import { useRequest } from '../lib/useRequest';
 
 const PAGE_SIZE = 20;
@@ -23,8 +23,6 @@ export function DocumentsPage({ scope, query }: { scope: DocumentScope; query: U
   const keyword = query.get('keyword') ?? '';
   const merchantId = scope === 'admin' && query.has('merchant_id') ? (query.get('merchant_id') ?? '') : undefined;
   const page = parsePage(query.get('page'));
-  const [flash] = useState(peekFlash);
-  useEffect(() => clearFlash(), []);
   const [result, reload] = useRequest(`docs|${scope}|${status}|${keyword}|${merchantId ?? '*'}|${page}`, () =>
     listDocuments(scope, { status, keyword, merchantId, page, pageSize: PAGE_SIZE }),
   );
@@ -47,11 +45,6 @@ export function DocumentsPage({ scope, query }: { scope: DocumentScope; query: U
           {scope === 'admin' ? '采集资料' : '添加资料'}
         </a>
       </div>
-      {flash && (
-        <p className="flash" role="status">
-          {flash}
-        </p>
-      )}
       <p className="muted small">导购助手回答问题时会检索这里已入库的资料，并在回复中注明出处。</p>
 
       <nav className="filter-tabs" aria-label="按状态筛选">
@@ -93,7 +86,7 @@ export function DocumentsPage({ scope, query }: { scope: DocumentScope; query: U
                     </a>
                   </h3>
                   <p className="tag-row">
-                    <span className={`status doc-status-${d.status}`}>{docStatusLabel[d.status]}</span>
+                    <StatusBadge tone={docStatusTone[d.status]}>{docStatusLabel[d.status]}</StatusBadge>
                     <span className="tag">{docTypeLabel[d.doc_type] ?? d.doc_type}</span>
                     {scope === 'admin' && <span className="tag">{merchantName(d.merchant_id)}</span>}
                     <span className="muted small">

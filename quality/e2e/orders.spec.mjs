@@ -79,7 +79,7 @@ test('下单 → 支付 → 商家在 Web 发货 → 买家确认收货 → 评�
   expect((await buyer.call('GET', `/orders/${order.order_id}`)).body.status).toBe('paid');
   await row.getByRole('button', { name: `发货 ${order.order_no}` }).click();
   await page.getByRole('dialog').getByRole('button', { name: '确认发货' }).click();
-  await expect(page.locator('.flash')).toContainText(`订单 ${order.order_no} 已发货`);
+  await expect(page.locator('.flash').last()).toContainText(`订单 ${order.order_no} 已发货`);
   await expect(page.getByText('没有符合条件的订单')).toBeVisible(); // 待发货筛选下已经没有它
   expect((await buyer.call('GET', `/orders/${order.order_id}`)).body.status).toBe('shipped');
 
@@ -137,7 +137,7 @@ test('管理员取消待支付订单：库存回补；已支付订单只能发�
   await expect(page.getByRole('dialog')).toContainText('库存回补');
   await page.screenshot({ path: shots(testInfo, 'admin-cancel'), fullPage: true });
   await page.getByRole('dialog').getByRole('button', { name: '确认取消' }).click();
-  await expect(page.locator('.flash')).toContainText(`订单 ${pending.order_no} 已取消，库存已回补`);
+  await expect(page.locator('.flash').last()).toContainText(`订单 ${pending.order_no} 已取消，库存已回补`);
   await expect(row.locator('.status')).toHaveText('已取消');
   expect(await lampStock(request)).toBe(before - 1);
   const closed = (await buyer.call('GET', `/orders/${pending.order_id}`)).body;
@@ -153,7 +153,7 @@ test('管理员取消待支付订单：库存回补；已支付订单只能发�
   await paidRow.getByRole('button', { name: `发货 ${toPay.order_no}` }).click();
   await page.getByRole('dialog').getByRole('button', { name: '确认发货' }).click();
   await expect(paidRow.locator('.status')).toHaveText('已发货');
-  await expect(page.locator('.flash')).toContainText(`订单 ${toPay.order_no} 已发货`);
+  await expect(page.locator('.flash').last()).toContainText(`订单 ${toPay.order_no} 已发货`);
   expect((await buyer.call('GET', `/orders/${toPay.order_id}`)).body.status).toBe('shipped');
 });
 

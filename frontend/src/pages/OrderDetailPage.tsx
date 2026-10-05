@@ -1,16 +1,16 @@
-import { useState } from 'react';
 import { getOrder, type OrderScope } from '../api/orders';
 import { OrderActions } from '../components/OrderActions';
 import { ProductImage } from '../components/ProductImage';
 import { ErrorState, Loading } from '../components/StateView';
-import { formatDateTime, formatMoney, orderStatusLabel, paymentMethodLabel, paymentStatusLabel } from '../lib/format';
+import { formatDateTime, formatMoney, orderStatusLabel, orderStatusTone, paymentMethodLabel, paymentStatusLabel } from '../lib/format';
 import { ordersHref } from '../lib/router';
+import { notify } from '../lib/notice';
+import { StatusBadge } from '../components/StatusBadge';
 import { useRequest } from '../lib/useRequest';
 
 // 订单详情：状态与时间线、买家、支付单、下单时冻结的商品信息和金额。
 export function OrderDetailPage({ scope, id }: { scope: OrderScope; id: string }) {
   const [result, reload] = useRequest(`order|${scope}|${id}`, () => getOrder(scope, id));
-  const [notice, setNotice] = useState<{ ok: boolean; message: string } | null>(null);
 
   return (
     <section aria-labelledby="order-title">
@@ -30,21 +30,16 @@ export function OrderDetailPage({ scope, id }: { scope: OrderScope; id: string }
                 scope={scope}
                 order={result.data}
                 onDone={(r) => {
-                  setNotice(r);
+                  notify(r.ok ? 'success' : 'error', r.message);
                   reload();
                 }}
               />
             </div>
           </div>
-          {notice && (
-            <p className={notice.ok ? 'flash' : 'field-error'} role={notice.ok ? 'status' : 'alert'}>
-              {notice.message}
-            </p>
-          )}
           <dl className="doc-meta">
             <dt>状态</dt>
             <dd>
-              <span className={`status order-status-${result.data.status}`}>{orderStatusLabel[result.data.status]}</span>
+              <StatusBadge tone={orderStatusTone[result.data.status]}>{orderStatusLabel[result.data.status]}</StatusBadge>
             </dd>
             <dt>店铺</dt>
             <dd>{result.data.merchant_name || result.data.merchant_id}</dd>

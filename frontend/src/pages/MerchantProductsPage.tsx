@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { deleteMerchantProduct, listMerchantProducts } from '../api/merchant';
 import { ApiError } from '../api/http';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -6,10 +6,11 @@ import { ProductImage } from '../components/ProductImage';
 import { PageLinks } from '../components/PageLinks';
 import { Empty, ErrorState, Loading } from '../components/StateView';
 import { StockBadge } from '../components/StockBadge';
-import { clearFlash, peekFlash } from '../lib/flash';
-import { formatMoney, productStatusLabel } from '../lib/format';
+import { notify } from '../lib/notice';
+import { formatMoney, productStatusLabel, productStatusTone } from '../lib/format';
 import { parsePage } from '../lib/paging';
 import { merchantProductEditHref, merchantProductsHref } from '../lib/router';
+import { StatusBadge } from '../components/StatusBadge';
 import { useRequest } from '../lib/useRequest';
 import type { MerchantProduct } from '../types/api';
 
@@ -26,8 +27,6 @@ export function MerchantProductsPage({ query }: { query: URLSearchParams }) {
   const status = query.get('status') ?? '';
   const keyword = query.get('keyword') ?? '';
   const page = parsePage(query.get('page'));
-  const [flash, setFlash] = useState(peekFlash);
-  useEffect(() => clearFlash(), []);
   const [version, setVersion] = useState(0);
   const [result, reload] = useRequest(`mp|${status}|${keyword}|${page}|${version}`, () =>
     listMerchantProducts({ status, keyword, page, pageSize: PAGE_SIZE }),
@@ -42,7 +41,7 @@ export function MerchantProductsPage({ query }: { query: URLSearchParams }) {
     setDeleteError('');
     try {
       await deleteMerchantProduct(pendingDelete.product_id);
-      setFlash(`已删除「${pendingDelete.name}」`);
+      notify('success', `已删除「${pendingDelete.name}」`);
       setPendingDelete(null);
       setVersion((v) => v + 1);
     } catch (err) {
@@ -61,11 +60,6 @@ export function MerchantProductsPage({ query }: { query: URLSearchParams }) {
           新建商品
         </a>
       </div>
-      {flash && (
-        <p className="flash" role="status">
-          {flash}
-        </p>
-      )}
       {deleteError && <ErrorState message={deleteError} />}
 
       <nav className="filter-tabs" aria-label="按状态筛选">
@@ -99,7 +93,7 @@ export function MerchantProductsPage({ query }: { query: URLSearchParams }) {
                     {p.name}
                   </h3>
                   <p className="tag-row">
-                    <span className={`status status-${p.status}`}>{productStatusLabel[p.status]}</span>
+                    <StatusBadge tone={productStatusTone[p.status]}>{productStatusLabel[p.status]}</StatusBadge>
                     <StockBadge status={p.stock_status} />
                     <span className="muted small">
                       库存 {p.stock_quantity} · {p.skus.length} 个规格

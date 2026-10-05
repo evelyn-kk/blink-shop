@@ -33,7 +33,7 @@ test('商家添加常见问题：切成问答片段，详情可查看，列表�
   await page.screenshot({ path: shots(testInfo, 'form'), fullPage: true });
   await page.getByRole('button', { name: '提交' }).click();
 
-  await expect(page.locator('.flash')).toContainText(`「${title}」已入库，共 2 个片段`);
+  await expect(page.locator('.flash').last()).toContainText(`「${title}」已入库，共 2 个片段`);
   await expect(page.getByRole('heading', { name: title })).toBeVisible();
   await expect(page.getByText('已入库').first()).toBeVisible();
   const chunks = page.locator('.chunk');
@@ -62,7 +62,7 @@ test('采集网页源码：去掉脚本和导航；重复提交提示已有资�
   const html = `<html><head><title>评测 ${tag}</title><script>steal()</script></head><body><nav>首页 | 分类</nav><h1>屏幕</h1><p>120Hz 高刷屏 ${tag}。</p></body></html>`;
   await page.getByLabel('内容').fill(html);
   await page.getByRole('button', { name: '提交' }).click();
-  await expect(page.locator('.flash')).toContainText(`「评测 ${tag}」已入库，共 1 个片段`);
+  await expect(page.locator('.flash').last()).toContainText(`「评测 ${tag}」已入库，共 1 个片段`);
   await expect(page.locator('.chunk-content')).toHaveText(`屏幕\n\n120Hz 高刷屏 ${tag}。`);
   await expect(page.getByText('网页文章')).toBeVisible();
 
@@ -70,7 +70,7 @@ test('采集网页源码：去掉脚本和导航；重复提交提示已有资�
   await page.getByLabel('网页源码').check();
   await page.getByLabel('内容').fill(html.replace('<nav>首页 | 分类</nav>', '<nav>另一个导航</nav>'));
   await page.getByRole('button', { name: '提交' }).click();
-  await expect(page.locator('.flash')).toContainText(`内容与已有资料「评测 ${tag}」相同，没有重复入库`);
+  await expect(page.locator('.flash').last()).toContainText(`内容与已有资料「评测 ${tag}」相同，没有重复入库`);
 });
 
 test('表单校验：必填、地址格式、内网地址被拒并定位到字段；连点只提交一次', async ({ page, request }, testInfo) => {
@@ -111,7 +111,7 @@ test('表单校验：必填、地址格式、内网地址被拒并定位到字�
   const submit = page.getByRole('button', { name: '提交' });
   await submit.click();
   await submit.click({ force: true }).catch(() => {});
-  await expect(page.locator('.flash')).toContainText(`「E2E 连点 ${tag}」已入库`);
+  await expect(page.locator('.flash').last()).toContainText(`「E2E 连点 ${tag}」已入库`);
   expect(posts).toBe(1);
 });
 
@@ -143,7 +143,7 @@ test('管理员采集平台资料，按归属筛选；商家不能进入平台�
   await page.getByLabel('标题').fill(`E2E 平台规则 ${tag}`);
   await page.getByLabel('内容').fill(JSON.stringify({ rule: `满 300 减 30（${tag}）`, scope: '全平台' }));
   await page.getByRole('button', { name: '提交' }).click();
-  await expect(page.locator('.flash')).toContainText(`「E2E 平台规则 ${tag}」已入库`);
+  await expect(page.locator('.flash').last()).toContainText(`「E2E 平台规则 ${tag}」已入库`);
   await expect(page.getByText('平台资料')).toBeVisible();
   await expect(page.locator('.chunk-content')).toContainText('rule: 满 300 减 30');
 

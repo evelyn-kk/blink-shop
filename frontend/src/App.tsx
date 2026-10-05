@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { logout } from './api/auth';
+import { NoticeHost } from './components/NoticeHost';
 import { Empty } from './components/StateView';
 import { RequireRole } from './components/RequireRole';
 import { documentsHref, loginHref, merchantProductsHref, navigate, ordersHref, productsHref, useRoute } from './lib/router';
@@ -21,6 +22,7 @@ export default function App() {
     <>
       <TopBar />
       <main className="container">
+        <NoticeHost />
         {route.name === 'products' && <ProductListPage query={route.query} />}
         {route.name === 'product' && <ProductDetailPage key={route.id} id={route.id} />}
         {route.name === 'login' && <LoginPage next={route.next} />}

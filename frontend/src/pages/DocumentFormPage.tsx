@@ -6,7 +6,7 @@ import { listMerchantProducts } from '../api/merchant';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Field } from '../components/FormField';
 import { invalid } from '../lib/invalid';
-import { setFlash } from '../lib/flash';
+import { notify } from '../lib/notice';
 import { docTypeLabel } from '../lib/format';
 import { documentHref, documentsHref, navigate } from '../lib/router';
 import { useRequest } from '../lib/useRequest';
@@ -113,7 +113,7 @@ export function DocumentFormPage({ scope }: { scope: DocumentScope }) {
           product_id: productId || undefined,
           force_reindex: form.force,
         });
-        setFlash(`「${doc.title}」已入库，共 ${doc.chunk_count} 个片段`);
+        notify('success', `「${doc.title}」已入库，共 ${doc.chunk_count} 个片段`);
         navigate(documentHref(scope, doc.document_id));
         return;
       }
@@ -125,7 +125,7 @@ export function DocumentFormPage({ scope }: { scope: DocumentScope }) {
       if (form.kind === 'url') input.source_url = form.body.trim();
       const res = await ingestDocument(scope, input);
       const d = res.document;
-      setFlash(
+      notify('success', 
         res.duplicate
           ? `内容与已有资料「${d.title}」相同，没有重复入库`
           : `「${d.title}」已入库，共 ${d.chunk_count} 个片段${res.truncated ? '（内容过长，已截断）' : ''}`,

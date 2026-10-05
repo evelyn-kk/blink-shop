@@ -101,7 +101,7 @@ test('新建 → 公开可见 → 编辑下架 → 删除（二次确认）', as
   await page.screenshot({ path: shots(testInfo, 'form'), fullPage: true });
   await page.getByRole('button', { name: '创建商品' }).click();
 
-  await expect(page.locator('.flash')).toContainText(`已创建「${name}」`);
+  await expect(page.locator('.flash').last()).toContainText(`已创建「${name}」`);
   const row = page.getByRole('listitem').filter({ hasText: name });
   await expect(row).toContainText('上架中');
   await expect(row).toContainText('2 个规格');
@@ -116,7 +116,7 @@ test('新建 → 公开可见 → 编辑下架 → 删除（二次确认）', as
   expect(specs.split('；').sort()).toEqual(['轴体=茶轴', '颜色=黑'].sort());
   await page.getByLabel('状态').selectOption('inactive');
   await page.getByRole('button', { name: '保存修改' }).click();
-  await expect(page.locator('.flash')).toContainText(`已保存「${name}」`);
+  await expect(page.locator('.flash').last()).toContainText(`已保存「${name}」`);
   await expect(page.getByRole('listitem').filter({ hasText: name })).toContainText('已下架');
   expect(await publicCount(request, name)).toBe(0);
 
@@ -131,7 +131,7 @@ test('新建 → 公开可见 → 编辑下架 → 删除（二次确认）', as
 
   await page.getByRole('button', { name: `删除 ${name}` }).click();
   await dialog.getByRole('button', { name: '确认删除' }).click();
-  await expect(page.locator('.flash')).toContainText(`已删除「${name}」`);
+  await expect(page.locator('.flash').last()).toContainText(`已删除「${name}」`);
   await expect(page.getByRole('listitem').filter({ hasText: name })).toHaveCount(0);
   expect(await merchantCount(request, name)).toBe(0);
 });
@@ -170,7 +170,7 @@ test('必填与格式校验，服务端错误定位到字段', async ({ page, re
 
   await page.getByLabel('市场价（划线价）').fill('');
   await page.getByRole('button', { name: '创建商品' }).click();
-  await expect(page.locator('.flash')).toContainText(`已创建「${name}」`);
+  await expect(page.locator('.flash').last()).toContainText(`已创建「${name}」`);
 });
 
 test('连点提交只创建一次', async ({ page, request }, testInfo) => {
@@ -191,7 +191,7 @@ test('连点提交只创建一次', async ({ page, request }, testInfo) => {
   await expect(page.getByRole('button', { name: '保存中…' })).toBeDisabled();
   await page.getByRole('button', { name: '保存中…' }).click({ force: true }).catch(() => {});
   await page.locator('form').evaluate((f) => f.requestSubmit());
-  await expect(page.locator('.flash')).toContainText(`已创建「${name}」`);
+  await expect(page.locator('.flash').last()).toContainText(`已创建「${name}」`);
   expect(await merchantCount(request, name)).toBe(1);
 });
 
@@ -245,7 +245,7 @@ test('服务端出错时显示错误且可以重试', async ({ page, request }, 
   await expect(page.getByRole('button', { name: '保存修改' })).toBeEnabled();
   fail = false;
   await page.getByRole('button', { name: '保存修改' }).click();
-  await expect(page.locator('.flash')).toContainText(`已保存「${name}」`);
+  await expect(page.locator('.flash').last()).toContainText(`已保存「${name}」`);
 });
 
 test('风控中的商品不能上下架', async ({ page }) => {

@@ -6,7 +6,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Field } from '../components/FormField';
 import { invalid } from '../lib/invalid';
 import { ErrorState, Loading } from '../components/StateView';
-import { setFlash } from '../lib/flash';
+import { notify } from '../lib/notice';
 import { productStatusLabel } from '../lib/format';
 import { merchantProductsHref, navigate } from '../lib/router';
 import { useRequest } from '../lib/useRequest';
@@ -267,7 +267,7 @@ function ProductForm({ product, categories }: { product: MerchantProduct | null;
       const saved = product
         ? await updateMerchantProduct(product.product_id, input)
         : await createMerchantProduct(input);
-      setFlash(product ? `已保存「${saved.name}」` : `已创建「${saved.name}」`);
+      notify('success', product ? `已保存「${saved.name}」` : `已创建「${saved.name}」`);
       navigate(merchantProductsHref());
     } catch (err) {
       if (err instanceof ApiError) {

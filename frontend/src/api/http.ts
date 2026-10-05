@@ -1,5 +1,5 @@
 import type { ApiErrorBody } from '../types/api';
-import { clearSession, getSession } from '../lib/session';
+import { expireSession, getSession } from '../lib/session';
 
 const API_BASE = '/api/v1';
 
@@ -20,7 +20,7 @@ export class ApiError extends Error {
 }
 
 // 所有接口请求都经过这里，统一处理前缀、JSON、登录 token 和错误结构。
-// 带 token 的请求收到 401 时清除本地会话（页面随之回到登录）。
+// 带 token 的请求收到 401 时清除本地会话并提示（需要登录的页面随之回到登录页）。
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await send(path, init);
   if (res.status === 204) {
@@ -54,8 +54,9 @@ async function send(path: string, init: RequestInit): Promise<Response> {
 
   if (!res.ok) {
     const body = await res.json().catch(() => null);
-    if (res.status === 401 && headers.has('Authorization')) {
-      clearSession();
+    // 退出登录时 token 已失效属于正常情况，不再提示“登录已失效”。
+    if (res.status === 401 && headers.has('Authorization') && path !== '/auth/logout') {
+      expireSession();
     }
     throw new ApiError(
       res.status,
