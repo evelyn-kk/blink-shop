@@ -56,6 +56,7 @@ func newTestServer(t *testing.T, env map[string]string, readiness []ReadinessChe
 		AvatarDir:    t.TempDir(),
 		PasswordCost: bcrypt.MinCost,
 		Now:          func() time.Time { return testNow },
+		Configs:      configcenter.NewAdmin(resolver, dynamic),
 	})
 	if extra != nil {
 		extra(s.mux)

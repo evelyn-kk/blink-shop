@@ -18,6 +18,10 @@ export type Route =
   | { name: 'merchant_promotion_new' }
   | { name: 'merchant_promotion_edit'; id: string }
   | { name: 'merchant_reviews'; query: URLSearchParams }
+  | { name: 'admin_platform'; query: URLSearchParams }
+  | { name: 'admin_risk' }
+  | { name: 'admin_configs' }
+  | { name: 'admin_audit'; query: URLSearchParams }
   | { name: 'orders'; scope: OrderScope; query: URLSearchParams }
   | { name: 'order'; scope: OrderScope; id: string }
   | { name: 'not_found' };
@@ -58,6 +62,12 @@ export function parseRoute(hash: string): Route {
   }
   if (parts[0] === 'merchant' && parts[1] === 'reviews' && parts.length === 2) {
     return { name: 'merchant_reviews', query: new URLSearchParams(search) };
+  }
+  if (parts[0] === 'admin' && parts.length === 2) {
+    if (parts[1] === 'platform') return { name: 'admin_platform', query: new URLSearchParams(search) };
+    if (parts[1] === 'risk') return { name: 'admin_risk' };
+    if (parts[1] === 'configs') return { name: 'admin_configs' };
+    if (parts[1] === 'audit') return { name: 'admin_audit', query: new URLSearchParams(search) };
   }
   if ((parts[0] === 'merchant' || parts[0] === 'admin') && parts[1] === 'orders') {
     const scope: OrderScope = parts[0];
@@ -186,4 +196,21 @@ export function reviewsHref(params: { replied?: string; page?: number } = {}): s
   if (params.page && params.page > 1) q.set('page', String(params.page));
   const text = q.toString();
   return `#/merchant/reviews${text ? `?${text}` : ''}`;
+}
+
+function withQuery(base: string, params: Record<string, string | number | undefined>): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== '' && !(k === 'page' && Number(v) <= 1)) q.set(k, String(v));
+  }
+  const text = q.toString();
+  return `${base}${text ? `?${text}` : ''}`;
+}
+
+export function platformHref(params: { tab?: string; status?: string; keyword?: string; page?: number } = {}): string {
+  return withQuery('#/admin/platform', params);
+}
+
+export function auditHref(params: { target_type?: string; target_id?: string; page?: number } = {}): string {
+  return withQuery('#/admin/audit', params);
 }

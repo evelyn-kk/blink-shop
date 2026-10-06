@@ -30,6 +30,7 @@ const (
 	PrefixTrace     = "tr_"
 	PrefixPrompt    = "prompt_"
 	PrefixPublish   = "pub_"
+	PrefixAudit     = "aud_"
 )
 
 // NewID 生成 “前缀 + 24 位随机 hex” 的不可猜测 ID。

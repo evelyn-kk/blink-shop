@@ -47,7 +47,8 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 	_ = mysql.SetLogger(mysqlDriverLogger{logger})
 
 	// 动态配置暂时只有内存实现；Nacos 在 9.1 接入，不可用时同样退回这里。
-	resolver := configcenter.NewResolver(getenv, configcenter.NewMemorySource(nil))
+	dynamic := configcenter.NewMemorySource(nil)
+	resolver := configcenter.NewResolver(getenv, dynamic)
 	cfg, err := configcenter.Load(ctx, resolver)
 	if err != nil {
 		return fmt.Errorf("配置不合法: %w", err)
@@ -89,6 +90,7 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 		Store:       st,
 		ObjectStore: objects,
 		AvatarDir:   cfg.AvatarUploadDir,
+		Configs:     configcenter.NewAdmin(resolver, dynamic),
 		Readiness: []httpapi.ReadinessCheck{
 			{Name: "mysql", Check: func(ctx context.Context) error { return schemaReady(ctx, st) }},
 		},

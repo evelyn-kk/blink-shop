@@ -1,0 +1,1 @@
+{"description": "密钥和只在启动时读取的配置不能在运行中修改", "request": {"method": "PATCH", "path": "/api/v1/admin/configs/mysql.dsn", "as": "blink_admin", "body": {"value": "x"}}, "response": {"status": 409, "body": {"code": "config_read_only", "message": "该配置只在启动时读取，不能在运行中修改", "request_id": "<request_id>"}}}

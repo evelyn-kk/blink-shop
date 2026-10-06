@@ -41,6 +41,8 @@ type Options struct {
 	AvatarDir string
 	// PasswordCost 是 bcrypt 成本，0 表示 bcrypt.DefaultCost；测试可调低以提速。
 	PasswordCost int
+	// Configs 是管理端的配置读写入口；nil 表示未启用，配置接口返回 503。
+	Configs ConfigAdmin
 	// Now 返回当前时间（判断促销是否有效等），nil 表示 time.Now；测试用来固定时间。
 	Now func() time.Time
 	// PaymentTimeout 是下单后的支付期限，0 表示 DefaultPaymentTimeout（30 分钟）。
@@ -58,6 +60,7 @@ type Server struct {
 	passwords      *passwordHasher
 	now            func() time.Time
 	paymentTimeout time.Duration
+	configs        ConfigAdmin
 	mux            *http.ServeMux
 	routeAccess    map[string]access // 路由 pattern → 访问规则，RBAC 矩阵测试据此核对
 	ipLimiter      *rateLimiter
@@ -78,6 +81,7 @@ func NewServer(opts Options) *Server {
 		passwords:      newPasswordHasher(opts.PasswordCost),
 		now:            opts.Now,
 		paymentTimeout: opts.PaymentTimeout,
+		configs:        opts.Configs,
 		mux:            http.NewServeMux(),
 		routeAccess:    map[string]access{},
 		ipLimiter:      newRateLimiter(time.Minute),
@@ -175,6 +179,21 @@ func (s *Server) routes() {
 	s.handle("POST /api/v1/merchant/documents", accessMerchant, s.handleCreateMerchantDocument)
 	s.handle("GET /api/v1/merchant/documents/{id}", accessMerchant, s.handleGetMerchantDocument)
 	s.handle("POST /api/v1/merchant/unstructured-ingestions", accessMerchant, s.handleMerchantIngestion)
+
+	s.handle("GET /api/v1/admin/accounts", accessAdmin, s.handleListAdminAccounts)
+	s.handle("PATCH /api/v1/admin/accounts/{id}", accessAdmin, s.handleUpdateAdminAccount)
+	s.handle("GET /api/v1/admin/merchants", accessAdmin, s.handleListAdminMerchants)
+	s.handle("PATCH /api/v1/admin/merchants/{id}", accessAdmin, s.handleUpdateAdminMerchant)
+	s.handle("GET /api/v1/admin/products", accessAdmin, s.handleListAdminProducts)
+	s.handle("PATCH /api/v1/admin/products/{id}", accessAdmin, s.handleUpdateAdminProduct)
+	s.handle("GET /api/v1/admin/promotions", accessAdmin, s.handleListAdminPromotions)
+	s.handle("PATCH /api/v1/admin/promotions/{id}", accessAdmin, s.handleUpdateAdminPromotion)
+	s.handle("GET /api/v1/admin/reviews", accessAdmin, s.handleListAdminReviews)
+	s.handle("PATCH /api/v1/admin/reviews/{id}", accessAdmin, s.handleUpdateAdminReview)
+	s.handle("GET /api/v1/admin/configs", accessAdmin, s.handleListAdminConfigs)
+	s.handle("PATCH /api/v1/admin/configs/{key}", accessAdmin, s.handleUpdateAdminConfig)
+	s.handle("GET /api/v1/admin/risk/overview", accessAdmin, s.handleRiskOverview)
+	s.handle("GET /api/v1/admin/audit-logs", accessAdmin, s.handleListAuditLogs)
 
 	s.handle("GET /api/v1/admin/documents", accessAdmin, s.handleListAdminDocuments)
 	s.handle("GET /api/v1/admin/documents/{id}", accessAdmin, s.handleGetAdminDocument)

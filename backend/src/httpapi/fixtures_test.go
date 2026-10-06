@@ -100,6 +100,12 @@ var fixturePlaceholders = map[string]func(got any, rec *httptest.ResponseRecorde
 	"<checkout_request_id>": idPlaceholder("chk_"),
 	"<review_id>":           idPlaceholder("rv_"),
 	"<promotion_id>":        idPlaceholder("promo_"),
+	"<audit_id>":            idPlaceholder("aud_"),
+	// 记录在数据里的、其他请求的 request id（例如审计记录里的），只校验格式。
+	"<recorded_request_id>": func(got any, _ *httptest.ResponseRecorder) bool {
+		s, ok := got.(string)
+		return ok && randomIDPattern.MatchString(s)
+	},
 	"<order_no>": func(got any, _ *httptest.ResponseRecorder) bool {
 		s, ok := got.(string)
 		return ok && orderNoPattern.MatchString(s)

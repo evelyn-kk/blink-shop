@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Blink Shop API
-  version: 0.10.0
+  version: 0.11.0
   description: |
     Blink Shop 的单一接口契约。约定：
     - 所有路径前缀为 `/api/v1`，JSON 字段使用 snake_case。
@@ -736,6 +736,685 @@ paths:
                 code: source_fetch_failed
                 message: 网页抓取失败：对方返回状态码 404
                 field: source_url
+  /admin/accounts:
+    get:
+      tags: [admin]
+      operationId: listAdminAccounts
+      summary: 账号列表
+      description: 不含已注销的账号，按注册时间倒序；不返回手机号和邮箱。
+      parameters:
+        - name: role
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [user, merchant, admin]
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, inactive, risk]
+        - name: keyword
+          in: query
+          required: false
+          description: 按账号或显示名包含匹配，不区分大小写。
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 账号分页列表
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AdminAccount"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /admin/accounts/{id}:
+    patch:
+      tags: [admin]
+      operationId: updateAdminAccount
+      summary: 修改账号状态
+      description: active / inactive / risk。不能修改自己的账号（409 `cannot_change_self`）。停用的账号只能查看会话和退出，风控账号只读；状态在每个请求时检查，已登录的 token 立即受影响。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [active, inactive, risk]
+                reason:
+                  type: string
+                  maxLength: 200
+                  description: 改为非正常状态时必填，记入操作审计。
+      responses:
+        "200":
+          description: 修改后的对象（状态修改与审计记录在同一事务内写入）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAccount"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`account_not_found`"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: account_not_found
+                message: 账号不存在
+        "409":
+          $ref: "#/components/responses/StatusChangeConflict"
+  /admin/merchants:
+    get:
+      tags: [admin]
+      operationId: listAdminMerchants
+      summary: 店铺列表
+      description: 含停业和风控的店铺。
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, inactive, risk]
+        - name: keyword
+          in: query
+          required: false
+          description: 按店铺名包含匹配。
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 店铺分页列表
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AdminMerchant"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /admin/merchants/{id}:
+    patch:
+      tags: [admin]
+      operationId: updateAdminMerchant
+      summary: 修改店铺状态
+      description: 店铺非正常状态时，它的商品、促销、店铺券和知识资料都不再对外可见。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [active, inactive, risk]
+                reason:
+                  type: string
+                  maxLength: 200
+                  description: 改为非正常状态时必填，记入操作审计。
+      responses:
+        "200":
+          description: 修改后的对象（状态修改与审计记录在同一事务内写入）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMerchant"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`merchant_not_found`"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: merchant_not_found
+                message: 店铺不存在
+        "409":
+          $ref: "#/components/responses/StatusChangeConflict"
+  /admin/products:
+    get:
+      tags: [admin]
+      operationId: listAdminProducts
+      summary: 商品列表
+      description: 全部店铺的商品，含已删除的，按更新时间倒序。
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, inactive, risk, deleted]
+        - name: merchant_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: keyword
+          in: query
+          required: false
+          description: 按名称包含匹配。
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 商品分页列表
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AdminProduct"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /admin/products/{id}:
+    patch:
+      tags: [admin]
+      operationId: updateAdminProduct
+      summary: 修改商品状态
+      description: 上架、下架或风控。删除由商家操作；已删除的商品不能再改（409 `invalid_status_transition`）。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [active, inactive, risk]
+                reason:
+                  type: string
+                  maxLength: 200
+                  description: 改为非正常状态时必填，记入操作审计。
+      responses:
+        "200":
+          description: 修改后的对象（状态修改与审计记录在同一事务内写入）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminProduct"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`product_not_found`"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: product_not_found
+                message: 商品不存在或已下架
+        "409":
+          $ref: "#/components/responses/StatusChangeConflict"
+  /admin/promotions:
+    get:
+      tags: [admin]
+      operationId: listAdminPromotions
+      summary: 促销列表
+      description: 全部店铺和平台的促销，含停用和已过期的。
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, inactive]
+        - name: merchant_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 促销分页列表
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/MerchantPromotion"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /admin/promotions/{id}:
+    patch:
+      tags: [admin]
+      operationId: updateAdminPromotion
+      summary: 停用或启用促销
+      description: 管理员不能改促销规则（与上游一致）。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [active, inactive]
+                reason:
+                  type: string
+                  maxLength: 200
+                  description: 改为非正常状态时必填，记入操作审计。
+      responses:
+        "200":
+          description: 修改后的对象（状态修改与审计记录在同一事务内写入）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MerchantPromotion"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`promotion_not_found`"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: promotion_not_found
+                message: 促销不存在
+        "409":
+          $ref: "#/components/responses/StatusChangeConflict"
+  /admin/reviews:
+    get:
+      tags: [admin]
+      operationId: listAdminReviews
+      summary: 评价列表
+      description: 全部评价，含隐藏的；带评价人账户 ID。
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [visible, hidden]
+        - name: product_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 评价分页列表
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AdminReview"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /admin/reviews/{id}:
+    patch:
+      tags: [admin]
+      operationId: updateAdminReview
+      summary: 显示或隐藏评价
+      description: 上游还有 deleted，这里的数据模型只有 visible / hidden，隐藏即可。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [visible, hidden]
+                reason:
+                  type: string
+                  maxLength: 200
+                  description: 改为非正常状态时必填，记入操作审计。
+      responses:
+        "200":
+          description: 修改后的对象（状态修改与审计记录在同一事务内写入）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReview"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`review_not_found`"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: review_not_found
+                message: 评价不存在
+        "409":
+          $ref: "#/components/responses/StatusChangeConflict"
+  /admin/configs:
+    get:
+      tags: [admin]
+      operationId: listAdminConfigs
+      summary: 配置列表
+      description: 全部已注册的配置项（不分页），密钥只返回掩码。值的优先级为环境变量 → 动态配置 → 默认值。
+      responses:
+        "200":
+          description: 配置项
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ConfigItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /admin/configs/{key}:
+    patch:
+      tags: [admin]
+      operationId: updateAdminConfig
+      summary: 修改配置
+      description: |
+        只能修改运行中可调的配置（editable=true），写入动态配置后立即生效，并写操作审计；空值表示恢复默认值。
+        密钥和只在启动时读取的配置 409 `config_read_only`；由环境变量指定的 409 `config_overridden_by_env`；值不合法 400（field=value）。
+        上游可以新建任意键、不校验类型；这里只接受已注册的键。
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value:
+                  type: string
+      responses:
+        "200":
+          description: 修改后的配置项
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigItem"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`config_not_found`"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: config_not_found
+                message: 配置项不存在
+        "409":
+          description: "`config_read_only` 或 `config_overridden_by_env`"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: config_read_only
+                message: 该配置只在启动时读取，不能在运行中修改
+  /admin/risk/overview:
+    get:
+      tags: [admin]
+      operationId: getRiskOverview
+      summary: 风控概览
+      description: 账号（不含已注销）、店铺、商品（不含已删除）按状态的数量，以及当前的风险词。
+      responses:
+        "200":
+          description: 风控概览
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RiskOverview"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /admin/audit-logs:
+    get:
+      tags: [admin]
+      operationId: listAdminAuditLogs
+      summary: 操作审计
+      description: 管理员的状态修改和配置修改记录，按写入顺序倒序（上游没有审计）。
+      parameters:
+        - name: target_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [account, merchant, product, promotion, review, config]
+        - name: target_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: operator_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 审计分页列表
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AuditLog"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /admin/documents:
     get:
       tags: [knowledge]
@@ -3623,6 +4302,158 @@ components:
         created_at:
           type: string
           format: date-time
+    AdminAccount:
+      type: object
+      required: [account_id, username, display_name, role, merchant_id, status, created_at, updated_at]
+      properties:
+        account_id:
+          type: string
+        username:
+          type: string
+        display_name:
+          type: string
+        role:
+          $ref: "#/components/schemas/Role"
+        merchant_id:
+          type: string
+        status:
+          $ref: "#/components/schemas/AccountStatus"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    AdminMerchant:
+      allOf:
+        - $ref: "#/components/schemas/Merchant"
+        - type: object
+          required: [service_phone, status, created_at, updated_at]
+          properties:
+            service_phone:
+              type: string
+            status:
+              type: string
+              enum: [active, inactive, risk]
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
+    AdminProduct:
+      type: object
+      required: [product_id, merchant_id, merchant_name, category_id, name, image_url, price, stock_quantity, stock_status, status, updated_at]
+      properties:
+        product_id:
+          type: string
+        merchant_id:
+          type: string
+        merchant_name:
+          type: string
+        category_id:
+          type: string
+        name:
+          type: string
+        image_url:
+          type: string
+        price:
+          $ref: "#/components/schemas/Money"
+        stock_quantity:
+          type: integer
+        stock_status:
+          $ref: "#/components/schemas/StockStatus"
+        status:
+          type: string
+          enum: [active, inactive, risk, deleted]
+        updated_at:
+          type: string
+          format: date-time
+    AdminReview:
+      allOf:
+        - $ref: "#/components/schemas/MerchantReview"
+        - type: object
+          required: [account_id, updated_at]
+          properties:
+            account_id:
+              type: string
+            updated_at:
+              type: string
+              format: date-time
+    ConfigItem:
+      type: object
+      required: [key, env, description, value, source, secret, editable]
+      properties:
+        key:
+          type: string
+        env:
+          type: string
+          description: 对应的环境变量名。
+        description:
+          type: string
+        value:
+          type: string
+          description: 当前生效的值；密钥只返回掩码（有值为 ******，未设置为空串）。
+        source:
+          type: string
+          enum: [env, dynamic, default]
+        secret:
+          type: boolean
+        editable:
+          type: boolean
+          description: 运行中可调、不是密钥、且没有被环境变量指定。
+    RiskOverview:
+      type: object
+      required: [accounts, merchants, products, blocked_words, blocked_words_source, blocked_words_editable]
+      properties:
+        accounts:
+          type: object
+          additionalProperties:
+            type: integer
+        merchants:
+          type: object
+          additionalProperties:
+            type: integer
+        products:
+          type: object
+          additionalProperties:
+            type: integer
+        blocked_words:
+          type: array
+          items:
+            type: string
+        blocked_words_source:
+          type: string
+        blocked_words_editable:
+          type: boolean
+    AuditLog:
+      type: object
+      required: [audit_id, operator_id, operator_name, action, target_type, target_id, before_value, after_value, reason, request_id, created_at]
+      properties:
+        audit_id:
+          type: string
+        operator_id:
+          type: string
+        operator_name:
+          type: string
+        action:
+          type: string
+          description: 例如 account.status_changed、config.updated。
+        target_type:
+          type: string
+        target_id:
+          type: string
+        before_value:
+          type: string
+        after_value:
+          type: string
+        reason:
+          type: string
+        request_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
     FileUpload:
       type: object
       required: [file]
@@ -3690,7 +4521,7 @@ components:
             机器可读错误码。通用错误码：`invalid_argument`、`invalid_json`、`unauthorized`、`forbidden`、`not_found`、
             `method_not_allowed`、`conflict`、`payload_too_large`、`unsupported_media_type`、`rate_limited`、
             `internal_error`、`not_ready`、`timeout`。认证相关：`invalid_credential`、`username_exists`、
-            `account_inactive`、`account_risk`。目录：`product_not_found`。商家：`product_under_review`。订单：`order_not_found`、`order_item_not_found`、`empty_cart`、`item_unavailable`、`price_changed`、`order_status_conflict`、`order_expired`、`order_not_completed`、`review_exists`。商家营销：`promotion_not_found`、`review_not_found`。
+            `account_inactive`、`account_risk`。目录：`product_not_found`。商家：`product_under_review`。订单：`order_not_found`、`order_item_not_found`、`empty_cart`、`item_unavailable`、`price_changed`、`order_status_conflict`、`order_expired`、`order_not_completed`、`review_exists`。商家营销：`promotion_not_found`、`review_not_found`。平台管理：`account_not_found`、`merchant_not_found`、`cannot_change_self`、`status_unchanged`、`invalid_status_transition`、`config_not_found`、`config_read_only`、`config_overridden_by_env`、`config_admin_unavailable`。
           examples: [not_found]
         message:
           type: string
@@ -3874,6 +4705,18 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/MerchantPromotion"
+    StatusChangeConflict:
+      description: "`status_unchanged` 已经是该状态；`invalid_status_transition` 状态机不允许；`cannot_change_self` 不能改自己的账号"
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: invalid_status_transition
+            message: 不能从“已删除”改为“正常”
     OrderResponse:
       description: 订单（含支付单）
       headers:

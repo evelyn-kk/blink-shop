@@ -1,0 +1,1 @@
+{"description": "已删除的商品不能再改状态（状态机终态）", "request": {"method": "PATCH", "path": "/api/v1/admin/products/p_seed_legacy", "as": "blink_admin", "body": {"status": "active"}}, "response": {"status": 409, "body": {"code": "invalid_status_transition", "message": "不能从“已删除”改为“正常”", "request_id": "<request_id>"}}}

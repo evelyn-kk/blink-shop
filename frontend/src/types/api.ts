@@ -383,3 +383,78 @@ export interface MerchantReview {
   merchant_replied_at: string | null;
   created_at: string;
 }
+
+// ---------- 平台管理（openapi tag: admin） ----------
+
+export type EntityStatus = 'active' | 'inactive' | 'risk';
+
+export interface AdminAccount {
+  account_id: string;
+  username: string;
+  display_name: string;
+  role: Role;
+  merchant_id: string;
+  status: EntityStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminMerchant extends Merchant {
+  service_phone: string;
+  status: EntityStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminProduct {
+  product_id: string;
+  merchant_id: string;
+  merchant_name: string;
+  category_id: string;
+  name: string;
+  image_url: string;
+  price: Money;
+  stock_quantity: number;
+  stock_status: StockStatus;
+  status: 'active' | 'inactive' | 'risk' | 'deleted';
+  updated_at: string;
+}
+
+export interface AdminReview extends MerchantReview {
+  account_id: string;
+  updated_at: string;
+}
+
+export interface ConfigItem {
+  key: string;
+  env: string;
+  description: string;
+  /** 密钥只返回掩码。 */
+  value: string;
+  source: 'env' | 'dynamic' | 'default';
+  secret: boolean;
+  editable: boolean;
+}
+
+export interface RiskOverview {
+  accounts: Record<string, number>;
+  merchants: Record<string, number>;
+  products: Record<string, number>;
+  blocked_words: string[];
+  blocked_words_source: string;
+  blocked_words_editable: boolean;
+}
+
+export interface AuditLog {
+  audit_id: string;
+  operator_id: string;
+  operator_name: string;
+  action: string;
+  target_type: string;
+  target_id: string;
+  before_value: string;
+  after_value: string;
+  reason: string;
+  request_id: string;
+  created_at: string;
+}

@@ -300,6 +300,18 @@ sequenceDiagram
 
 与上游的差异：上游商家只能建全店满减，商品/品类字段存了也不参与计价，几乎不校验（金额、时间、类型都不查），默认 stackable=false，PATCH 只能改状态；回复为空返回 404、超长静默截断到 1000 字。这里按上面的规则校验并定位到字段。
 
+## 平台管理与风控
+
+接口：`GET /admin/accounts|merchants|products|promotions|reviews` 与对应的 `PATCH .../{id}`、`GET,PATCH /admin/configs`、`GET /admin/risk/overview`、`GET /admin/audit-logs`（后两个是新增的）。
+
+- **状态修改**：请求体 `{status, reason}`。改为非正常状态（停用、风控、隐藏）必须写原因（≤200 字）。修改必须符合状态机：账号、店铺 active / inactive / risk 互转；商品可以上架、下架、风控，删除由商家操作，已删除是终态；促销只能停用/启用（不能改规则）；评价只有 visible / hidden。已经是目标状态 409 `status_unchanged`，状态机不允许 409 `invalid_status_transition`。管理员不能改自己的账号（409 `cannot_change_self`），因此至少总有一个可用的管理员。
+- **影响**：账号状态在每个请求时检查，已登录的 token 立即受影响（停用只能看会话和退出，风控只读）；店铺非正常状态时它的商品、促销、店铺券、知识资料都不再对外可见；商品非上架、评价隐藏后公开接口看不到。这些都由已有查询的可见性条件保证，不需要级联写。
+- **审计**：每次修改在同一个事务里写 `admin_audit_logs`（操作人 ID 和当时的显示名、动作、对象、前后值、原因、请求 ID），修改失败不留记录；按写入顺序（自增 `seq`）倒序查询，可按对象或操作人筛选。配置不在数据库里，先改配置再写审计，审计写入失败时把配置改回去。
+- **配置**：`configcenter.Settings()` 是管理端可见的全部配置（说明、能否运行中修改、校验）。列表返回当前值和来源（env / dynamic / default），密钥只返回掩码 `******`（未设置为空串），任何接口都不返回明文。只有运行中可调、不是密钥、没有被环境变量指定的配置可以改，按类型校验后写入动态配置并立即生效（例如限流、超时、风险词）；空值恢复默认值。动态配置目前是内存实现，重启后丢失，9.1 接入 Nacos。
+- **风控概览**：账号（不含已注销）、店铺、商品（不含已删除）按状态的数量，以及当前风险词。
+
+与上游的差异：上游列表没有任何筛选；状态可以随意改（不查状态机、没有确认、管理员可以停用自己）；没有审计；配置可以新建任意键、不校验类型，密钥掩码同样是 `******`；评价有 deleted 状态；改为相同状态返回 404。
+
 ## 认证与权限
 
 - **token**：注册/登录返回 32 字节随机 token（base64url），`auth_tokens` 只存 SHA-256 摘要和过期时间。每个请求都按 token 重新读取账户，所以管理员改账户状态立即生效。登出撤销当前 token，注销撤销全部 token。
@@ -345,6 +357,8 @@ sequenceDiagram
 | `GET,POST /merchant/promotions`、`GET,PATCH /merchant/promotions/{id}`、`GET /merchant/reviews`、`POST /merchant/reviews/{id}:reply` | merchant（只看本店促销和本店商品的评价，他店的 404） |
 | `GET /admin/documents`、`GET /admin/documents/{id}`、`POST /admin/unstructured-ingestions` | admin |
 | `GET /admin/orders`、`GET,PATCH /admin/orders/{id}` | admin |
+| `GET /admin/accounts`、`PATCH /admin/accounts/{id}`、`GET /admin/merchants`、`PATCH /admin/merchants/{id}`、`GET /admin/products`、`PATCH /admin/products/{id}`、`GET /admin/promotions`、`PATCH /admin/promotions/{id}`、`GET /admin/reviews`、`PATCH /admin/reviews/{id}` | admin（不能修改自己的账号） |
+| `GET /admin/configs`、`PATCH /admin/configs/{key}`、`GET /admin/risk/overview`、`GET /admin/audit-logs` | admin |
 
 后续节点按前缀约定（`TestRoutePrefixRoles` 检查）：`/admin/*` → admin；`/merchant/*` → merchant；`/cart`、`/orders`、`/coupons/*`、`/agent/*`、`/speech/*` → user；`/files` → account；分类/商家/商品读取 → public。
 
@@ -386,6 +400,7 @@ sequenceDiagram
 | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | — | `minioadmin` | 密钥类 |
 | `MILVUS_TOKEN` | — | 空 | 密钥类 |
 | `AI_API_KEY` | — | 空 | 密钥类 |
+| `RISK_BLOCKED_WORDS` | `risk.blocked_words` | `违法,违禁,假货,绕过风控` | 导购对话的风险词，逗号分隔（最多 200 个、每个 20 字内）；导购 Agent 接入后生效 |
 
 ### 生产危险配置
 

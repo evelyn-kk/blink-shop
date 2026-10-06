@@ -41,6 +41,8 @@ type state struct {
 	files       map[string]domain.StoredFile
 	cartItems   map[string]domain.CartItem
 	checkouts   map[string]domain.CheckoutRequest
+	audits      map[string]store.AuditLog
+	auditSeq    map[string]int64 // 审计记录的写入顺序
 }
 
 func newState() state {
@@ -51,6 +53,7 @@ func newState() state {
 		userCoupons: map[string]domain.UserCoupon{}, orders: map[string]domain.Order{}, orderItems: map[string]domain.OrderItem{},
 		payments: map[string]domain.Payment{}, reviews: map[string]domain.ProductReview{}, files: map[string]domain.StoredFile{},
 		cartItems: map[string]domain.CartItem{}, checkouts: map[string]domain.CheckoutRequest{},
+		audits: map[string]store.AuditLog{}, auditSeq: map[string]int64{},
 	}
 }
 
@@ -63,6 +66,7 @@ func (s state) clone() state {
 		userCoupons: maps.Clone(s.userCoupons), orders: maps.Clone(s.orders), orderItems: maps.Clone(s.orderItems),
 		payments: maps.Clone(s.payments), reviews: maps.Clone(s.reviews), files: maps.Clone(s.files),
 		cartItems: maps.Clone(s.cartItems), checkouts: maps.Clone(s.checkouts),
+		audits: maps.Clone(s.audits), auditSeq: maps.Clone(s.auditSeq),
 	}
 }
 

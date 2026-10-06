@@ -172,7 +172,7 @@ func prefixed(alias, columns string) string {
 	return strings.Join(parts, ", ")
 }
 
-func (s *Store) scanAccount(row *sql.Row) (domain.Account, string, error) {
+func (s *Store) scanAccount(row rowScanner) (domain.Account, string, error) {
 	var (
 		acc     domain.Account
 		hash    string

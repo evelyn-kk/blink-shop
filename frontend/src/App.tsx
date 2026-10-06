@@ -3,8 +3,12 @@ import { logout } from './api/auth';
 import { NoticeHost } from './components/NoticeHost';
 import { Empty } from './components/StateView';
 import { RequireRole } from './components/RequireRole';
-import { documentsHref, loginHref, merchantProductsHref, navigate, ordersHref, productsHref, promotionsHref, reviewsHref, useRoute } from './lib/router';
+import { auditHref, documentsHref, loginHref, merchantProductsHref, navigate, ordersHref, platformHref, productsHref, promotionsHref, reviewsHref, useRoute } from './lib/router';
 import { clearSession, useSession } from './lib/session';
+import { AdminAuditPage } from './pages/AdminAuditPage';
+import { AdminConfigsPage } from './pages/AdminConfigsPage';
+import { AdminPlatformPage } from './pages/AdminPlatformPage';
+import { AdminRiskPage } from './pages/AdminRiskPage';
 import { DocumentDetailPage } from './pages/DocumentDetailPage';
 import { DocumentFormPage } from './pages/DocumentFormPage';
 import { DocumentsPage } from './pages/DocumentsPage';
@@ -62,6 +66,26 @@ export default function App() {
         {route.name === 'merchant_reviews' && (
           <RequireRole role="merchant">
             <ReviewsPage query={route.query} />
+          </RequireRole>
+        )}
+        {route.name === 'admin_platform' && (
+          <RequireRole role="admin">
+            <AdminPlatformPage query={route.query} />
+          </RequireRole>
+        )}
+        {route.name === 'admin_risk' && (
+          <RequireRole role="admin">
+            <AdminRiskPage />
+          </RequireRole>
+        )}
+        {route.name === 'admin_configs' && (
+          <RequireRole role="admin">
+            <AdminConfigsPage />
+          </RequireRole>
+        )}
+        {route.name === 'admin_audit' && (
+          <RequireRole role="admin">
+            <AdminAuditPage query={route.query} />
           </RequireRole>
         )}
         {route.name === 'documents' && (
@@ -136,7 +160,11 @@ function TopBar() {
         )}
         {session?.account.role === 'admin' && (
           <>
+            <a href={platformHref()}>平台管理</a>
             <a href={ordersHref('admin')}>订单管理</a>
+            <a href="#/admin/risk">风控</a>
+            <a href="#/admin/configs">配置</a>
+            <a href={auditHref()}>操作审计</a>
             <a href={documentsHref('admin')}>知识资料</a>
           </>
         )}

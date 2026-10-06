@@ -51,3 +51,8 @@ var (
 	KeyMilvusToken    = Key{Name: "milvus.token", Env: "MILVUS_TOKEN", Secret: true}
 	KeyAIAPIKey       = Key{Name: "ai.api_key", Env: "AI_API_KEY", Secret: true}
 )
+
+// 风控；运行中可由动态配置调整。导购 Agent 的运行前检查在 7.2 接入后读取它。
+var (
+	KeyRiskBlockedWords = Key{Name: "risk.blocked_words", Env: "RISK_BLOCKED_WORDS", Default: "违法,违禁,假货,绕过风控"}
+)

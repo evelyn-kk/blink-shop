@@ -1093,3 +1093,88 @@ td {
   justify-content: flex-end;
   gap: 12px;
 }
+
+/* ---------- 平台管理 ---------- */
+
+.search-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.search-row .search-form {
+  flex: 1 1 280px;
+  margin: 0;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin: 0 0 16px;
+}
+
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+}
+
+.stat-card h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.stat-card dl {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 0;
+  text-align: center;
+}
+
+.stat-card dt {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.stat-card dd {
+  margin: 0;
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-card dd a {
+  display: inline-block;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  line-height: var(--tap);
+}
+
+.config-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.config-row p {
+  margin: 2px 0;
+}
+
+.config-edit {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.config-edit input {
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .config-row {
+    grid-template-columns: 1fr;
+  }
+}

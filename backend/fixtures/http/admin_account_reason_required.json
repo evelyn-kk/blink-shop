@@ -1,0 +1,1 @@
+{"description": "停用、风控必须写原因：400，field 指向 reason", "request": {"method": "PATCH", "path": "/api/v1/admin/accounts/acct_seed_user2", "as": "blink_admin", "body": {"status": "inactive"}}, "response": {"status": 400, "body": {"code": "invalid_argument", "message": "请填写原因（最多 200 个字），会记入操作审计", "field": "reason", "request_id": "<request_id>"}}}

@@ -56,7 +56,7 @@ func TestMigrateEmptyThenAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(applied, []string{"0001_init.sql", "0002_promotion_discount_rate_check.sql",
-		"0003_knowledge_document_product.sql", "0004_backfill_knowledge_document_product.sql"}) {
+		"0003_knowledge_document_product.sql", "0004_backfill_knowledge_document_product.sql", "0005_admin_audit_logs.sql"}) {
 		t.Fatalf("first run applied %v", applied)
 	}
 	applied, err = s.Migrate(ctx, migrations.FS)
@@ -64,14 +64,14 @@ func TestMigrateEmptyThenAgain(t *testing.T) {
 		t.Fatalf("second run applied %v, err %v; want nothing", applied, err)
 	}
 	var count int
-	if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil || count != 4 {
+	if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil || count != 5 {
 		t.Fatalf("schema_migrations rows = %d, %v", count, err)
 	}
 }
 
-// expectedTables 与 docs/02 的表清单一致（加上文件、结算幂等和迁移记录表）。
+// expectedTables 与 docs/02 的表清单一致（加上文件、结算幂等、管理审计和迁移记录表）。
 var expectedTables = []string{
-	"accounts", "agent_prompt_publish_records", "agent_prompts", "agent_runs", "agent_trace_events", "auth_tokens",
+	"accounts", "admin_audit_logs", "agent_prompt_publish_records", "agent_prompts", "agent_runs", "agent_trace_events", "auth_tokens",
 	"cart_items", "categories", "chat_sessions", "checkout_requests", "coupons", "knowledge_chunks", "knowledge_documents",
 	"merchants", "order_items", "orders", "payments", "product_reviews", "product_skus", "products", "promotion_rules",
 	"schema_migrations", "stored_files", "user_coupons", "user_messages",
@@ -80,6 +80,7 @@ var expectedTables = []string{
 // expectedUniqueKeys 是 docs/02 要求的唯一约束（表 -> 键名 -> 列）。
 var expectedUniqueKeys = map[string]map[string]string{
 	"accounts":            {"uk_accounts_username": "username"},
+	"admin_audit_logs":    {"uk_admin_audit_seq": "seq"},
 	"cart_items":          {"uk_cart_items_account_product_sku": "account_id,product_id,sku_id"},
 	"user_messages":       {"uk_user_messages_client_message": "account_id,session_id,client_message_id"},
 	"agent_runs":          {"uk_agent_runs_account_message": "account_id,message_id"},
@@ -409,7 +410,8 @@ func TestMigrateUpgradeFrom0001(t *testing.T) {
 		}
 	}
 	applied, err := s.Migrate(ctx, migrations.FS)
-	want := []string{"0002_promotion_discount_rate_check.sql", "0003_knowledge_document_product.sql", "0004_backfill_knowledge_document_product.sql"}
+	want := []string{"0002_promotion_discount_rate_check.sql", "0003_knowledge_document_product.sql", "0004_backfill_knowledge_document_product.sql",
+		"0005_admin_audit_logs.sql"}
 	if err != nil || !reflect.DeepEqual(applied, want) {
 		t.Fatalf("upgrade applied %v, %v", applied, err)
 	}

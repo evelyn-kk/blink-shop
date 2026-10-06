@@ -26,6 +26,7 @@
 | 0002 | `0002_promotion_discount_rate_check.sql` | `promotion_rules.discount_rate` 加 CHECK 约束，限定在 [0, 1]（REV-003） |
 | 0003 | `0003_knowledge_document_product.sql` | `knowledge_documents` 加 `product_id`（关联商品，可为空）和 `(merchant_id, updated_at)` 索引 |
 | 0004 | `0004_backfill_knowledge_document_product.sql` | 回填已有文档的 `product_id`（全部分块指向同一商品时），可重复执行 |
+| 0005 | `0005_admin_audit_logs.sql` | 新建 `admin_audit_logs`：管理员状态变更与配置修改的审计记录 |
 
 ## 约定
 

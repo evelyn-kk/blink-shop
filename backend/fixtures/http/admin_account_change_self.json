@@ -1,0 +1,1 @@
+{"description": "管理员不能修改自己账号的状态", "request": {"method": "PATCH", "path": "/api/v1/admin/accounts/acct_seed_admin", "as": "blink_admin", "body": {"status": "inactive", "reason": "测试"}}, "response": {"status": 409, "body": {"code": "cannot_change_self", "message": "不能修改自己账号的状态", "request_id": "<request_id>"}}}

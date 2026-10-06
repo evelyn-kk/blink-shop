@@ -214,6 +214,69 @@ type MerchantReview struct {
 	ReviewerName string
 }
 
+// ---------- 平台管理 ----------
+
+// AccountQuery 列出账户（不含已注销的）。Role / Status 为空表示不过滤；Keyword 按账号或显示名包含匹配。按 created_at、account_id 倒序。
+type AccountQuery struct {
+	Role    domain.Role
+	Status  domain.EntityStatus
+	Keyword string
+	Page    Page
+}
+
+// MerchantQuery 列出全部店铺（含停业和风控的）。Keyword 按店铺名包含匹配。按 created_at、merchant_id 倒序。
+type MerchantQuery struct {
+	Status  domain.EntityStatus
+	Keyword string
+	Page    Page
+}
+
+// AdminProductQuery 列出全部商品（含已删除的）。MerchantID / Status 为空表示不过滤；Keyword 按名称包含匹配。
+// 按 updated_at、product_id 倒序；结果不加载 SKU。
+type AdminProductQuery struct {
+	MerchantID string
+	Status     domain.ProductStatus
+	Keyword    string
+	Page       Page
+}
+
+// AdminReviewQuery 列出全部评价。Status / ProductID 为空表示不过滤。按 created_at、review_id 倒序。
+type AdminReviewQuery struct {
+	Status    string
+	ProductID string
+	Page      Page
+}
+
+// AuditLog 是一条管理员操作审计记录。
+type AuditLog struct {
+	AuditID      string
+	OperatorID   string
+	OperatorName string
+	Action       string
+	TargetType   string
+	TargetID     string
+	BeforeValue  string
+	AfterValue   string
+	Reason       string
+	RequestID    string
+	CreatedAt    time.Time
+}
+
+// AuditQuery 列出审计记录。各条件为空表示不过滤。按写入顺序倒序（最新的在前，同一毫秒内也按先后）。
+type AuditQuery struct {
+	TargetType string
+	TargetID   string
+	OperatorID string
+	Page       Page
+}
+
+// StatusOverview 是风控概览：账户（不含已注销）、店铺、商品（不含已删除）按状态的数量。
+type StatusOverview struct {
+	Accounts  map[string]int
+	Merchants map[string]int
+	Products  map[string]int
+}
+
 // ProfileUpdate 是个人资料的部分更新，nil 表示不修改。
 type ProfileUpdate struct {
 	DisplayName *string
@@ -531,6 +594,21 @@ type Store interface {
 	// ReplyReview 写入（或覆盖）商家回复和回复时间。
 	ReplyReview(ctx context.Context, merchantID, reviewID, reply string, at time.Time) (MerchantReview, error)
 
+	// 平台管理。状态修改都锁定行后交给 fn，修改后的状态必须符合对应的状态机（相同状态视为未变化），否则返回 ErrInvalid；
+	// fn 出错时不修改。fn 只能改状态，其他字段改了也不会写入。
+	ListAccounts(ctx context.Context, q AccountQuery) ([]domain.Account, int, error)
+	UpdateAccountStatus(ctx context.Context, accountID string, fn func(a *domain.Account) error) (domain.Account, error)
+	ListMerchants(ctx context.Context, q MerchantQuery) ([]domain.Merchant, int, error)
+	UpdateMerchantStatus(ctx context.Context, merchantID string, fn func(m *domain.Merchant) error) (domain.Merchant, error)
+	ListAllProducts(ctx context.Context, q AdminProductQuery) ([]CatalogProduct, int, error)
+	ListAllReviews(ctx context.Context, q AdminReviewQuery) ([]MerchantReview, int, error)
+	// UpdateReviewStatus 只允许 visible ↔ hidden。
+	UpdateReviewStatus(ctx context.Context, reviewID string, fn func(r *domain.ProductReview) error) (MerchantReview, error)
+	CountStatuses(ctx context.Context) (StatusOverview, error)
+	// InsertAuditLog 写入审计记录（AuditID 为空时生成，CreatedAt 为空时取当前时间）。与状态修改放在同一个 WithTx 里即可一起提交或回滚。
+	InsertAuditLog(ctx context.Context, l AuditLog) (AuditLog, error)
+	ListAuditLogs(ctx context.Context, q AuditQuery) ([]AuditLog, int, error)
+
 	// ApplySeed 在一个事务内写入开发种子：按主键“不存在才插入”，可重复执行；违反其他唯一键时整体回滚并返回 ErrConflict。
 	ApplySeed(ctx context.Context, data SeedData) (SeedResult, error)
 }
@@ -701,6 +779,24 @@ func PrepareChunks(d domain.KnowledgeDocument, chunks []domain.KnowledgeChunk, n
 		out[i] = c
 	}
 	return out, nil
+}
+
+// CheckEntityTransition / CheckProductTransition / CheckReviewTransition 是两种实现共用的状态校验（相同状态视为未变化）。
+func CheckEntityTransition(from, to domain.EntityStatus) error {
+	if from == to {
+		return nil
+	}
+	if err := from.CanTransitionTo(to); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	return nil
+}
+
+func CheckReviewTransition(from, to string) error {
+	if to != domain.ReviewVisible && to != domain.ReviewHidden {
+		return fmt.Errorf("%w: 评价状态只能是 visible 或 hidden", ErrInvalid)
+	}
+	return nil
 }
 
 // EffectiveCouponStatus 按时间计算用户券的状态：未使用但券已到期（at ≥ end_at）的视为 expired。
