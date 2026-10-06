@@ -51,7 +51,8 @@ export function AdminRiskPage() {
               </section>
             ))}
           </div>
-          <BlockedWords key={overview.data.blocked_words.join(',')} overview={overview.data} onSaved={reload} />
+          {/* 保存后统计和“最近操作”都要刷新，新写的审计记录才会出现。 */}
+          <BlockedWords key={overview.data.blocked_words.join(',')} overview={overview.data} onSaved={() => (reload(), reloadRecent())} />
         </>
       )}
 

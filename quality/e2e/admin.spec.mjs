@@ -116,7 +116,8 @@ test('风险词与配置：密钥只显示掩码；风险词保存后立即生�
     expect(overview.blocked_words).toEqual(['违法', '刷单', '套现']);
     expect(overview.blocked_words_source).toBe('dynamic');
     await expect(page.getByText('最近操作')).toBeVisible();
-    await expect(page.locator('.doc-row').filter({ hasText: 'config.updated' }).first()).toContainText('risk.blocked_words');
+    // 刚才这次保存的审计记录（新库里也必须出现，不能靠以前留下的记录）。
+    await expect(page.locator('.doc-row').filter({ hasText: 'config.updated' }).filter({ hasText: '→ 违法,刷单,套现' }).first()).toContainText('risk.blocked_words');
 
     await page.goto('/#/admin/configs');
     await expect(page.getByRole('heading', { name: '应用配置' })).toBeVisible();
