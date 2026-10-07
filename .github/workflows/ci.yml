@@ -114,6 +114,8 @@ jobs:
   web-e2e:
     name: Web E2E (real API)
     runs-on: ubuntu-latest
+    # 正常 5 分钟内结束；给卡住的外部依赖（如 apt 镜像）一个上限，不让任务挂 6 小时
+    timeout-minutes: 30
     services:
       mysql:
         image: mysql:8.4.11@sha256:6ea90827b1100f8f2ae306a539f86d2c264a26ed435a2a9f75551dd5c3aeb242
@@ -177,7 +179,9 @@ jobs:
           WEB_BASE_URL: http://127.0.0.1:5173
         run: |
           npm ci
-          npx playwright install --with-deps chromium
+          # --with-deps 要 apt-get 装系统库，apt 镜像故障时会一直卡住；限时 5 分钟，
+          # 超时则只装浏览器（runner 镜像已带 Chromium 所需的系统库）。
+          timeout 300 npx playwright install --with-deps chromium || npx playwright install chromium
           npm run e2e
       - uses: actions/upload-artifact@v4
         if: always()
