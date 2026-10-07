@@ -23,6 +23,78 @@ func cartRaceCases() []struct {
 		{"CartUpdateWaitsForProductChange", testCartWaitsForProductChange},
 		{"ProductChangeWaitsForCartUpdate", testProductWaitsForCart},
 		{"CartAndProductLockOrderNoDeadlock", testCartProductNoDeadlock},
+		{"LockProductHoldsUntilCommit", testLockProduct},
+	}
+}
+
+// LockProduct：未提交的商品修改先拿到锁时，LockProduct 等它提交并读到新状态；
+// 反过来，事务里 LockProduct 之后，修改商品要等这个事务结束。
+func testLockProduct(t *testing.T, s store.Store) {
+	ctx := context.Background()
+	seeded(t, s)
+	if _, err := s.LockProduct(ctx, "p_missing"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing product: %v", err)
+	}
+
+	changed, release, productDone := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		_, err := s.UpdateProduct(ctx, "p_seed_nova", func(p *domain.Product) error {
+			p.Status = domain.ProductDeleted
+			close(changed)
+			<-release
+			return nil
+		})
+		productDone <- err
+	}()
+	<-changed
+	lockDone := make(chan struct{})
+	var locked domain.Product
+	var lockErr error
+	go func() {
+		defer close(lockDone)
+		lockErr = s.WithTx(ctx, func(ctx context.Context) error {
+			locked, lockErr = s.LockProduct(ctx, "p_seed_nova")
+			return lockErr
+		})
+	}()
+	waited := blockedFor(lockDone, 300*time.Millisecond)
+	close(release)
+	productErr := <-productDone
+	<-lockDone
+	if !waited {
+		t.Fatal("LockProduct did not wait for the uncommitted product change")
+	}
+	if productErr != nil || lockErr != nil || locked.Status != domain.ProductDeleted || locked.MerchantID != seed.DigitalMerchant {
+		t.Fatalf("product err %v, lock err %v, locked %+v", productErr, lockErr, locked)
+	}
+
+	read, release, txDone := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		txDone <- s.WithTx(ctx, func(ctx context.Context) error {
+			if p, err := s.LockProduct(ctx, "p_seed_vista"); err != nil || p.Status != domain.ProductActive {
+				return errBoom
+			}
+			close(read)
+			<-release
+			return nil
+		})
+	}()
+	<-read
+	updateDone := make(chan struct{})
+	var updateErr error
+	go func() {
+		defer close(updateDone)
+		_, updateErr = s.UpdateProduct(ctx, "p_seed_vista", func(p *domain.Product) error { p.Status = domain.ProductDeleted; return nil })
+	}()
+	waited = blockedFor(updateDone, 300*time.Millisecond)
+	close(release)
+	txErr := <-txDone
+	<-updateDone
+	if !waited {
+		t.Fatal("product change did not wait for the transaction holding LockProduct")
+	}
+	if txErr != nil || updateErr != nil {
+		t.Fatalf("tx %v, update %v", txErr, updateErr)
 	}
 }
 

@@ -75,6 +75,15 @@ func (s *Store) CreateProduct(ctx context.Context, p domain.Product) (domain.Pro
 	return s.GetProduct(ctx, p.ProductID)
 }
 
+func (s *Store) LockProduct(ctx context.Context, productID string) (domain.Product, error) {
+	p, err := scanProduct(s.q(ctx).QueryRowContext(ctx, `SELECT `+productColumns+` FROM products WHERE product_id = ? FOR SHARE`, productID))
+	if err != nil {
+		return domain.Product{}, err
+	}
+	p.SKUs = []domain.ProductSKU{}
+	return p, nil
+}
+
 func (s *Store) UpdateProduct(ctx context.Context, productID string, fn func(p *domain.Product) error) (domain.Product, error) {
 	err := s.WithTx(ctx, func(ctx context.Context) error {
 		p, err := scanProduct(s.q(ctx).QueryRowContext(ctx,

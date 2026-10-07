@@ -115,29 +115,8 @@ func checkLateCheckout(t *testing.T, ts *testServer, tok string, done <-chan che
 // 时间过去一小时。放开后订单必须按事务内此刻生效的活动计价，支付期限从此刻算起，并能立即支付。
 func TestCheckoutUsesRulesFromTransactionMySQL(t *testing.T) {
 	ctx := context.Background()
-	st, err := mysqlstore.Open(mysqltest.FreshDSN(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { st.Close() })
-	if _, err := st.Migrate(ctx, migrations.FS); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.ApplySeed(ctx, storetest.DevSeed(t)); err != nil {
-		t.Fatal(err)
-	}
 	clock := newTestClock(testNow)
-	logs := &bytes.Buffer{}
-	s := NewServer(Options{
-		Logger: logging.New(logs, slog.LevelDebug), Store: st, PasswordCost: bcrypt.MinCost, AvatarDir: t.TempDir(), Now: clock.now,
-		Settings: configcenter.NewHTTPSettingsProvider(configcenter.NewResolver(func(string) string { return "" }, configcenter.NewMemorySource(nil)), false),
-	})
-	ts := &testServer{Server: s, handler: s.Handler(), logs: logs}
-	t.Cleanup(func() {
-		if t.Failed() {
-			t.Log(logs.String())
-		}
-	})
+	ts, st := newMySQLTestServer(t, clock.now)
 	tok := ts.login(t, seed.User2Username, seed.DevPassword).Token
 	ts.addToCart(t, tok, map[string]any{"product_id": "p_seed_lamp"}) // 249：不够平台满 300 减 30，旧规则下只用平台券满 200 减 20
 
@@ -161,6 +140,34 @@ func TestCheckoutUsesRulesFromTransactionMySQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkLateCheckout(t, ts, tok, done)
+}
+
+// newMySQLTestServer 在新建的测试库（已迁移并写入开发种子数据）上启动服务；未配置 MySQL 时跳过测试。
+func newMySQLTestServer(t *testing.T, now func() time.Time) (*testServer, *mysqlstore.Store) {
+	t.Helper()
+	ctx := context.Background()
+	st, err := mysqlstore.Open(mysqltest.FreshDSN(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if _, err := st.Migrate(ctx, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ApplySeed(ctx, storetest.DevSeed(t)); err != nil {
+		t.Fatal(err)
+	}
+	logs := &bytes.Buffer{}
+	s := NewServer(Options{
+		Logger: logging.New(logs, slog.LevelDebug), Store: st, PasswordCost: bcrypt.MinCost, AvatarDir: t.TempDir(), Now: now,
+		Settings: configcenter.NewHTTPSettingsProvider(configcenter.NewResolver(func(string) string { return "" }, configcenter.NewMemorySource(nil)), false),
+	})
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Log(logs.String())
+		}
+	})
+	return &testServer{Server: s, handler: s.Handler(), logs: logs}, st
 }
 
 // waitForLockWait 等到本测试库里有连接正在执行结算第一步的账户加锁语句（被另一事务挡住，最多 5 秒）。

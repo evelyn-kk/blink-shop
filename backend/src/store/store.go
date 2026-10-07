@@ -515,6 +515,9 @@ type Store interface {
 	// UpdateProduct 在事务中锁定商品行并加载 SKU，交给 fn 修改后整体写回：SKU 按 ID 更新或新增，
 	// 不在新列表中的删除。fn 返回错误或写回失败时整体回滚。商品不存在返回 ErrNotFound。
 	UpdateProduct(ctx context.Context, productID string, fn func(p *domain.Product) error) (domain.Product, error)
+	// LockProduct 在当前事务中以共享锁读取商品行（不加载 SKU），锁持有到事务结束：其间 UpdateProduct（如删除）要等待，
+	// 读到的状态在提交前不会变。必须在 WithTx 内调用，否则读完即释放。不存在返回 ErrNotFound。
+	LockProduct(ctx context.Context, productID string) (domain.Product, error)
 
 	// 私有文件元数据。CreateStoredFile 前用 ValidateStoredFile 校验；FileID 为空时自动生成，object_key 重复返回 ErrConflict。
 	CreateStoredFile(ctx context.Context, f domain.StoredFile) (domain.StoredFile, error)

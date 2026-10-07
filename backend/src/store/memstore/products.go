@@ -61,6 +61,18 @@ func (s *Store) CreateProduct(ctx context.Context, p domain.Product) (domain.Pro
 	return s.GetProduct(ctx, p.ProductID)
 }
 
+// LockProduct 事务内已持有全局锁，修改商品的事务只能等它结束。
+func (s *Store) LockProduct(ctx context.Context, productID string) (domain.Product, error) {
+	defer s.lock(ctx)()
+	p, ok := s.data.products[productID]
+	if !ok {
+		return domain.Product{}, store.ErrNotFound
+	}
+	p = cloneProduct(p)
+	p.SKUs = []domain.ProductSKU{}
+	return p, nil
+}
+
 func (s *Store) UpdateProduct(ctx context.Context, productID string, fn func(p *domain.Product) error) (domain.Product, error) {
 	err := s.WithTx(ctx, func(context.Context) error {
 		stored, ok := s.data.products[productID]

@@ -1,12 +1,16 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/evelyn-kk/blink-shop/backend/src/domain"
 	"github.com/evelyn-kk/blink-shop/backend/src/seed"
+	"github.com/evelyn-kk/blink-shop/backend/src/store"
 )
 
 const merchantPromotionsPath = "/api/v1/merchant/promotions"
@@ -252,5 +256,153 @@ func TestMerchantReviewsAndReply(t *testing.T) {
 	}
 	if !strings.Contains(ts.logs.String(), `"action":"review.replied"`) {
 		t.Error("audit review.replied missing")
+	}
+}
+
+// pausePoint 让请求停在某个位置：到达时关闭 reached，等 resume 关闭后继续。
+type pausePoint struct{ reached, resume chan struct{} }
+
+func newPausePoint() *pausePoint {
+	return &pausePoint{reached: make(chan struct{}), resume: make(chan struct{})}
+}
+
+// promotionDeleteRaceStore 在单品促销锁住商品之后（afterLock），或删除商品已写入、事务还没提交时（inDelete）停住。
+type promotionDeleteRaceStore struct {
+	store.Store
+	afterLock, inDelete *pausePoint
+}
+
+func (s *promotionDeleteRaceStore) LockProduct(ctx context.Context, productID string) (domain.Product, error) {
+	p, err := s.Store.LockProduct(ctx, productID)
+	if s.afterLock != nil {
+		close(s.afterLock.reached)
+		<-s.afterLock.resume
+	}
+	return p, err
+}
+
+func (s *promotionDeleteRaceStore) UpdateProduct(ctx context.Context, productID string, fn func(p *domain.Product) error) (domain.Product, error) {
+	return s.Store.UpdateProduct(ctx, productID, func(p *domain.Product) error {
+		if err := fn(p); err != nil || s.inDelete == nil || p.Status != domain.ProductDeleted {
+			return err
+		}
+		close(s.inDelete.reached)
+		<-s.inDelete.resume
+		return nil
+	})
+}
+
+// TestProductPromotionRacesWithProductDelete（REV-012）：创建或修改单品促销时，商家并发删除该商品。
+// 促销先校验并锁住商品：删除必须等促销提交后才能进行；删除先拿到锁：促销等删除提交后读到 deleted，
+// 返回 product_id 字段错误且不写入。内存和 MySQL 两个 Store 结果一致。
+func TestProductPromotionRacesWithProductDelete(t *testing.T) {
+	for name, newServer := range map[string]func(t *testing.T) *testServer{
+		"memory": func(t *testing.T) *testServer { return newTestServer(t, nil, nil, nil) },
+		"mysql": func(t *testing.T) *testServer {
+			ts, _ := newMySQLTestServer(t, func() time.Time { return testNow })
+			return ts
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ts := newServer(t)
+			raced := &promotionDeleteRaceStore{Store: ts.store}
+			ts.store = raced
+			tok := ts.login(t, seed.MerchantUsername, seed.DevPassword).Token
+			for _, c := range []struct {
+				name                     string
+				productID                string
+				updating, promotionFirst bool
+			}{
+				{"create/promotion first", "p_seed_nova", false, true},
+				{"create/delete first", "p_seed_vista", false, false},
+				{"update/promotion first", "p_seed_keyboard", true, true},
+				{"update/delete first", "p_seed_mouse", true, false},
+			} {
+				t.Run(c.name, func(t *testing.T) {
+					runPromotionDeleteRace(t, ts, raced, tok, c.productID, c.updating, c.promotionFirst)
+				})
+			}
+		})
+	}
+}
+
+func runPromotionDeleteRace(t *testing.T, ts *testServer, raced *promotionDeleteRaceStore, tok, productID string, updating, promotionFirst bool) {
+	method, path := http.MethodPost, merchantPromotionsPath
+	body := map[string]any{"name": "单品立减", "scope": "product", "product_id": productID, "discount_amount": "10"}
+	var promotionID string
+	if updating {
+		// 先建一条全店满减，再把它改成这个商品的单品促销。
+		rec := ts.call(t, http.MethodPost, merchantPromotionsPath, tok, map[string]any{"name": "单品立减", "threshold_amount": "100", "discount_amount": "10"})
+		expectStatus(t, rec, http.StatusCreated, "")
+		promotionID = decodeBody[merchantPromotionView](t, rec).PromotionID
+		method, path = http.MethodPatch, merchantPromotionsPath+"/"+promotionID
+		body = map[string]any{"scope": "product", "product_id": productID}
+	}
+	async := func(method, path string, body any) <-chan *httptest.ResponseRecorder {
+		out := make(chan *httptest.ResponseRecorder, 1)
+		go func() { out <- ts.call(t, method, path, tok, body) }()
+		return out
+	}
+	first := newPausePoint()
+	// reach 等先发的请求停在暂停点；没经过暂停点就结束（例如没有锁商品）直接失败。
+	reach := func(done <-chan *httptest.ResponseRecorder) {
+		t.Helper()
+		select {
+		case <-first.reached:
+		case rec := <-done:
+			t.Fatalf("request finished without reaching the pause point: %d %s", rec.Code, rec.Body)
+		case <-time.After(5 * time.Second):
+			t.Fatal("pause point not reached")
+		}
+	}
+	var promotionDone, deleteDone, firstDone, secondDone <-chan *httptest.ResponseRecorder
+	if promotionFirst {
+		raced.afterLock, raced.inDelete = first, nil
+		promotionDone = async(method, path, body)
+		reach(promotionDone)
+		deleteDone = async(http.MethodDelete, merchantProducts+"/"+productID, nil)
+		firstDone, secondDone = promotionDone, deleteDone
+	} else {
+		raced.afterLock, raced.inDelete = nil, first
+		deleteDone = async(http.MethodDelete, merchantProducts+"/"+productID, nil)
+		reach(deleteDone)
+		promotionDone = async(method, path, body)
+		firstDone, secondDone = deleteDone, promotionDone
+	}
+	// 后到的请求必须等先拿到锁的事务提交；失败时先放行，不能让暂停的事务一直占着锁。
+	select {
+	case rec := <-secondDone:
+		close(first.resume)
+		<-firstDone
+		t.Fatalf("second request did not wait: %d %s", rec.Code, rec.Body)
+	case <-time.After(300 * time.Millisecond):
+	}
+	close(first.resume)
+	promotionRec, deleteRec := <-promotionDone, <-deleteDone
+	expectStatus(t, deleteRec, http.StatusOK, "")
+
+	if promotionFirst {
+		want := http.StatusCreated
+		if updating {
+			want = http.StatusOK
+		}
+		expectStatus(t, promotionRec, want, "")
+		if v := decodeBody[merchantPromotionView](t, promotionRec); v.Scope != "product" || v.ProductID != productID {
+			t.Fatalf("promotion = %+v", v)
+		}
+		return
+	}
+	expectStatus(t, promotionRec, http.StatusBadRequest, "invalid_argument")
+	if e := decodeError(t, promotionRec); e.Field != "product_id" {
+		t.Fatalf("field = %q (%s)", e.Field, e.Message)
+	}
+	rec := ts.call(t, http.MethodGet, merchantPromotionsPath+"?page_size=100", tok, nil)
+	for _, p := range decodeBody[pageResponse[merchantPromotionView]](t, rec).Items {
+		if p.ProductID == productID {
+			t.Fatalf("promotion written for deleted product: %+v", p)
+		}
+		if p.PromotionID == promotionID && p.Scope != "merchant" {
+			t.Fatalf("promotion changed: %+v", p)
+		}
 	}
 }

@@ -156,12 +156,22 @@ func (s *Server) handleCreateMerchantPromotion(w http.ResponseWriter, r *http.Re
 	now := s.now().UTC()
 	p := domain.PromotionRule{Scope: domain.ScopeMerchant, MerchantID: acc.MerchantID, Type: domain.PromotionFullReduction, Stackable: true,
 		StartAt: now, Status: domain.StatusActive}
-	if err := s.applyPromotionInput(r.Context(), &p, in, acc.MerchantID, true, now); err != nil {
-		writeError(w, err)
+	// 校验和写入放在同一事务里：单品促销校验时锁住的商品在提交前不会被删除。
+	var created domain.PromotionRule
+	err := s.store.WithTx(r.Context(), func(ctx context.Context) error {
+		if err := s.applyPromotionInput(ctx, &p, in, acc.MerchantID, true, now); err != nil {
+			return err
+		}
+		var err error
+		created, err = s.store.CreatePromotion(ctx, p)
+		return err
+	})
+	var apiErr *APIError
+	switch {
+	case errors.As(err, &apiErr):
+		writeError(w, apiErr)
 		return
-	}
-	created, err := s.store.CreatePromotion(r.Context(), p)
-	if err != nil {
+	case err != nil:
 		s.storeFailed(w, r, "create promotion", err)
 		return
 	}
@@ -230,7 +240,8 @@ func (s *Server) applyPromotionInput(ctx context.Context, p *domain.PromotionRul
 		if p.ProductID == "" {
 			return fieldError("product_id", "请选择商品")
 		}
-		prod, err := s.store.GetProduct(ctx, p.ProductID)
+		// 共享锁持有到事务结束：校验通过后，商品在促销提交前不会被删除或改动。调用方须在事务内调用。
+		prod, err := s.store.LockProduct(ctx, p.ProductID)
 		if errors.Is(err, store.ErrNotFound) || (err == nil && (prod.MerchantID != merchantID || prod.Status == domain.ProductDeleted)) {
 			return fieldError("product_id", "只能选择本店的商品")
 		}
