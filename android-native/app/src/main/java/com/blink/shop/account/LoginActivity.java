@@ -53,6 +53,8 @@ public final class LoginActivity extends BaseActivity {
         formError = findViewById(R.id.form_error);
         submit = findViewById(R.id.submit);
 
+        // 输入法设置只在代码里定（见 LoginInputs），布局里不写 imeOptions
+        username.setImeOptions(LoginInputs.usernameImeOptions());
         registerMode = savedInstanceState != null && savedInstanceState.getBoolean(STATE_REGISTER);
         findViewById(R.id.back_button).setOnClickListener(v -> finish());
         tabLogin.setOnClickListener(v -> setMode(false));
@@ -105,7 +107,7 @@ public final class LoginActivity extends BaseActivity {
         displayNameGroup.setVisibility(register ? View.VISIBLE : View.GONE);
         usernameRule.setVisibility(register ? View.VISIBLE : View.GONE);
         passwordRule.setVisibility(register ? View.VISIBLE : View.GONE);
-        password.setImeOptions((register ? EditorInfo.IME_ACTION_NEXT : EditorInfo.IME_ACTION_DONE) | EditorInfo.IME_FLAG_FORCE_ASCII);
+        password.setImeOptions(LoginInputs.passwordImeOptions(register));
         submit.setText(register ? "注册并登录" : "登录");
         clearErrors();
     }

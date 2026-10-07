@@ -71,7 +71,6 @@
                     style="@style/Field"
                     android:autofillHints="username"
                     android:hint="账号"
-                    android:imeOptions="actionNext|flagForceAscii"
                     android:inputType="text|textNoSuggestions"
                     android:maxLength="32"
                     android:maxLines="1" />
@@ -99,7 +98,6 @@
                     style="@style/Field"
                     android:autofillHints="password"
                     android:hint="密码"
-                    android:imeOptions="flagForceAscii"
                     android:inputType="textPassword"
                     android:maxLength="64"
                     android:maxLines="1" />
@@ -109,7 +107,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="8–64 个字符"
+                    android:text="8–64 个字符，可以包含中文"
                     android:textColor="@color/text_hint"
                     android:textSize="12sp" />
 

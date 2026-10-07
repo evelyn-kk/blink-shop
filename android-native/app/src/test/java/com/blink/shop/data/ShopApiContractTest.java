@@ -118,6 +118,22 @@ public class ShopApiContractTest {
         taken(f);
     }
 
+    /** 服务端允许中文等多字节密码（不超过 72 字节）：客户端原样发送，不做任何转换。 */
+    @Test
+    public void unicodePasswordSentUnchanged() throws Exception {
+        String password = "蓝色Blink密码2026";
+        assertTrue(password.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 72);
+        serve("auth_register_created");
+        api.register("new_user", password, "新用户");
+        RecordedRequest reg = server.takeRequest();
+        assertEquals(password, new JSONObject(reg.getBody().readUtf8()).getString("password"));
+        serve("auth_login_ok");
+        api.login("blink_user", password);
+        RecordedRequest login = server.takeRequest();
+        assertTrue(login.getHeader("Content-Type").contains("charset=utf-8"));
+        assertEquals(password, new JSONObject(login.getBody().readUtf8()).getString("password"));
+    }
+
     @Test
     public void meAndExpiredToken() throws Exception {
         session.token = "tok_live";
