@@ -25,13 +25,21 @@ android {
 
     buildTypes {
         debug {
-            // 10.0.2.2 是模拟器访问宿主机的地址；真机调试时改成宿主机局域网 IP。
+            // 10.0.2.2 是模拟器访问宿主机的地址；真机调试时在“高级设置”里改成宿主机局域网 IP。
             buildConfigField 'String', 'DEFAULT_API_BASE', '"http://10.0.2.2:8080/api/v1"'
+            // Debug 要连本机/局域网的 http 服务；Release 只允许 https。
+            manifestPlaceholders = [usesCleartextTraffic: 'true']
         }
         release {
-            buildConfigField 'String', 'DEFAULT_API_BASE', '"https://api.blink-shop.invalid/api/v1"'
+            // 发布地址由构建环境注入（BLINK_API_BASE），Release 没有修改入口。
+            buildConfigField 'String', 'DEFAULT_API_BASE', "\"${System.getenv('BLINK_API_BASE') ?: 'https://api.blink-shop.invalid/api/v1'}\""
+            manifestPlaceholders = [usesCleartextTraffic: 'false']
             minifyEnabled false
         }
+    }
+
+    testOptions {
+        unitTests.returnDefaultValues = true
     }
 
     lint {
@@ -41,5 +49,12 @@ android {
 }
 
 dependencies {
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'androidx.recyclerview:recyclerview:1.3.2'
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'
+    // android.jar 里的 org.json 只是桩，JVM 单测要用真实实现。
+    testImplementation 'org.json:json:20240303'
 }

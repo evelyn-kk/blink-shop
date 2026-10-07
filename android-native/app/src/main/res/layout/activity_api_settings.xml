@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <LinearLayout style="@style/TopBar">
+
+        <TextView
+            android:id="@+id/back_button"
+            style="@style/TopBarButton"
+            android:contentDescription="@string/back"
+            android:text="‹"
+            android:textSize="26sp" />
+
+        <TextView
+            style="@style/TopBarTitle"
+            android:accessibilityHeading="true"
+            android:text="@string/api_settings" />
+    </LinearLayout>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="12dp">
+
+            <LinearLayout style="@style/Card">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:labelFor="@+id/api_base_input"
+                    android:text="服务地址（仅调试版可改）"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp" />
+
+                <EditText
+                    android:id="@+id/api_base_input"
+                    style="@style/Field"
+                    android:hint="http://192.168.1.10:8080/api/v1"
+                    android:importantForAutofill="no"
+                    android:inputType="textUri"
+                    android:maxLines="1" />
+
+                <TextView
+                    android:id="@+id/api_base_hint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="模拟器访问本机用 10.0.2.2；真机填电脑的局域网 IP，手机和电脑需在同一网络。修改后需要重新登录。"
+                    android:textColor="@color/text_hint"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/api_base_result"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:accessibilityLiveRegion="polite"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/api_test"
+                        style="@style/SecondaryButton"
+                        android:text="测试连接" />
+
+                    <View
+                        android:layout_width="12dp"
+                        android:layout_height="1dp" />
+
+                    <Button
+                        android:id="@+id/api_reset"
+                        style="@style/SecondaryButton"
+                        android:text="恢复默认" />
+                </LinearLayout>
+
+                <Button
+                    android:id="@+id/api_save"
+                    style="@style/PrimaryButton"
+                    android:layout_marginTop="16dp"
+                    android:text="保存" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

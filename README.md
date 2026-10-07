@@ -28,7 +28,7 @@ set -a && source .env && set +a                         # 后端读取环境变�
 cd backend && go run ./cmd/seed                         # 迁移并写入演示数据（账号见 backend/README.md）
 cd backend && go run ./cmd/api                          # /api/v1/health 存活，/api/v1/ready 检查 MySQL 和迁移
 cd frontend && npm ci && npm run dev -- --port 5173     # /api 代理到 :8080
-cd android-native && ./gradlew :app:assembleDebug       # 模拟器默认访问 http://10.0.2.2:8080/api/v1
+cd android-native && ./gradlew :app:assembleDebug       # 模拟器默认访问 http://10.0.2.2:8080/api/v1，其他地址见 android-native/README.md
 ```
 
 ## 本地检查（与 CI 一致）

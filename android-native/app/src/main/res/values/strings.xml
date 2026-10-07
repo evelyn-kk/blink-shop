@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Blink Shop</string>
-    <string name="api_base_label">接口地址：%1$s</string>
+    <string name="loading">加载中</string>
+    <string name="retry">重试</string>
+    <string name="back">返回</string>
+    <string name="search_hint">搜索商品、品牌或用途</string>
+    <string name="clear_search">清空搜索</string>
+    <string name="login">登录</string>
+    <string name="register">注册</string>
+    <string name="product_image">商品图片</string>
+    <string name="api_settings">接口设置</string>
 </resources>

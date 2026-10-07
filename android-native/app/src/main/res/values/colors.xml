@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brand">#2155D6</color>
+    <color name="brand_soft">#E8EEFC</color>
+    <color name="text_primary">#15181E</color>
+    <color name="text_secondary">#5B6270</color>
+    <color name="text_hint">#8A909C</color>
+    <color name="page_bg">#F3F4F7</color>
+    <color name="card_bg">#FFFFFF</color>
+    <color name="divider">#E3E6EB</color>
+    <color name="price">#D0342C</color>
+    <color name="danger">#C62828</color>
+    <color name="warning_bg">#FFF4E0</color>
+    <color name="warning_text">#8A4B00</color>
+    <color name="image_placeholder">#E9EBEF</color>
+</resources>
