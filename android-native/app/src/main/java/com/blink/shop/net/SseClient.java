@@ -8,6 +8,7 @@ import org.json.JSONObject;
 
 import okhttp3.Call;
 import okhttp3.Callback;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -88,7 +89,8 @@ public final class SseClient {
                         finishWithError(stream, listener, ApiException.fromHttp(r.code(), text, r.header("X-Request-ID")));
                         return;
                     }
-                    if (body == null) {
+                    // 2xx 但不是事件流（如代理返回的 JSON/HTML）是协议错误，不能当成正常结束
+                    if (body == null || !isEventStream(body.contentType())) {
                         finishWithError(stream, listener, ApiException.badResponse(null));
                         return;
                     }
@@ -112,6 +114,11 @@ public final class SseClient {
             }
         });
         return stream;
+    }
+
+    /** 媒体类型是 text/event-stream（忽略大小写和 charset 等参数）。 */
+    static boolean isEventStream(MediaType type) {
+        return type != null && "text".equalsIgnoreCase(type.type()) && "event-stream".equalsIgnoreCase(type.subtype());
     }
 
     private static void finishWithError(Stream stream, Listener listener, ApiException error) {

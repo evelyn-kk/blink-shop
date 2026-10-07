@@ -102,7 +102,7 @@ public class SseTest {
 
     @Test
     public void streamsEventsThenCloses() throws Exception {
-        server.enqueue(new MockResponse().setHeader("Content-Type", "text/event-stream")
+        server.enqueue(new MockResponse().setHeader("Content-Type", "Text/Event-Stream; charset=utf-8")
                 .setBody("event: message_start\r\ndata: {}\r\n\r\nevent: text_delta\ndata: 你好\n\nevent: message_done\ndata: {}\n\n"));
         Recorder r = new Recorder();
         sse.post("/agent/sessions/s1/messages:stream", new JSONObject().put("content", "hi"), r);
@@ -124,6 +124,29 @@ public class SseTest {
         assertEquals(Collections.singletonList("error"), r.log);
         assertTrue(r.error.isUnauthorized());
         assertEquals(Collections.singletonList("tok_1"), session.rejected);
+    }
+
+    @Test
+    public void nonEventStreamSuccessIsError() throws Exception {
+        String[][] cases = {
+                {"application/json", "{\"run_id\":\"r1\"}"},
+                {"text/html; charset=utf-8", "<html><body>data: not sse</body></html>"},
+                {null, "data: x\n\n"},
+        };
+        for (String[] c : cases) {
+            MockResponse resp = new MockResponse().setBody(c[1]);
+            if (c[0] != null) {
+                resp.setHeader("Content-Type", c[0]);
+            } else {
+                resp.removeHeader("Content-Type");
+            }
+            server.enqueue(resp);
+            Recorder r = new Recorder();
+            sse.post("/x", new JSONObject(), r);
+            assertTrue(r.done.await(5, TimeUnit.SECONDS));
+            assertEquals(c[0], Collections.singletonList("error"), r.log);
+            assertEquals(ApiException.Kind.BAD_RESPONSE, r.error.kind());
+        }
     }
 
     @Test
