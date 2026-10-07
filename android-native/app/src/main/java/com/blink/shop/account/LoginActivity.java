@@ -105,7 +105,7 @@ public final class LoginActivity extends BaseActivity {
         displayNameGroup.setVisibility(register ? View.VISIBLE : View.GONE);
         usernameRule.setVisibility(register ? View.VISIBLE : View.GONE);
         passwordRule.setVisibility(register ? View.VISIBLE : View.GONE);
-        password.setImeOptions(register ? EditorInfo.IME_ACTION_NEXT : EditorInfo.IME_ACTION_DONE);
+        password.setImeOptions((register ? EditorInfo.IME_ACTION_NEXT : EditorInfo.IME_ACTION_DONE) | EditorInfo.IME_FLAG_FORCE_ASCII);
         submit.setText(register ? "注册并登录" : "登录");
         clearErrors();
     }

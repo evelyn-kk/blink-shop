@@ -71,7 +71,8 @@
                     style="@style/Field"
                     android:autofillHints="username"
                     android:hint="账号"
-                    android:inputType="text"
+                    android:imeOptions="actionNext|flagForceAscii"
+                    android:inputType="text|textNoSuggestions"
                     android:maxLength="32"
                     android:maxLines="1" />
 
@@ -98,6 +99,7 @@
                     style="@style/Field"
                     android:autofillHints="password"
                     android:hint="密码"
+                    android:imeOptions="flagForceAscii"
                     android:inputType="textPassword"
                     android:maxLength="64"
                     android:maxLines="1" />
