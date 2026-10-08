@@ -171,9 +171,26 @@ def checkout_page():
     dev.wait(rid="coupon_value", contains=True, text="自动选择最优")
 
 
-@step("连点两次“提交订单”，只生成一组订单（2 个），进入支付页")
-def submit_twice(token):
+@step("断网提交：结果未知，页面冻结上次提交（提示、不能换券、按钮变为原样重发）")
+def submit_offline(token):
     before = len(user_orders(token))
+    dev.set_network(False)
+    try:
+        dev.tap(rid="submit_button")
+        dev.wait(rid="pending_banner", contains=True, text="没有收到结果")
+        dev.wait(rid="submit_button", text="重新提交上次的订单")
+        dev.wait(rid="coupon_value", contains=True, text="上次提交：自动选择最优券")
+        dev.tap(rid="coupon_row")
+        time.sleep(1)
+        assert not dev.find(text="使用优惠券"), "结果未确认时不应能换券"
+        assert len(user_orders(token)) == before
+    finally:
+        dev.set_network(True)
+    return before
+
+
+@step("恢复网络后连点两次“重新提交上次的订单”，只生成一组订单（2 个），进入支付页")
+def submit_twice(token, before):
     dev.double_tap_fast(rid="submit_button")
     dev.wait(text="支付订单", timeout=20)
     dev.wait(contains=True, text="共 2 个订单")
@@ -312,7 +329,8 @@ def main():
         stock = cart_quantities(token)
         stock_changes(token, stock)
         checkout_page()
-        order_ids = submit_twice(token)
+        before = submit_offline(token)
+        order_ids = submit_twice(token, before)
         pay_fail_then_retry(token, order_ids)
         kill_and_ship(order_ids)
         digital = next(o["order_id"] for o in user_orders(token) if o["merchant_name"] == "Blink 数码旗舰店")

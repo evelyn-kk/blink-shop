@@ -223,7 +223,7 @@ public class TradeContractTest {
         price.assertRequest(server.takeRequest());
         assertEquals("price_changed", e.code());
         assertTrue(e.getMessage().contains("¥229.00"));
-        assertFalse(Drafts.keepKeyAfter(e)); // 明确拒绝：没下单，丢弃幂等键
+        assertFalse(PendingCheckout.unknownAfter(e)); // 明确拒绝：没下单
 
         serve("order_checkout_empty_cart");
         e = fails(() -> api.checkout("fixture-empty", null, "0.00"));

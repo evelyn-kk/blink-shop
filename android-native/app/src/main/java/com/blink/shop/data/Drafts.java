@@ -3,18 +3,14 @@ package com.blink.shop.data;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-import java.util.UUID;
-
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import com.blink.shop.net.ApiException;
 
 /**
  * 本地草稿（应用私有存储，App 被杀后仍在）：
  * <ul>
- * <li>结算幂等键：第一次提交前生成并保存，网络失败、超时或 App 被杀后重新提交都用同一个键——
- * 如果上次其实已经下单成功，服务端直接返回那次的订单，不会重复下单；下单成功或被服务端明确拒绝后清除。</li>
+ * <li>结果未确认的结算提交（幂等键、用券选择、确认金额一起冻结，见 PendingCheckout）。</li>
  * <li>评价草稿：按订单项保存评分、内容和标签，提交成功后清除。</li>
  * </ul>
  * 按账户隔离，换号后看不到别人的草稿。
@@ -31,49 +27,26 @@ public final class Drafts {
 
     // ---------- 结算 ----------
 
-    /** 当前未完成的结算幂等键；没有则生成并保存。 */
-    public String checkoutKey(String accountId) {
-        String k = prefs.getString(checkoutKeyName(accountId), null);
-        if (k == null || k.isEmpty()) {
-            k = newCheckoutKey();
-            prefs.edit().putString(checkoutKeyName(accountId), k).commit();
-        }
-        return k;
-    }
+    /** 某个账户结果未确认的结算提交（见 PendingCheckout）。 */
+    public PendingCheckout.Store checkout(String accountId) {
+        String name = "checkout_pending." + accountId;
+        return new PendingCheckout.Store() {
+            @Override
+            public PendingCheckout load() {
+                return PendingCheckout.fromJson(prefs.getString(name, null));
+            }
 
-    /** 是否有一次提交过、结果未知的结算（用于提示“上次提交未完成”）。 */
-    public boolean hasPendingCheckout(String accountId) {
-        return prefs.getBoolean(checkoutKeyName(accountId) + ".sent", false);
-    }
+            @Override
+            public void save(PendingCheckout p) {
+                // commit：发请求前必须已经落盘，App 随后被杀也不会丢
+                prefs.edit().putString(name, p.toJson()).commit();
+            }
 
-    /** 请求发出前调用：之后若没有收到明确结果，下次提交仍用这个键。 */
-    public void markCheckoutSent(String accountId) {
-        prefs.edit().putBoolean(checkoutKeyName(accountId) + ".sent", true).commit();
-    }
-
-    /** 下单成功或被服务端明确拒绝：丢弃这个键，下次提交是新的一单。 */
-    public void clearCheckout(String accountId) {
-        prefs.edit().remove(checkoutKeyName(accountId)).remove(checkoutKeyName(accountId) + ".sent").commit();
-    }
-
-    /**
-     * 提交失败后是否保留幂等键：网络失败、超时、取消、响应无法识别、5xx、429 时结果未知或可重试，保留；
-     * 服务端明确拒绝（其他 4xx，如价格变化、购物车为空、券不可用）时没有下单，丢弃。
-     */
-    public static boolean keepKeyAfter(ApiException e) {
-        if (e.kind() != ApiException.Kind.HTTP) {
-            return true;
-        }
-        return e.status() >= 500 || e.status() == 429;
-    }
-
-    /** 1–128 位字母数字和 . _ : -（服务端规则）。 */
-    static String newCheckoutKey() {
-        return "and-" + UUID.randomUUID().toString();
-    }
-
-    private static String checkoutKeyName(String accountId) {
-        return "checkout_key." + accountId;
+            @Override
+            public void clear() {
+                prefs.edit().remove(name).commit();
+            }
+        };
     }
 
     // ---------- 评价 ----------
