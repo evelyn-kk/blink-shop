@@ -5,6 +5,7 @@ import android.os.Handler;
 import android.os.Looper;
 
 import com.blink.shop.data.AndroidConnectivity;
+import com.blink.shop.data.Drafts;
 import com.blink.shop.data.ApiBaseStore;
 import com.blink.shop.data.PrefsSessionStorage;
 import com.blink.shop.data.SessionManager;
@@ -23,6 +24,7 @@ import okhttp3.OkHttpClient;
 public final class ShopApp extends Application {
 
     private SessionManager sessions;
+    private Drafts drafts;
     private ApiBaseStore apiBase;
     private AndroidConnectivity connectivity;
     private OkHttpClient baseHttp;
@@ -42,6 +44,7 @@ public final class ShopApp extends Application {
             }
         });
         apiBase = new ApiBaseStore(this);
+        drafts = new Drafts(this);
         connectivity = new AndroidConnectivity(this);
         baseHttp = ApiClient.defaultHttp().build();
         rebuild();
@@ -54,6 +57,10 @@ public final class ShopApp extends Application {
 
     public SessionManager sessions() {
         return sessions;
+    }
+
+    public Drafts drafts() {
+        return drafts;
     }
 
     public ShopApi api() {

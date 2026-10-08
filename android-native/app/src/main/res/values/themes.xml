@@ -96,6 +96,28 @@
         <item name="android:layout_marginTop">8dp</item>
     </style>
 
+    <!-- 页面底部的操作栏：左侧金额/说明，右侧主按钮 -->
+    <style name="BottomBar">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:minHeight">64dp</item>
+        <item name="android:background">@color/card_bg</item>
+        <item name="android:elevation">8dp</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:paddingEnd">12dp</item>
+        <item name="android:paddingTop">8dp</item>
+        <item name="android:paddingBottom">8dp</item>
+    </style>
+
+    <style name="BottomBarButton" parent="PrimaryButton">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:minWidth">120dp</item>
+        <item name="android:paddingStart">20dp</item>
+        <item name="android:paddingEnd">20dp</item>
+    </style>
+
     <style name="Row">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>

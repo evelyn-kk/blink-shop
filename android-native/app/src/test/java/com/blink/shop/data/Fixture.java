@@ -61,8 +61,17 @@ final class Fixture {
 
     /** 方法、路径与样例一致；查询参数只用样例里出现过的名字（外加分页参数）；JSON 请求体与样例字段一致。 */
     void assertRequest(RecordedRequest actual) throws Exception {
+        assertRequest(actual, java.util.Collections.emptyMap());
+    }
+
+    /** subst 把样例路径里的占位（如 {setup_order_id}）换成测试里用的值。 */
+    void assertRequest(RecordedRequest actual, java.util.Map<String, String> subst) throws Exception {
         assertEquals(name + " method", request.getString("method"), actual.getMethod());
-        HttpUrl want = HttpUrl.get("http://x" + request.getString("path"));
+        String path = request.getString("path");
+        for (java.util.Map.Entry<String, String> e : subst.entrySet()) {
+            path = path.replace(e.getKey(), e.getValue());
+        }
+        HttpUrl want = HttpUrl.get("http://x" + path);
         HttpUrl got = actual.getRequestUrl();
         assertEquals(name + " path", want.encodedPath(), got.encodedPath());
         Set<String> allowed = new HashSet<>(want.queryParameterNames());

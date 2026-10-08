@@ -71,4 +71,43 @@ public class ModelTest {
         Sku s = Sku.fromJson(new JSONObject().put("sku_name", "默认规格"));
         assertEquals("默认规格", s.label());
     }
+
+    @Test
+    public void sumsAmounts() {
+        assertEquals("3671.05", Money.sum(java.util.Arrays.asList("3441.98", "229.07")));
+        assertEquals("0.00", Money.sum(java.util.Collections.emptyList()));
+        assertEquals("1.50", Money.sum(java.util.Arrays.asList("1.5", "x")));
+    }
+
+    @Test
+    public void orderStatusLabelsAndReviews() throws Exception {
+        assertEquals("待支付", Order.statusLabel("pending_payment"));
+        assertEquals("待发货", Order.statusLabel("paid"));
+        assertEquals("已发货", Order.statusLabel("shipped"));
+        assertEquals("已完成", Order.statusLabel("completed"));
+        assertEquals("已取消", Order.statusLabel("cancelled"));
+        org.json.JSONObject o = new org.json.JSONObject().put("status", "shipped")
+                .put("items", new org.json.JSONArray().put(new org.json.JSONObject().put("order_item_id", "i1").put("review_id", "")))
+                .put("paid_at", org.json.JSONObject.NULL);
+        Order order = Order.fromJson(o);
+        assertFalse(order.hasUnreviewed()); // 还没完成不能评价
+        assertEquals("", order.paidAt);
+        assertNull(order.payment);
+        o.put("status", "completed");
+        assertTrue(Order.fromJson(o).hasUnreviewed());
+    }
+
+    @Test
+    public void cartCountsOnlySelectedAvailableForCheckout() throws Exception {
+        org.json.JSONArray items = new org.json.JSONArray()
+                .put(new org.json.JSONObject().put("cart_item_id", "a").put("quantity", 2).put("selected", true).put("available", true)
+                        .put("stock_quantity", 200))
+                .put(new org.json.JSONObject().put("cart_item_id", "b").put("quantity", 3).put("selected", false).put("available", false)
+                        .put("unavailable_reason", "已售罄").put("stock_quantity", 0));
+        Cart c = Cart.fromJson(new org.json.JSONObject().put("items", items));
+        assertEquals(1, c.checkoutCount());
+        assertEquals(5, c.totalQuantity());
+        assertEquals(99, c.items.get(0).maxQuantity()); // 不超过 99
+        assertEquals(1, c.items.get(1).maxQuantity());
+    }
 }

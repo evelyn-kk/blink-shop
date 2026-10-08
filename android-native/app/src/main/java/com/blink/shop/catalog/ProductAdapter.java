@@ -27,6 +27,8 @@ final class ProductAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder>
         void onProductClick(Product p);
 
         void onRetryMore();
+
+        void onAddToCart(Product p);
     }
 
     private static final int TYPE_ITEM = 0;
@@ -90,6 +92,7 @@ final class ProductAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder>
         final TextView price;
         final TextView marketPrice;
         final TextView stock;
+        final TextView add;
 
         ItemHolder(View v) {
             super(v);
@@ -100,6 +103,7 @@ final class ProductAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder>
             price = v.findViewById(R.id.product_price);
             marketPrice = v.findViewById(R.id.product_market_price);
             stock = v.findViewById(R.id.product_stock);
+            add = v.findViewById(R.id.product_add);
             marketPrice.setPaintFlags(marketPrice.getPaintFlags() | Paint.STRIKE_THRU_TEXT_FLAG);
         }
 
@@ -118,6 +122,12 @@ final class ProductAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder>
                 images.load(image, p.imageUrl, imagePx);
             }
             itemView.setOnClickListener(v -> listener.onProductClick(p));
+            boolean soldOut = "out_of_stock".equals(p.stockStatus);
+            add.setText(soldOut ? "暂时缺货" : "加入购物车");
+            add.setEnabled(!soldOut);
+            add.setAlpha(soldOut ? 0.5f : 1f);
+            add.setContentDescription(soldOut ? p.name + " 暂时缺货" : "把 " + p.name + " 加入购物车");
+            add.setOnClickListener(v -> listener.onAddToCart(p));
         }
     }
 

@@ -194,4 +194,31 @@
 
         <include layout="@layout/view_state" />
     </FrameLayout>
+
+    <LinearLayout
+        android:id="@+id/bottom_bar"
+        style="@style/BottomBar"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/cart_button"
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/touch_target"
+            android:gravity="center"
+            android:minWidth="88dp"
+            android:paddingEnd="12dp"
+            android:text="购物车"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <Button
+            android:id="@+id/add_to_cart"
+            style="@style/BottomBarButton"
+            android:text="加入购物车" />
+    </LinearLayout>
 </LinearLayout>

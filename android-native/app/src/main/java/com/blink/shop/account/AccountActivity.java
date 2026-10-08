@@ -16,11 +16,12 @@ import android.widget.TextView;
 import java.io.IOException;
 
 import com.blink.shop.R;
-import com.blink.shop.data.ApiBaseStore;
 import com.blink.shop.model.Account;
 import com.blink.shop.model.Session;
 import com.blink.shop.net.ApiException;
-import com.blink.shop.settings.ApiSettingsActivity;
+import com.blink.shop.coupon.CouponActivity;
+import com.blink.shop.order.OrderListActivity;
+import com.blink.shop.settings.SettingsActivity;
 import com.blink.shop.ui.Async;
 import com.blink.shop.ui.BaseActivity;
 
@@ -50,12 +51,9 @@ public final class AccountActivity extends BaseActivity {
         findViewById(R.id.row_email).setOnClickListener(v -> editContact());
         findViewById(R.id.row_logout).setOnClickListener(v -> confirmLogout());
         findViewById(R.id.row_delete).setOnClickListener(v -> confirmDelete());
-        View apiRow = findViewById(R.id.row_api_settings);
-        if (ApiBaseStore.editable()) {
-            apiRow.setOnClickListener(v -> startActivity(new Intent(this, ApiSettingsActivity.class)));
-        } else {
-            apiRow.setVisibility(View.GONE);
-        }
+        findViewById(R.id.row_orders).setOnClickListener(v -> startActivity(new Intent(this, OrderListActivity.class)));
+        findViewById(R.id.row_coupons).setOnClickListener(v -> startActivity(new Intent(this, CouponActivity.class)));
+        findViewById(R.id.row_settings).setOnClickListener(v -> startActivity(new Intent(this, SettingsActivity.class)));
         render(app.sessions().current());
         refresh();
     }

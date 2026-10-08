@@ -10,6 +10,7 @@ import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -23,15 +24,19 @@ import java.util.List;
 import java.util.TimeZone;
 
 import com.blink.shop.R;
+import com.blink.shop.account.LoginActivity;
+import com.blink.shop.model.Cart;
 import com.blink.shop.model.Money;
 import com.blink.shop.model.PageResult;
 import com.blink.shop.model.Product;
 import com.blink.shop.model.Review;
+import com.blink.shop.model.Session;
 import com.blink.shop.model.Sku;
 import com.blink.shop.model.Times;
 import com.blink.shop.net.ApiException;
 import com.blink.shop.ui.Async;
 import com.blink.shop.ui.BaseActivity;
+import com.blink.shop.ui.CartButton;
 import com.blink.shop.ui.Chips;
 import com.blink.shop.ui.StateView;
 
@@ -63,6 +68,8 @@ public final class ProductDetailActivity extends BaseActivity {
     private Product product;
     private List<Sku> skus = new ArrayList<>();
     private String selectedSkuId = "";
+    private CartButton cartButton;
+    private boolean adding;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -84,7 +91,49 @@ public final class ProductDetailActivity extends BaseActivity {
         TextView market = findViewById(R.id.detail_market_price);
         market.setPaintFlags(market.getPaintFlags() | Paint.STRIKE_THRU_TEXT_FLAG);
         state = new StateView(findViewById(android.R.id.content));
+        cartButton = new CartButton(this, findViewById(R.id.cart_button));
+        findViewById(R.id.add_to_cart).setOnClickListener(v -> addToCart());
         load();
+    }
+
+    @Override
+    protected void onSessionUpdated(Session session) {
+        if (cartButton != null) {
+            cartButton.refresh();
+        }
+    }
+
+    /** 未登录先去登录（登录后回到本页再点一次）；数量规则和库存以服务端为准。 */
+    private void addToCart() {
+        if (adding || product == null) {
+            return;
+        }
+        if (!app.sessions().isLoggedIn()) {
+            toast("请先登录");
+            startActivity(new Intent(this, LoginActivity.class));
+            return;
+        }
+        adding = true;
+        Button b = findViewById(R.id.add_to_cart);
+        b.setEnabled(false);
+        b.setText("加入中…");
+        String skuId = selectedSkuId;
+        call(() -> app.api().addToCart(productId, skuId, 1), new Async.Callback<Cart>() {
+            @Override
+            public void onSuccess(Cart cart) {
+                adding = false;
+                cartButton.show(cart.totalQuantity());
+                toast("已加入购物车");
+                renderSkus();
+            }
+
+            @Override
+            public void onError(ApiException e) {
+                adding = false;
+                toast(e.getMessage());
+                renderSkus();
+            }
+        });
     }
 
     @Override
@@ -227,6 +276,11 @@ public final class ProductDetailActivity extends BaseActivity {
         market.setText(showMarket ? Money.format(product.marketPrice) : "");
         market.setContentDescription(showMarket ? "原价 " + Money.format(product.marketPrice) : null);
         StockLabels.apply(findViewById(R.id.detail_stock), stockStatus);
+        findViewById(R.id.bottom_bar).setVisibility(View.VISIBLE);
+        Button add = findViewById(R.id.add_to_cart);
+        boolean soldOut = selected != null ? selected.stockQuantity <= 0 : "out_of_stock".equals(product.stockStatus);
+        add.setEnabled(!soldOut && !adding);
+        add.setText(adding ? "加入中…" : (soldOut ? "暂时缺货" : "加入购物车"));
         TextView info = findViewById(R.id.sku_info);
         if (selected == null) {
             info.setVisibility(View.GONE);

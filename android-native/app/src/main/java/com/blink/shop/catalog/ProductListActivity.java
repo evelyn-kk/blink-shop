@@ -25,6 +25,7 @@ import java.util.List;
 import com.blink.shop.R;
 import com.blink.shop.account.AccountActivity;
 import com.blink.shop.account.LoginActivity;
+import com.blink.shop.model.Cart;
 import com.blink.shop.model.Category;
 import com.blink.shop.model.PageResult;
 import com.blink.shop.model.Product;
@@ -32,7 +33,9 @@ import com.blink.shop.model.Session;
 import com.blink.shop.net.ApiException;
 import com.blink.shop.ui.Async;
 import com.blink.shop.ui.BaseActivity;
+import com.blink.shop.ui.CartButton;
 import com.blink.shop.ui.Chips;
+import com.blink.shop.ui.Pager;
 import com.blink.shop.ui.StateView;
 
 /** 首页：商品搜索、分类筛选和分页列表。 */
@@ -51,7 +54,7 @@ public final class ProductListActivity extends BaseActivity implements ProductAd
     private RecyclerView list;
     private StateView state;
     private final ProductAdapter adapter = new ProductAdapter(this);
-    private final ProductPager pager = new ProductPager();
+    private final Pager<Product> pager = new Pager<>(p -> p.productId);
 
     /** 已提交的搜索词（输入框里未提交的不算）。 */
     private String keyword = "";
@@ -61,6 +64,7 @@ public final class ProductListActivity extends BaseActivity implements ProductAd
     private ApiException lastError;
     private ConnectivityManager.NetworkCallback networkCallback;
     private int apiVersion;
+    private CartButton cartButton;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -135,6 +139,7 @@ public final class ProductListActivity extends BaseActivity implements ProductAd
         });
         findViewById(R.id.search_button).setOnClickListener(v -> submitSearch());
         accountButton.setOnClickListener(v -> openAccount());
+        cartButton = new CartButton(this, findViewById(R.id.cart_button));
 
         renderAccountButton(app.sessions().current());
         renderCategories();
@@ -174,6 +179,30 @@ public final class ProductListActivity extends BaseActivity implements ProductAd
     @Override
     protected void onSessionUpdated(Session session) {
         renderAccountButton(session);
+        if (cartButton != null) {
+            cartButton.refresh();
+        }
+    }
+
+    @Override
+    public void onAddToCart(Product p) {
+        if (!app.sessions().isLoggedIn()) {
+            toast("请先登录");
+            startActivity(new Intent(this, LoginActivity.class));
+            return;
+        }
+        call(() -> app.api().addToCart(p.productId, p.skuId, 1), new Async.Callback<Cart>() {
+            @Override
+            public void onSuccess(Cart cart) {
+                toast("已加入购物车");
+                cartButton.show(cart.totalQuantity());
+            }
+
+            @Override
+            public void onError(ApiException e) {
+                toast(e.getMessage());
+            }
+        });
     }
 
     // ---------- 加载 ----------

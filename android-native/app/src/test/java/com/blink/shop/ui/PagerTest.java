@@ -1,4 +1,4 @@
-package com.blink.shop.catalog;
+package com.blink.shop.ui;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -13,7 +13,7 @@ import org.junit.Test;
 import com.blink.shop.model.PageResult;
 import com.blink.shop.model.Product;
 
-public class ProductPagerTest {
+public class PagerTest {
 
     private static PageResult<Product> page(int page, int total, String... ids) throws Exception {
         List<Product> items = new ArrayList<>();
@@ -25,7 +25,7 @@ public class ProductPagerTest {
 
     @Test
     public void pagesUntilTotalAndDedupes() throws Exception {
-        ProductPager p = new ProductPager();
+        Pager<Product> p = new Pager<>(x -> x.productId);
         int gen = p.reset();
         assertEquals(-1, p.next()); // 首页加载中不能翻页
         assertTrue(p.accept(gen, page(1, 5, "a", "b")));
@@ -43,7 +43,7 @@ public class ProductPagerTest {
 
     @Test
     public void staleResultsAfterFilterChangeAreDropped() throws Exception {
-        ProductPager p = new ProductPager();
+        Pager<Product> p = new Pager<>(x -> x.productId);
         int old = p.reset();
         int current = p.reset();
         assertFalse(p.accept(old, page(1, 2, "old")));
@@ -55,7 +55,7 @@ public class ProductPagerTest {
 
     @Test
     public void failedNextPageCanBeRetried() throws Exception {
-        ProductPager p = new ProductPager();
+        Pager<Product> p = new Pager<>(x -> x.productId);
         int gen = p.reset();
         p.accept(gen, page(1, 4, "a", "b"));
         int g = p.next();
@@ -71,7 +71,7 @@ public class ProductPagerTest {
 
     @Test
     public void emptyPageStopsPaging() throws Exception {
-        ProductPager p = new ProductPager();
+        Pager<Product> p = new Pager<>(x -> x.productId);
         int gen = p.reset();
         p.accept(gen, page(1, 10));
         assertFalse(p.hasMore());
