@@ -24,6 +24,23 @@
             android:text="购物车" />
     </LinearLayout>
 
+    <!-- 上一次结算结果未确认时显示（购物车可能已被那一单清空），点开进入恢复 -->
+    <TextView
+        android:id="@+id/pending_checkout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="12dp"
+        android:background="@drawable/bg_warning"
+        android:foreground="?android:attr/selectableItemBackground"
+        android:minHeight="@dimen/touch_target"
+        android:padding="12dp"
+        android:text="上一笔订单提交后没有收到结果，点这里确认（不会重复下单）"
+        android:textColor="@color/warning_text"
+        android:textSize="14sp"
+        android:visibility="gone" />
+
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"

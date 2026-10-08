@@ -178,6 +178,32 @@ public class PendingCheckoutTest {
         assertEquals(0, b.getJSONArray("user_coupon_ids").length());
     }
 
+    /** REV-017：首单已成功、客户端没收到响应，进程重启后购物车已空、没有试算，仍能原样重发拿到回放订单。 */
+    @Test
+    public void afterRestartWithEmptyCart_resendsFrozenAndGetsReplay() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(201).setBody(created(false)).setHeadersDelay(3, TimeUnit.SECONDS));
+        submitFails(Arrays.asList("uc_a"), "3687.05");
+        JSONObject first = body(server.takeRequest());
+
+        MemoryStore afterRestart = new MemoryStore();
+        afterRestart.saved = store.saved; // 进程重启：只剩本地保存的内容
+        server.enqueue(new MockResponse().setResponseCode(200).setBody(created(true)));
+        ShopApi.CheckoutResult r = PendingCheckout.submit(api, afterRestart, null, null); // 购物车已空：没有当前选择和金额
+        JSONObject again = body(server.takeRequest());
+        assertEquals(first.getString("idempotency_key"), again.getString("idempotency_key"));
+        assertEquals("uc_a", again.getJSONArray("user_coupon_ids").getString(0));
+        assertEquals("3687.05", again.getString("expected_pay_amount"));
+        assertTrue(r.replayed);
+        assertEquals("o_1", r.orders.get(0).orderId);
+        assertNull(afterRestart.load());
+        assertEquals(2, server.getRequestCount());
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void newSubmitNeedsConfirmedAmount() throws Exception {
+        PendingCheckout.submit(api, store, null, null);
+    }
+
     @Test
     public void unknownAfterRules() throws Exception {
         assertTrue(PendingCheckout.unknownAfter(ApiException.offline()));

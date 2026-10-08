@@ -100,13 +100,17 @@ public final class PendingCheckout {
     }
 
     /**
-     * 提交结算。有未确认结果的上一次提交时，忽略当前页面的选择，原样重发上一次；否则按当前选择新建一次。
+     * 提交结算。有未确认结果的上一次提交时，忽略当前页面的选择（可以为 null，例如重启后购物车已清空、没有试算），
+     * 原样重发上一次；否则按当前选择新建一次。
      * 请求发出前先保存；成功或被明确拒绝后清除，结果未知时保留（下次仍只能原样重发）。
      */
     public static ShopApi.CheckoutResult submit(ShopApi api, Store store, List<String> currentCoupons, String currentExpected)
             throws ApiException {
         PendingCheckout p = store.load();
         if (p == null) {
+            if (currentExpected == null) {
+                throw new IllegalStateException("no pending checkout and no confirmed amount");
+            }
             p = create(currentCoupons, currentExpected);
             store.save(p);
         }

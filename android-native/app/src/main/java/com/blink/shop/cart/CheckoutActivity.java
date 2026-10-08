@@ -119,6 +119,12 @@ public final class CheckoutActivity extends BaseActivity {
     }
 
     private void load() {
+        if (pending != null) {
+            // 恢复不依赖当前购物车和试算：上次如果已经成功，购物车已被清空，试算也算不出那一单
+            state.hide();
+            renderRecovery();
+            return;
+        }
         state.loading("正在计算优惠…");
         findViewById(R.id.bottom_bar).setVisibility(View.GONE);
         List<String> coupons = couponArg();
@@ -167,19 +173,11 @@ public final class CheckoutActivity extends BaseActivity {
                     R.color.text_primary, false));
         }
 
+        findViewById(R.id.pending_banner).setVisibility(View.GONE);
+        findViewById(R.id.discount_card).setVisibility(View.VISIBLE);
         TextView couponValue = findViewById(R.id.coupon_value);
-        String couponText = pending != null ? "上次提交：" + pending.couponDescription() : couponSummary();
-        couponValue.setText(couponText);
-        findViewById(R.id.coupon_row).setContentDescription("优惠券：" + couponText + (pending != null ? "" : "，点击更换"));
-        TextView banner = findViewById(R.id.pending_banner);
-        if (pending != null) {
-            banner.setVisibility(View.VISIBLE);
-            banner.setText("上次提交的订单（实付 " + Money.format(pending.expectedPayAmount) + "，" + pending.couponDescription()
-                    + "）没有收到结果。为避免重复下单或进入与当前页面不同的订单，只能原样重新提交这一笔；"
-                    + "拿到结果后才能修改优惠券。如果上次已经成功，会直接显示那次的订单。");
-        } else {
-            banner.setVisibility(View.GONE);
-        }
+        couponValue.setText(couponSummary());
+        findViewById(R.id.coupon_row).setContentDescription("优惠券：" + couponSummary() + "，点击更换");
 
         LinearLayout d = findViewById(R.id.discount_card);
         d.removeAllViews();
@@ -202,19 +200,41 @@ public final class CheckoutActivity extends BaseActivity {
 
         findViewById(R.id.bottom_bar).setVisibility(View.VISIBLE);
         TextView note = findViewById(R.id.pay_note);
-        if (pending != null) {
-            ((TextView) findViewById(R.id.pay_amount)).setText("实付 " + Money.format(pending.expectedPayAmount));
-            boolean differs = !Money.format(pending.expectedPayAmount).equals(Money.format(preview.payAmount));
-            note.setText(differs ? "上次提交的金额；当前计算为 " + Money.format(preview.payAmount) : "上次提交的金额");
-            note.setVisibility(View.VISIBLE);
-            submit.setText("重新提交上次的订单");
-        } else {
-            ((TextView) findViewById(R.id.pay_amount)).setText("实付 " + Money.format(preview.payAmount));
-            boolean discounted = Money.greater(preview.discountAmount, "0");
-            note.setText(discounted ? "已优惠 " + Money.format(preview.discountAmount) : "");
-            note.setVisibility(discounted ? View.VISIBLE : View.GONE);
-            submit.setText("提交订单");
-        }
+        ((TextView) findViewById(R.id.pay_amount)).setText("实付 " + Money.format(preview.payAmount));
+        boolean discounted = Money.greater(preview.discountAmount, "0");
+        note.setText(discounted ? "已优惠 " + Money.format(preview.discountAmount) : "");
+        note.setVisibility(discounted ? View.VISIBLE : View.GONE);
+        submit.setText("提交订单");
+    }
+
+    /**
+     * 恢复界面：只用本地冻结的上一次提交（不拉购物车和试算）。上次如果其实已经成功，购物车已清空，
+     * 原样重发会拿到服务端回放的那组订单；如果没成功，会按上次的内容下单或被明确拒绝。
+     */
+    private void renderRecovery() {
+        TextView banner = findViewById(R.id.pending_banner);
+        banner.setVisibility(View.VISIBLE);
+        banner.setText("上次提交的订单（实付 " + Money.format(pending.expectedPayAmount) + "，" + pending.couponDescription()
+                + "）没有收到结果。为避免重复下单或进入与当时确认内容不同的订单，只能原样重新提交这一笔："
+                + "如果上次已经成功，会直接显示那次的订单；拿到结果后才能修改或重新结算。");
+        LinearLayout items = findViewById(R.id.items_card);
+        items.removeAllViews();
+        items.addView(Rows.title(this, "上次提交的订单"));
+        items.addView(Rows.pair(this, "确认时的实付金额", Money.format(pending.expectedPayAmount), R.color.price, true));
+        items.addView(Rows.pair(this, "用券方式", pending.couponDescription(), R.color.text_primary, false));
+        items.addView(Rows.text(this, "商品以服务端结果为准：上次成功时会显示那次的订单，购物车里已结算的商品不会再次下单。",
+                R.color.text_secondary, 13));
+        TextView couponValue = findViewById(R.id.coupon_value);
+        couponValue.setText("上次提交：" + pending.couponDescription());
+        findViewById(R.id.coupon_row).setContentDescription("优惠券：上次提交，" + pending.couponDescription() + "，结果确认前不能修改");
+        findViewById(R.id.discount_card).setVisibility(View.GONE);
+        findViewById(R.id.bottom_bar).setVisibility(View.VISIBLE);
+        ((TextView) findViewById(R.id.pay_amount)).setText("实付 " + Money.format(pending.expectedPayAmount));
+        TextView note = findViewById(R.id.pay_note);
+        note.setText("上次提交的金额");
+        note.setVisibility(View.VISIBLE);
+        submit.setText("重新提交上次的订单");
+        submit.setEnabled(!submitting);
     }
 
     private String couponSummary() {
@@ -237,11 +257,11 @@ public final class CheckoutActivity extends BaseActivity {
     // ---------- 选券 ----------
 
     private void chooseCoupons() {
-        if (preview == null || submitting) {
-            return;
-        }
         if (pending != null) {
             toast("上一笔订单的结果还没确认，确认后才能修改优惠券");
+            return;
+        }
+        if (preview == null || submitting) {
             return;
         }
         call(() -> app.api().myCoupons(Coupon.Mine.UNUSED), new Async.Callback<PageResult<Coupon.Mine>>() {
@@ -308,11 +328,12 @@ public final class CheckoutActivity extends BaseActivity {
     // ---------- 提交 ----------
 
     private void submit() {
-        if (submitting || preview == null) {
+        // 恢复时不需要（也可能拿不到）当前试算：PendingCheckout 只用冻结的参数
+        if (submitting || (pending == null && preview == null)) {
             return;
         }
         List<String> coupons = couponArg();
-        String expected = preview.payAmount;
+        String expected = preview == null ? null : preview.payAmount;
         submitting = true;
         submit.setEnabled(false);
         busy.show(pending != null ? "正在确认上次的订单…" : "正在提交订单…");
@@ -378,7 +399,7 @@ public final class CheckoutActivity extends BaseActivity {
             default:
                 if (pending != null) {
                     toast(e.getMessage() + "。订单可能未提交，可以直接再次提交，不会重复下单");
-                    render();
+                    renderRecovery();
                 } else {
                     toast(e.getMessage());
                 }

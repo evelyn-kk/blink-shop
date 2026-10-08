@@ -22,6 +22,7 @@ import com.blink.shop.R;
 import com.blink.shop.catalog.ProductDetailActivity;
 import com.blink.shop.model.Cart;
 import com.blink.shop.model.Money;
+import com.blink.shop.model.Session;
 import com.blink.shop.net.ApiException;
 import com.blink.shop.ui.Async;
 import com.blink.shop.ui.BaseActivity;
@@ -72,6 +73,7 @@ public final class CartActivity extends BaseActivity {
         refresh.setOnRefreshListener(() -> load(false));
         selectAll.setOnClickListener(v -> toggleAll());
         checkoutButton.setOnClickListener(v -> goCheckout());
+        findViewById(R.id.pending_checkout).setOnClickListener(v -> startActivity(new Intent(this, CheckoutActivity.class)));
         state.loading("正在加载购物车…");
         bottomBar.setVisibility(View.GONE);
     }
@@ -81,6 +83,9 @@ public final class CartActivity extends BaseActivity {
         super.onResume();
         // 每次回到购物车都重新拉取：别处加购、下单或库存变化后数据可能已变
         if (!isFinishing()) {
+            Session session = app.sessions().current();
+            boolean pending = session != null && app.drafts().checkout(session.account.accountId).load() != null;
+            findViewById(R.id.pending_checkout).setVisibility(pending ? View.VISIBLE : View.GONE);
             load(cart == null);
         }
     }

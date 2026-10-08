@@ -131,6 +131,17 @@ class Device:
         subprocess.run([ADB, "shell", f"run-as {PKG} sh -c 'mkdir -p shared_prefs && cat > shared_prefs/blink_settings.xml'"],
                        input=prefs, text=True, check=True)
 
+    def write_pending_checkout(self, account_id, pending):
+        """在 App 停止时写入一条“结果未确认的结算提交”（模拟提交后没收到响应就被杀）。"""
+        import json
+        from xml.sax.saxutils import escape
+        self.shell(f"am force-stop {PKG}")
+        value = escape(json.dumps(pending), {'"': "&quot;"})
+        xml = ("<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n<map>\n"
+               f'    <string name="checkout_pending.{account_id}">{value}</string>\n</map>\n')
+        subprocess.run([ADB, "shell", f"run-as {PKG} sh -c 'mkdir -p shared_prefs && cat > shared_prefs/blink_drafts.xml'"],
+                       input=xml, text=True, check=True)
+
     def start(self):
         self.shell(f"am start -W -n {PKG}/.catalog.ProductListActivity")
         time.sleep(1)

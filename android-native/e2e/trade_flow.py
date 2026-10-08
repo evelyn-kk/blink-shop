@@ -312,6 +312,37 @@ def cancel_flow(token):
     assert {"completed", "shipped", "cancelled"} <= statuses, statuses
 
 
+@step("首单已在服务端成功但 App 没收到响应、随后被杀：重启后购物车已空，横幅进入恢复，原样重发拿到同一组订单")
+def recover_lost_response(token, username):
+    me = api.ok("GET", "/auth/me", token)
+    api.ok("POST", "/cart/items", token, {"product_id": LAMP, "quantity": 1})
+    expected = api.ok("GET", "/cart/discount-preview", token)["pay_amount"]
+    before = len(user_orders(token))
+    key = "e2e-lost-" + str(int(time.time()))
+    # 服务端已经成功下单（购物车被清空）……
+    first = api.ok("POST", "/orders:checkout", token, {"idempotency_key": key, "expected_pay_amount": expected})
+    assert api.ok("GET", "/cart", token)["items"] == []
+    # ……但 App 没收到响应、进程被杀：本地只留下冻结的那次提交（与 App 提交前写入的格式相同）
+    dev.write_pending_checkout(me["account_id"], {"key": key, "expected_pay_amount": expected})
+    dev.restart()
+    dev.tap(rid="cart_button")
+    dev.wait(text="购物车是空的")
+    dev.tap(rid="pending_checkout")
+    dev.wait(rid="pending_banner", contains=True, text="没有收到结果")
+    dev.wait(rid="submit_button", text="重新提交上次的订单")
+    dev.tap(rid="submit_button")
+    dev.wait(text="支付订单", timeout=20)
+    dev.wait(contains=True, text=first["items"][0]["order_no"])
+    after = user_orders(token)
+    assert len(after) == before + len(first["items"]), f"订单数 {before} -> {len(after)}"
+    # 恢复后不再提示
+    dev.back()
+    dev.wait(text="购物车是空的")
+    assert not dev.find(rid="pending_checkout"), "恢复后横幅应消失"
+    for o in first["items"]:
+        api.ok("POST", f"/orders/{o['order_id']}:cancel", token, {})
+
+
 def main():
     username = "e2e_" + str(int(time.time()))
     print("输出目录：", os.path.abspath(OUT))
@@ -337,6 +368,7 @@ def main():
         confirm_receipt(token, digital)
         review_with_draft(token, digital, username)
         cancel_flow(token)
+        recover_lost_response(token, username)
         ok = True
     except Exception:
         traceback.print_exc()
