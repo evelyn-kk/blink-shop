@@ -1,0 +1,28 @@
+{
+  "description": "开始流式输出前的校验错误以普通 JSON 返回：client_message_id 必填（1–128 位字母、数字或 . _ : -），content 1–2000 字，附件只能是本人上传的文件且最多 10 个",
+  "setup_requests": [
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions",
+      "body": {}
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/agent/sessions/{setup_session_id}/messages:stream",
+    "as": "blink_user",
+    "body": {
+      "content": "你好"
+    }
+  },
+  "response": {
+    "status": 400,
+    "body": {
+      "code": "invalid_argument",
+      "message": "client_message_id 必填，1–128 位字母、数字或 . _ : -",
+      "field": "client_message_id",
+      "request_id": "<request_id>"
+    }
+  }
+}

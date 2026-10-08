@@ -312,6 +312,58 @@ sequenceDiagram
 
 与上游的差异：上游列表没有任何筛选；状态可以随意改（不查状态机、没有确认、管理员可以停用自己）；没有审计；配置可以新建任意键、不校验类型，密钥掩码同样是 `******`；评价有 deleted 状态；改为相同状态返回 404。
 
+## 导购会话与流式回答
+
+会话、消息、运行和轨迹都按账户隔离（别人的一律 404），只有普通用户可用。一条用户消息对应一次运行：
+`queued → running → completed | failed | cancelled`，已结束的运行不再变化。7.1 的运行器是占位实现（如实说明能力还在接入，
+不假装调用模型或工具），7.2 起换成规则规划和工具；运行器通过 `httpapi.Options.AgentRunner` 注入。
+
+### 事件流
+
+`POST /api/v1/agent/sessions/{id}/messages:stream` 返回 `text/event-stream`（`X-Accel-Buffering: no`），每个事件立即 flush，
+空闲时每 15 秒写一行 `: ping`。帧为 `event: <类型>` + `data: <JSON>` + 空行：
+
+| 事件 | data | 说明 |
+| --- | --- | --- |
+| `message_start` | `run_id, message_id, session_id, trace_id, replayed` | 总是第一个；`replayed=true` 表示重复提交，随后是保存的回答 |
+| `thinking` | `step: {id, title, status}` | 同一 `id` 以后到的状态为准（running → done） |
+| `text_delta` | `delta` | 按顺序拼接得到完整回答 |
+| `block` | `block: {type, ...}` | 结构化块（7.2 起由工具结果生成） |
+| `followups` | `questions` | 推荐追问 |
+| `message_done` | `run_id, status` | 正常结束 |
+| `error` | `run_id, code, message` | 没有正常结束：`cancelled`、`agent_failed`、`run_timeout`、`server_shutdown`、`interrupted` |
+
+最后恰好一个 `message_done` 或 `error`。开始推送前的错误（校验、会话不存在、未登录、限流）是普通 JSON 错误。
+
+- **幂等**：先在一个事务里锁定会话、写入用户消息和运行；`(account_id, session_id, client_message_id)` 已存在时不写入、不运行，
+  直接重放保存的结果；运行还没结束时保持连接（心跳）等它结束再重放。
+- **取消**：运行的 context 与请求分离，取消原因区分为用户取消（`POST /agent/runs/{id}:cancel`，等运行保存完已生成的内容后返回）、
+  客户端断开、超时（2 分钟）和服务关闭；无论哪种都把最终状态和已生成的内容写回。运行器 panic 按失败处理。
+- **重启**：`cmd/api` 在数据库就绪后把进程启动前创建、仍在进行的运行标为 `failed/interrupted`；优雅关闭时先取消进行中的运行
+  （`failed/server_shutdown`），再关闭 HTTP 服务。多实例部署时“取消”只能直接作用于本实例上的运行，其他实例上的运行改为直接写库。
+- **顺序**：用户消息和轨迹有写入序号（迁移 0006），同一毫秒内写入的也按先后读取。
+
+### curl 示例
+
+```bash
+API=http://127.0.0.1:8080/api/v1
+TOKEN=$(curl -s $API/auth/login -H 'Content-Type: application/json' \
+  -d '{"username":"blink_user","password":"BlinkDev#2026"}' | jq -r .token)
+SID=$(curl -s -X POST $API/agent/sessions -H "Authorization: Bearer $TOKEN" | jq -r .session_id)
+
+# 流式提问（-N 关闭 curl 缓冲，逐个看到事件）；用同一个 client_message_id 再发一次会得到 replayed=true 的重放
+curl -N $API/agent/sessions/$SID/messages:stream -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"client_message_id":"demo-1","content":"推荐一款通勤降噪耳机"}'
+
+curl -s "$API/agent/sessions?keyword=耳机" -H "Authorization: Bearer $TOKEN" | jq
+curl -s $API/agent/sessions/$SID -H "Authorization: Bearer $TOKEN" | jq '.messages[0].run.status'
+curl -s $API/agent/runs/<run_id>/trace -H "Authorization: Bearer $TOKEN" | jq
+curl -s -X POST $API/agent/runs/<run_id>:cancel -H "Authorization: Bearer $TOKEN" | jq
+```
+
+录制的请求/响应样例见 `fixtures/http/agent_*.json`（含完整事件流），Web（`frontend/src/api/sse.ts`）和 Android（`ShopApi.streamAgentMessage`）
+的流式客户端用同一份样例做契约测试。
+
 ## 认证与权限
 
 - **token**：注册/登录返回 32 字节随机 token（base64url），`auth_tokens` 只存 SHA-256 摘要和过期时间。每个请求都按 token 重新读取账户，所以管理员改账户状态立即生效。登出撤销当前 token，注销撤销全部 token。

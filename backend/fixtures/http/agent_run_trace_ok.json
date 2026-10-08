@@ -1,0 +1,89 @@
+{
+  "description": "运行状态与轨迹（GET /agent/runs/{id}/trace）：服务重启后也能查到最终状态（启动时把上一个进程没跑完的运行标为 failed/interrupted）",
+  "setup_requests": [
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions",
+      "body": {}
+    },
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions/{setup_session_id}/messages:stream",
+      "body": {
+        "client_message_id": "fixture-1",
+        "content": "推荐一款通勤降噪耳机"
+      }
+    }
+  ],
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/agent/runs/{setup_run_id}/trace",
+    "as": "blink_user"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "run": {
+        "run_id": "<run_id>",
+        "session_id": "<session_id>",
+        "message_id": "<message_id>",
+        "trace_id": "<trace_id>",
+        "status": "completed",
+        "content": "你好，我是 Blink 导购助手。商品推荐、对比、加购和订单查询的能力正在接入中，现在可以先在首页搜索和筛选商品，在购物车和“我的订单”里完成购买。",
+        "blocks": [],
+        "followups": [
+          "怎么筛选商品？",
+          "下单后多久要付款？"
+        ],
+        "error_code": "",
+        "created_at": "<timestamp>",
+        "updated_at": "<timestamp>"
+      },
+      "items": [
+        {
+          "trace_event_id": "<trace_event_id>",
+          "stage": "run",
+          "event_type": "start",
+          "model": "",
+          "status": "ok",
+          "duration_ms": "<duration_ms>",
+          "error": "",
+          "metadata": {
+            "attachments": 0
+          },
+          "created_at": "<timestamp>"
+        },
+        {
+          "trace_event_id": "<trace_event_id>",
+          "stage": "planner",
+          "event_type": "placeholder",
+          "model": "",
+          "status": "ok",
+          "duration_ms": "<duration_ms>",
+          "error": "",
+          "metadata": {
+            "content_runes": 10
+          },
+          "created_at": "<timestamp>"
+        },
+        {
+          "trace_event_id": "<trace_event_id>",
+          "stage": "run",
+          "event_type": "end",
+          "model": "",
+          "status": "completed",
+          "duration_ms": "<duration_ms>",
+          "error": "",
+          "metadata": {
+            "error_code": "",
+            "content_runes": 74,
+            "blocks": 0
+          },
+          "created_at": "<timestamp>"
+        }
+      ]
+    }
+  }
+}

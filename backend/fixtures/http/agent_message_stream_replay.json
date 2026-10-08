@@ -1,0 +1,66 @@
+{
+  "description": "重复的 client_message_id 不会再运行：message_start 带 replayed=true，随后一次性重放保存的回答；运行还没结束时会等它结束再重放",
+  "setup_requests": [
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions",
+      "body": {}
+    },
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions/{setup_session_id}/messages:stream",
+      "body": {
+        "client_message_id": "fixture-1",
+        "content": "推荐一款通勤降噪耳机"
+      }
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/agent/sessions/{setup_session_id}/messages:stream",
+    "as": "blink_user",
+    "body": {
+      "client_message_id": "fixture-1",
+      "content": "推荐一款通勤降噪耳机"
+    }
+  },
+  "response": {
+    "status": 200,
+    "events": [
+      {
+        "event": "message_start",
+        "data": {
+          "run_id": "<run_id>",
+          "message_id": "<message_id>",
+          "session_id": "<session_id>",
+          "trace_id": "<trace_id>",
+          "replayed": true
+        }
+      },
+      {
+        "event": "text_delta",
+        "data": {
+          "delta": "你好，我是 Blink 导购助手。商品推荐、对比、加购和订单查询的能力正在接入中，现在可以先在首页搜索和筛选商品，在购物车和“我的订单”里完成购买。"
+        }
+      },
+      {
+        "event": "followups",
+        "data": {
+          "questions": [
+            "怎么筛选商品？",
+            "下单后多久要付款？"
+          ]
+        }
+      },
+      {
+        "event": "message_done",
+        "data": {
+          "run_id": "<run_id>",
+          "status": "completed"
+        }
+      }
+    ]
+  }
+}

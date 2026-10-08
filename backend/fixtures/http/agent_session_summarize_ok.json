@@ -1,0 +1,39 @@
+{
+  "description": "整理摘要（POST /agent/sessions/{id}:summarize，规则生成）：前三条用户消息用“；”连接；标题仍是默认值时按第一条消息生成",
+  "setup_requests": [
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions",
+      "body": {}
+    },
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions/{setup_session_id}/messages:stream",
+      "body": {
+        "client_message_id": "fixture-1",
+        "content": "推荐一款通勤降噪耳机"
+      }
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/agent/sessions/{setup_session_id}:summarize",
+    "as": "blink_user"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "session_id": "<session_id>",
+      "title": "耳机咨询",
+      "summary": "推荐一款通勤降噪耳机",
+      "message_count": 1,
+      "last_message_at": "<timestamp>",
+      "pinned": false,
+      "pinned_at": null,
+      "created_at": "<timestamp>",
+      "updated_at": "<timestamp>"
+    }
+  }
+}

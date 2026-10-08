@@ -54,6 +54,10 @@ tags:
     description: |
       订单、支付与评价（仅普通用户）。订单状态 pending_payment → paid → shipped → completed，只有待支付可以取消；
       支付单 pending → paid | closed。所有状态变化只能由服务端按状态机执行，别人的订单一律 404。
+  - name: agent
+    description: |
+      导购会话（仅普通用户）。会话、消息、运行和轨迹都按账户隔离，别人的一律 404。一条用户消息对应一次运行：
+      queued → running → completed | failed | cancelled，已结束的运行不再变化。流式回答见 `messages:stream`。
   - name: admin
     description: 平台管理（仅管理员）
   - name: catalog
@@ -2185,6 +2189,415 @@ paths:
               example:
                 code: coupon_limit_reached
                 message: 已达到这张券的领取上限
+  /agent/sessions:
+    get:
+      tags: [agent]
+      operationId: listChatSessions
+      summary: 我的导购会话
+      description: |
+        只列出有消息、未删除的会话。置顶的在前（按置顶时间倒序），其余按最近消息时间倒序。
+        `keyword`（最多 64 字）不区分大小写地匹配标题、摘要或任一条用户消息，`%`、`_` 按字面匹配。
+      parameters:
+        - name: keyword
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 64
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 成功
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatSessionPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [agent]
+      operationId: createChatSession
+      summary: 新建导购会话
+      description: 标题默认“AI 导购”，第一条消息会按内容生成标题（命中品类词时为“××咨询”）和摘要；用户改过的标题不会被覆盖。
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatSessionUpdate"
+      responses:
+        "201":
+          description: 已创建
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /agent/sessions/{id}:
+    get:
+      tags: [agent]
+      operationId: getChatSession
+      summary: 会话详情
+      description: 会话和按发送顺序的每一轮（用户消息 + 运行结果）。
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+      responses:
+        "200":
+          description: 成功
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatSessionDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`session_not_found`"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: session_not_found
+                message: 会话不存在
+                request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
+    patch:
+      tags: [agent]
+      operationId: updateChatSession
+      summary: 修改标题或摘要
+      description: 只改出现的字段；标题 1–128 字，摘要最多 500 字，至少提供一个。
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatSessionUpdate"
+      responses:
+        "200":
+          description: 成功
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`session_not_found`"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: session_not_found
+                message: 会话不存在
+                request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
+    delete:
+      tags: [agent]
+      operationId: deleteChatSession
+      summary: 删除会话
+      description: 软删；之后读取、修改、发消息都返回 404。
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+      responses:
+        "200":
+          description: 已删除
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id, status]
+                properties:
+                  session_id:
+                    type: string
+                  status:
+                    type: string
+                    const: deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`session_not_found`"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: session_not_found
+                message: 会话不存在
+                request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
+  /agent/sessions/{id}:pin:
+    post:
+      tags: [agent]
+      operationId: pinChatSession
+      summary: 置顶或取消置顶
+      description: 显式设置（不是切换）；已置顶的再次置顶不改变置顶时间。
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pinned]
+              properties:
+                pinned:
+                  type: boolean
+      responses:
+        "200":
+          description: 成功
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`session_not_found`"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: session_not_found
+                message: 会话不存在
+                request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
+  /agent/sessions/{id}:summarize:
+    post:
+      tags: [agent]
+      operationId: summarizeChatSession
+      summary: 整理会话摘要
+      description: 按规则生成（不调用模型）：前三条用户消息用“；”连接，最多 500 字；标题仍是默认值时按第一条消息生成。
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+      responses:
+        "200":
+          description: 成功
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatSession"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`session_not_found`"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: session_not_found
+                message: 会话不存在
+                request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
+  /agent/sessions/{id}/messages:stream:
+    post:
+      tags: [agent]
+      operationId: streamChatMessage
+      summary: 发送消息并流式接收回答
+      description: |
+        先在一个事务里写入用户消息和运行，再以 `text/event-stream` 推送事件，每个事件立即发送（关闭代理缓冲），空闲时每 15 秒发一行注释心跳 `: ping`。
+        帧格式：`event: <类型>` + `data: <JSON>` + 空行。顺序：`message_start` → 0..n 个 `thinking` / `text_delta` / `block` / `followups`
+        → 恰好一个 `message_done`（status=completed）或 `error`。各事件的 data 见 AgentEvent* schema。
+
+        - 幂等：`client_message_id` 在会话内唯一。同一 ID 再次提交不会再运行：`message_start.replayed=true`，随后一次性重放保存的回答
+          （一个 `text_delta`、各 `block`、`followups`）和结束事件；运行还没结束时保持连接、等它结束再重放。
+        - 取消：客户端断开或调用 `POST /agent/runs/{id}:cancel` 都会取消运行，状态写为 cancelled，已生成的内容保留；
+          显式取消时流以 `error{code: cancelled}` 结束。
+        - 失败：运行出错、超过 2 分钟或服务关闭时状态写为 failed（error_code 为 `agent_error` / `run_timeout` / `server_shutdown`），
+          流以 `error` 结束，`message` 是可展示的中文，不含内部细节。服务启动时把上一个进程没跑完的运行标为 failed（`interrupted`）。
+        - 开始流式输出前的错误（校验、会话不存在、未登录、限流）以普通 JSON 错误返回。
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatMessageRequest"
+      responses:
+        "200":
+          description: 事件流
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE 帧序列；每一帧（event 名 + data JSON）的结构见 AgentStreamEvent。
+                contentSchema:
+                  $ref: "#/components/schemas/AgentStreamEvent"
+              example: |
+                event: message_start
+                data: {"run_id":"run_…","message_id":"msg_…","session_id":"s_…","trace_id":"tr_…","replayed":false}
+
+                event: text_delta
+                data: {"delta":"你好，"}
+
+                event: message_done
+                data: {"run_id":"run_…","status":"completed"}
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`session_not_found`"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: session_not_found
+                message: 会话不存在
+                request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
+  /agent/runs/{id}/trace:
+    get:
+      tags: [agent]
+      operationId: getAgentRunTrace
+      summary: 运行状态与轨迹
+      description: 当前状态、已保存的回答和按写入顺序的轨迹事件（服务重启后也能查到最终状态）。
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+      responses:
+        "200":
+          description: 成功
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentRunTrace"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`run_not_found`"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: run_not_found
+                message: 运行记录不存在
+                request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
+  /agent/runs/{id}:cancel:
+    post:
+      tags: [agent]
+      operationId: cancelAgentRun
+      summary: 取消运行
+      description: 进行中的运行停止并写为 cancelled（等它保存已生成的内容后返回）；已取消的再次取消返回当前结果；已完成或失败的返回 409 `run_finished`。
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+      responses:
+        "200":
+          description: 成功
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentRun"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`run_not_found`"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: run_not_found
+                message: 运行记录不存在
+                request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
+        "409":
+          description: "`run_finished` 运行已经结束"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: run_finished
+                message: 这次回答已经结束，不能取消
+                request_id: 6f1c2a9e0b7d4c3e8a5f1b2c
   /orders:
     get:
       tags: [orders]
@@ -3105,6 +3518,18 @@ components:
       in: query
       required: false
       description: 按订单号精确查找。
+      schema:
+        type: string
+    SessionID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    RunID:
+      name: id
+      in: path
+      required: true
       schema:
         type: string
   schemas:
@@ -4521,7 +4946,7 @@ components:
             机器可读错误码。通用错误码：`invalid_argument`、`invalid_json`、`unauthorized`、`forbidden`、`not_found`、
             `method_not_allowed`、`conflict`、`payload_too_large`、`unsupported_media_type`、`rate_limited`、
             `internal_error`、`not_ready`、`timeout`。认证相关：`invalid_credential`、`username_exists`、
-            `account_inactive`、`account_risk`。目录：`product_not_found`。商家：`product_under_review`。订单：`order_not_found`、`order_item_not_found`、`empty_cart`、`item_unavailable`、`price_changed`、`order_status_conflict`、`order_expired`、`order_not_completed`、`review_exists`。商家营销：`promotion_not_found`、`review_not_found`。平台管理：`account_not_found`、`merchant_not_found`、`cannot_change_self`、`status_unchanged`、`invalid_status_transition`、`config_not_found`、`config_read_only`、`config_overridden_by_env`、`config_admin_unavailable`。
+            `account_inactive`、`account_risk`。目录：`product_not_found`。商家：`product_under_review`。订单：`order_not_found`、`order_item_not_found`、`empty_cart`、`item_unavailable`、`price_changed`、`order_status_conflict`、`order_expired`、`order_not_completed`、`review_exists`。商家营销：`promotion_not_found`、`review_not_found`。平台管理：`account_not_found`、`merchant_not_found`、`cannot_change_self`、`status_unchanged`、`invalid_status_transition`、`config_not_found`、`config_read_only`、`config_overridden_by_env`、`config_admin_unavailable`。导购：`session_not_found`、`run_not_found`、`run_finished`。
           examples: [not_found]
         message:
           type: string
@@ -4558,6 +4983,286 @@ components:
             items:
               type: array
               items: {}
+    ChatSession:
+      type: object
+      required: [session_id, title, summary, message_count, last_message_at, pinned, pinned_at, created_at, updated_at]
+      properties:
+        session_id:
+          type: string
+        title:
+          type: string
+        summary:
+          type: string
+        message_count:
+          type: integer
+        last_message_at:
+          type: [string, "null"]
+          format: date-time
+        pinned:
+          type: boolean
+        pinned_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ChatSessionPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/ChatSession"
+    ChatSessionUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 128
+        summary:
+          type: string
+          maxLength: 500
+    ChatMessageRequest:
+      type: object
+      required: [client_message_id, content]
+      properties:
+        client_message_id:
+          type: string
+          pattern: "^[A-Za-z0-9._:-]{1,128}$"
+          description: 客户端生成，重试时复用；会话内唯一。
+        content:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: 去掉首尾空白后 1–2000 字。
+        attachments:
+          type: array
+          maxItems: 10
+          items:
+            type: object
+            required: [file_id]
+            properties:
+              file_id:
+                type: string
+                description: 本人通过 `POST /files` 上传的文件。
+    ChatMessage:
+      type: object
+      required: [message_id, client_message_id, content, attachments, created_at, run]
+      properties:
+        message_id:
+          type: string
+        client_message_id:
+          type: string
+        content:
+          type: string
+        attachments:
+          type: array
+          items:
+            type: object
+            required: [file_id, mime_type]
+            properties:
+              file_id:
+                type: string
+              mime_type:
+                type: string
+        created_at:
+          type: string
+          format: date-time
+        run:
+          oneOf:
+            - $ref: "#/components/schemas/AgentRun"
+            - type: "null"
+    ChatSessionDetail:
+      type: object
+      required: [session, messages]
+      properties:
+        session:
+          $ref: "#/components/schemas/ChatSession"
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+    AgentRunStatus:
+      type: string
+      enum: [queued, running, completed, failed, cancelled]
+    AgentRun:
+      type: object
+      required: [run_id, session_id, message_id, trace_id, status, content, blocks, followups, error_code, created_at, updated_at]
+      properties:
+        run_id:
+          type: string
+        session_id:
+          type: string
+        message_id:
+          type: string
+        trace_id:
+          type: string
+        status:
+          $ref: "#/components/schemas/AgentRunStatus"
+        content:
+          type: string
+          description: 已生成的文字（取消或失败时为已输出的部分）。
+        blocks:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentBlock"
+        followups:
+          type: array
+          items:
+            type: string
+        error_code:
+          type: string
+          description: 失败或取消的原因：`cancelled`、`agent_error`、`run_timeout`、`server_shutdown`、`interrupted`；完成时为空。
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    AgentBlock:
+      type: object
+      required: [type]
+      description: 结构化块：`product_list`（可信 product_ids）、`comparison`、`citation`、`action` 等（7.2 起由工具结果生成）。
+      properties:
+        type:
+          type: string
+      additionalProperties: true
+    AgentTraceEvent:
+      type: object
+      required: [trace_event_id, stage, event_type, model, status, duration_ms, error, metadata, created_at]
+      properties:
+        trace_event_id:
+          type: string
+        stage:
+          type: string
+          description: 例如 run（start / end）、planner、tool、answer。
+        event_type:
+          type: string
+        model:
+          type: string
+        status:
+          type: string
+        duration_ms:
+          type: integer
+        error:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+    AgentRunTrace:
+      type: object
+      required: [run, items]
+      properties:
+        run:
+          $ref: "#/components/schemas/AgentRun"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentTraceEvent"
+    AgentStreamEvent:
+      type: object
+      description: 事件流中的一帧：`event` 是类型，`data` 是对应结构。
+      required: [event, data]
+      properties:
+        event:
+          type: string
+          enum: [message_start, thinking, text_delta, block, followups, message_done, error]
+        data:
+          oneOf:
+            - $ref: "#/components/schemas/AgentEventMessageStart"
+            - $ref: "#/components/schemas/AgentEventThinking"
+            - $ref: "#/components/schemas/AgentEventTextDelta"
+            - $ref: "#/components/schemas/AgentEventBlock"
+            - $ref: "#/components/schemas/AgentEventFollowups"
+            - $ref: "#/components/schemas/AgentEventMessageDone"
+            - $ref: "#/components/schemas/AgentEventError"
+    AgentEventMessageStart:
+      type: object
+      description: 事件 `message_start`，总是第一个。
+      required: [run_id, message_id, session_id, trace_id, replayed]
+      properties:
+        run_id:
+          type: string
+        message_id:
+          type: string
+        session_id:
+          type: string
+        trace_id:
+          type: string
+        replayed:
+          type: boolean
+          description: true 表示重复提交，随后是保存的回答而不是重新运行。
+    AgentEventThinking:
+      type: object
+      description: 事件 `thinking`：同一 id 的步骤以后到的状态为准。
+      required: [step]
+      properties:
+        step:
+          type: object
+          required: [id, title, status]
+          properties:
+            id:
+              type: string
+            title:
+              type: string
+            status:
+              type: string
+              enum: [running, done]
+    AgentEventTextDelta:
+      type: object
+      description: 事件 `text_delta`：按顺序拼接得到完整回答。
+      required: [delta]
+      properties:
+        delta:
+          type: string
+    AgentEventBlock:
+      type: object
+      description: 事件 `block`。
+      required: [block]
+      properties:
+        block:
+          $ref: "#/components/schemas/AgentBlock"
+    AgentEventFollowups:
+      type: object
+      description: 事件 `followups`：推荐的追问。
+      required: [questions]
+      properties:
+        questions:
+          type: array
+          items:
+            type: string
+    AgentEventMessageDone:
+      type: object
+      description: 事件 `message_done`：正常结束。
+      required: [run_id, status]
+      properties:
+        run_id:
+          type: string
+        status:
+          type: string
+          const: completed
+    AgentEventError:
+      type: object
+      description: 事件 `error`：没有正常结束（取消、失败、超时、服务重启）。message 可直接展示。
+      required: [run_id, code, message]
+      properties:
+        run_id:
+          type: string
+        code:
+          type: string
+          enum: [cancelled, agent_failed, run_timeout, server_shutdown, interrupted, internal_error]
+        message:
+          type: string
   responses:
     OK:
       description: 操作成功

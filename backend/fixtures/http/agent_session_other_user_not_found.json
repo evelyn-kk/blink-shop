@@ -1,0 +1,24 @@
+{
+  "description": "别人的会话按不存在处理（会话、消息、运行都按账户隔离）",
+  "setup_requests": [
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions",
+      "body": {}
+    }
+  ],
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/agent/sessions/{setup_session_id}",
+    "as": "blink_user2"
+  },
+  "response": {
+    "status": 404,
+    "body": {
+      "code": "session_not_found",
+      "message": "会话不存在",
+      "request_id": "<request_id>"
+    }
+  }
+}

@@ -22,6 +22,7 @@ import com.blink.shop.model.Session;
 import com.blink.shop.model.Sku;
 import com.blink.shop.net.ApiClient;
 import com.blink.shop.net.ApiException;
+import com.blink.shop.net.SseClient;
 
 import okhttp3.RequestBody;
 
@@ -262,6 +263,26 @@ public final class ShopApi {
             throw new IllegalStateException(e);
         }
         return api.post("/orders/" + enc(orderId) + "/items/" + enc(orderItemId) + ":review", body).optString("review_id", "");
+    }
+
+    // ---------- 导购（7.1 基础；聊天界面在 7.3） ----------
+
+    /** 新建导购会话，返回 session_id。 */
+    public String createChatSession() throws ApiException {
+        String id = api.post("/agent/sessions", new JSONObject()).optString("session_id", "");
+        if (id.isEmpty()) {
+            throw ApiException.badResponse(null);
+        }
+        return id;
+    }
+
+    /**
+     * 向会话发送一条消息并流式接收回答（SSE）。clientMessageId 由调用方生成并在重试时复用：
+     * 服务端对同一个 ID 不会再运行，而是重放已有的回答。取消返回的 Stream 会断开连接，服务端把这次运行记为已取消。
+     */
+    public SseClient.Stream streamAgentMessage(String sessionId, String clientMessageId, String content, SseClient.Listener listener) {
+        return new SseClient(api).post("/agent/sessions/" + enc(sessionId) + "/messages:stream",
+                obj("client_message_id", clientMessageId, "content", content), listener);
     }
 
     /** 检查服务地址是否可用（高级设置里的“测试连接”）。 */

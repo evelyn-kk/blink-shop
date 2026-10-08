@@ -1,0 +1,42 @@
+{
+  "description": "置顶 / 取消置顶（POST /agent/sessions/{id}:pin）：pinned 必填，显式设置而不是切换",
+  "setup_requests": [
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions",
+      "body": {}
+    },
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions/{setup_session_id}/messages:stream",
+      "body": {
+        "client_message_id": "fixture-1",
+        "content": "推荐一款通勤降噪耳机"
+      }
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/agent/sessions/{setup_session_id}:pin",
+    "as": "blink_user",
+    "body": {
+      "pinned": true
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "session_id": "<session_id>",
+      "title": "耳机咨询",
+      "summary": "用户咨询：推荐一款通勤降噪耳机",
+      "message_count": 1,
+      "last_message_at": "<timestamp>",
+      "pinned": true,
+      "pinned_at": "<timestamp>",
+      "created_at": "<timestamp>",
+      "updated_at": "<timestamp>"
+    }
+  }
+}

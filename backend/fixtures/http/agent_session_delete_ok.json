@@ -1,0 +1,23 @@
+{
+  "description": "删除会话（软删）：之后读取、修改、发消息都返回 404 session_not_found",
+  "setup_requests": [
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions",
+      "body": {}
+    }
+  ],
+  "request": {
+    "method": "DELETE",
+    "path": "/api/v1/agent/sessions/{setup_session_id}",
+    "as": "blink_user"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "session_id": "<session_id>",
+      "status": "deleted"
+    }
+  }
+}

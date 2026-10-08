@@ -34,6 +34,11 @@ export async function requestBlob(path: string, init: RequestInit = {}): Promise
   return (await send(path, init)).blob();
 }
 
+// requestRaw 返回原始响应（用于流式读取，如 SSE），错误处理与 request 相同。
+export function requestRaw(path: string, init: RequestInit = {}): Promise<Response> {
+  return send(path, init);
+}
+
 async function send(path: string, init: RequestInit): Promise<Response> {
   const headers = new Headers(init.headers);
   const session = getSession();

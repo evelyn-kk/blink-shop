@@ -1,0 +1,33 @@
+{
+  "description": "别人的运行按不存在处理",
+  "setup_requests": [
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions",
+      "body": {}
+    },
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions/{setup_session_id}/messages:stream",
+      "body": {
+        "client_message_id": "fixture-1",
+        "content": "推荐一款通勤降噪耳机"
+      }
+    }
+  ],
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/agent/runs/{setup_run_id}/trace",
+    "as": "blink_user2"
+  },
+  "response": {
+    "status": 404,
+    "body": {
+      "code": "run_not_found",
+      "message": "运行记录不存在",
+      "request_id": "<request_id>"
+    }
+  }
+}

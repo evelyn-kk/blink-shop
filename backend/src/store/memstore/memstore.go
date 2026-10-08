@@ -43,6 +43,12 @@ type state struct {
 	checkouts   map[string]domain.CheckoutRequest
 	audits      map[string]store.AuditLog
 	auditSeq    map[string]int64 // 审计记录的写入顺序
+	sessions    map[string]domain.ChatSession
+	messages    map[string]domain.UserMessage
+	runs        map[string]domain.AgentRun
+	traces      map[string]domain.AgentTraceEvent
+	traceSeq    map[string]int64 // 轨迹的写入顺序
+	messageSeq  map[string]int64 // 用户消息的写入顺序
 }
 
 func newState() state {
@@ -54,6 +60,8 @@ func newState() state {
 		payments: map[string]domain.Payment{}, reviews: map[string]domain.ProductReview{}, files: map[string]domain.StoredFile{},
 		cartItems: map[string]domain.CartItem{}, checkouts: map[string]domain.CheckoutRequest{},
 		audits: map[string]store.AuditLog{}, auditSeq: map[string]int64{},
+		sessions: map[string]domain.ChatSession{}, messages: map[string]domain.UserMessage{}, runs: map[string]domain.AgentRun{},
+		traces: map[string]domain.AgentTraceEvent{}, traceSeq: map[string]int64{}, messageSeq: map[string]int64{},
 	}
 }
 
@@ -67,6 +75,8 @@ func (s state) clone() state {
 		payments: maps.Clone(s.payments), reviews: maps.Clone(s.reviews), files: maps.Clone(s.files),
 		cartItems: maps.Clone(s.cartItems), checkouts: maps.Clone(s.checkouts),
 		audits: maps.Clone(s.audits), auditSeq: maps.Clone(s.auditSeq),
+		sessions: maps.Clone(s.sessions), messages: maps.Clone(s.messages), runs: maps.Clone(s.runs),
+		traces: maps.Clone(s.traces), traceSeq: maps.Clone(s.traceSeq), messageSeq: maps.Clone(s.messageSeq),
 	}
 }
 

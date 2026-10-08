@@ -1,0 +1,23 @@
+{
+  "description": "新建导购会话（仅普通用户）：标题默认“AI 导购”，可在请求体传 title。没有消息的会话不出现在会话列表里",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/agent/sessions",
+    "as": "blink_user",
+    "body": {}
+  },
+  "response": {
+    "status": 201,
+    "body": {
+      "session_id": "<session_id>",
+      "title": "AI 导购",
+      "summary": "",
+      "message_count": 0,
+      "last_message_at": null,
+      "pinned": false,
+      "pinned_at": null,
+      "created_at": "<timestamp>",
+      "updated_at": "<timestamp>"
+    }
+  }
+}

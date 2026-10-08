@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/evelyn-kk/blink-shop/backend/src/agent"
 	"github.com/evelyn-kk/blink-shop/backend/src/seed"
 )
 
@@ -59,7 +60,40 @@ type fixture struct {
 		Status  int               `json:"status"`
 		Headers map[string]string `json:"headers"`
 		Body    map[string]any    `json:"body"`
+		// Events 是流式（text/event-stream）响应的全部事件，按顺序逐个比较 data。
+		Events []struct {
+			Event string         `json:"event"`
+			Data  map[string]any `json:"data"`
+		} `json:"events"`
 	} `json:"response"`
+}
+
+// parseSSE 把 text/event-stream 响应体解析成事件（忽略注释行）。
+func parseSSE(t *testing.T, body string) []fixtureEvent {
+	t.Helper()
+	var out []fixtureEvent
+	for _, frame := range strings.Split(body, "\n\n") {
+		var ev fixtureEvent
+		for _, line := range strings.Split(frame, "\n") {
+			switch {
+			case strings.HasPrefix(line, "event: "):
+				ev.Event = strings.TrimPrefix(line, "event: ")
+			case strings.HasPrefix(line, "data: "):
+				if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &ev.Data); err != nil {
+					t.Fatalf("bad event data %q: %v", line, err)
+				}
+			}
+		}
+		if ev.Event != "" {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+type fixtureEvent struct {
+	Event string
+	Data  map[string]any
 }
 
 // 响应体中的占位符：值随机或随时间变化的字段只校验格式。
@@ -101,6 +135,15 @@ var fixturePlaceholders = map[string]func(got any, rec *httptest.ResponseRecorde
 	"<review_id>":           idPlaceholder("rv_"),
 	"<promotion_id>":        idPlaceholder("promo_"),
 	"<audit_id>":            idPlaceholder("aud_"),
+	"<duration_ms>": func(got any, _ *httptest.ResponseRecorder) bool {
+		n, ok := got.(float64)
+		return ok && n >= 0 && n == float64(int64(n))
+	},
+	"<session_id>":     idPlaceholder("s_"),
+	"<message_id>":     idPlaceholder("msg_"),
+	"<run_id>":         idPlaceholder("run_"),
+	"<trace_id>":       idPlaceholder("tr_"),
+	"<trace_event_id>": idPlaceholder("te_"),
 	// 记录在数据里的、其他请求的 request id（例如审计记录里的），只校验格式。
 	"<recorded_request_id>": func(got any, _ *httptest.ResponseRecorder) bool {
 		s, ok := got.(string)
@@ -217,8 +260,16 @@ func TestHTTPFixtures(t *testing.T) {
 			if fx.Request.ObjectStorage == "unavailable" {
 				ts.Server.objects = nil
 			}
+			ts.runner = agent.PlaceholderRunner{} // 导购占位回复不等待，流式 fixture 的事件固定
 
 			path := fx.Request.Path
+			subs := map[string]string{}
+			substitute := func(p string) string {
+				for k, v := range subs {
+					p = strings.ReplaceAll(p, k, v)
+				}
+				return p
+			}
 			if fx.Setup != nil {
 				req := fixtureUploadRequest(t, fx.Setup.Multipart)
 				req.Header.Set("Authorization", "Bearer "+ts.login(t, fx.Setup.As, seed.DevPassword).Token)
@@ -234,9 +285,21 @@ func TestHTTPFixtures(t *testing.T) {
 				if len(sr.Body) > 0 {
 					body = sr.Body
 				}
-				rec := ts.call(t, sr.Method, sr.Path, ts.login(t, sr.As, seed.DevPassword).Token, body)
+				rec := ts.call(t, sr.Method, substitute(sr.Path), ts.login(t, sr.As, seed.DevPassword).Token, body)
 				if rec.Code < 200 || rec.Code > 299 {
 					t.Fatalf("setup request %d: %d %s", i, rec.Code, rec.Body)
+				}
+				// 导购：创建会话的准备请求提供 {setup_session_id}，流式请求提供 {setup_run_id}
+				var session struct {
+					SessionID string `json:"session_id"`
+				}
+				if json.Unmarshal(rec.Body.Bytes(), &session) == nil && session.SessionID != "" {
+					subs["{setup_session_id}"] = session.SessionID
+				}
+				if strings.HasPrefix(rec.Header().Get("Content-Type"), "text/event-stream") {
+					if evs := parseSSE(t, rec.Body.String()); len(evs) > 0 {
+						subs["{setup_run_id}"], _ = evs[0].Data["run_id"].(string)
+					}
 				}
 				// 结算类的准备请求：请求路径中的 {setup_order_id} 替换为它创建的第一个订单。
 				var created struct {
@@ -250,6 +313,7 @@ func TestHTTPFixtures(t *testing.T) {
 				time.Sleep(2 * time.Millisecond) // 时间精确到毫秒：隔开以保持加入顺序
 			}
 
+			path = substitute(path)
 			var rec *httptest.ResponseRecorder
 			token := ""
 			if fx.Request.As != "" {
@@ -295,6 +359,21 @@ func TestHTTPFixtures(t *testing.T) {
 				if got != want {
 					t.Errorf("header %s = %q, want %q", k, got, want)
 				}
+			}
+			if len(fx.Response.Events) > 0 {
+				evs := parseSSE(t, rec.Body.String())
+				if len(evs) != len(fx.Response.Events) {
+					t.Fatalf("%d events, want %d; body=%s", len(evs), len(fx.Response.Events), rec.Body)
+				}
+				for i, want := range fx.Response.Events {
+					if evs[i].Event != want.Event {
+						t.Fatalf("event[%d] = %s, want %s", i, evs[i].Event, want.Event)
+					}
+					if msg := matchFixture(map[string]any(want.Data), evs[i].Data, rec, fmt.Sprintf("events[%d]", i)); msg != "" {
+						t.Fatalf("%s\nbody=%s", msg, rec.Body)
+					}
+				}
+				return
 			}
 			var got map[string]any
 			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {

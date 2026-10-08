@@ -1,0 +1,66 @@
+{
+  "description": "会话详情：会话和按发送顺序的每一轮（用户消息 + 运行结果）",
+  "setup_requests": [
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions",
+      "body": {}
+    },
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions/{setup_session_id}/messages:stream",
+      "body": {
+        "client_message_id": "fixture-1",
+        "content": "推荐一款通勤降噪耳机"
+      }
+    }
+  ],
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/agent/sessions/{setup_session_id}",
+    "as": "blink_user"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "session": {
+        "session_id": "<session_id>",
+        "title": "耳机咨询",
+        "summary": "用户咨询：推荐一款通勤降噪耳机",
+        "message_count": 1,
+        "last_message_at": "<timestamp>",
+        "pinned": false,
+        "pinned_at": null,
+        "created_at": "<timestamp>",
+        "updated_at": "<timestamp>"
+      },
+      "messages": [
+        {
+          "message_id": "<message_id>",
+          "client_message_id": "fixture-1",
+          "content": "推荐一款通勤降噪耳机",
+          "attachments": [],
+          "created_at": "<timestamp>",
+          "run": {
+            "run_id": "<run_id>",
+            "session_id": "<session_id>",
+            "message_id": "<message_id>",
+            "trace_id": "<trace_id>",
+            "status": "completed",
+            "content": "你好，我是 Blink 导购助手。商品推荐、对比、加购和订单查询的能力正在接入中，现在可以先在首页搜索和筛选商品，在购物车和“我的订单”里完成购买。",
+            "blocks": [],
+            "followups": [
+              "怎么筛选商品？",
+              "下单后多久要付款？"
+            ],
+            "error_code": "",
+            "created_at": "<timestamp>",
+            "updated_at": "<timestamp>"
+          }
+        }
+      ]
+    }
+  }
+}

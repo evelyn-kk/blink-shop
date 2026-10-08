@@ -1,0 +1,117 @@
+{
+  "description": "流式提问（POST /agent/sessions/{id}/messages:stream，text/event-stream）：先 message_start，再 thinking / text_delta / block / followups，最后恰好一个 message_done 或 error；每个事件立即发送，空闲时有“: ping”心跳。client_message_id 必填且在会话内唯一。7.1 的回答是占位说明（7.2 接入规划和工具）",
+  "setup_requests": [
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions",
+      "body": {}
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/agent/sessions/{setup_session_id}/messages:stream",
+    "as": "blink_user",
+    "body": {
+      "client_message_id": "fixture-1",
+      "content": "推荐一款通勤降噪耳机"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "X-Accel-Buffering": "no"
+    },
+    "events": [
+      {
+        "event": "message_start",
+        "data": {
+          "run_id": "<run_id>",
+          "message_id": "<message_id>",
+          "session_id": "<session_id>",
+          "trace_id": "<trace_id>",
+          "replayed": false
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "understand",
+            "title": "理解你的问题",
+            "status": "running"
+          }
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "understand",
+            "title": "理解你的问题",
+            "status": "done"
+          }
+        }
+      },
+      {
+        "event": "text_delta",
+        "data": {
+          "delta": "你好，我是 Blink "
+        }
+      },
+      {
+        "event": "text_delta",
+        "data": {
+          "delta": "导购助手。商品推荐、对比"
+        }
+      },
+      {
+        "event": "text_delta",
+        "data": {
+          "delta": "、加购和订单查询的能力正"
+        }
+      },
+      {
+        "event": "text_delta",
+        "data": {
+          "delta": "在接入中，现在可以先在首"
+        }
+      },
+      {
+        "event": "text_delta",
+        "data": {
+          "delta": "页搜索和筛选商品，在购物"
+        }
+      },
+      {
+        "event": "text_delta",
+        "data": {
+          "delta": "车和“我的订单”里完成购"
+        }
+      },
+      {
+        "event": "text_delta",
+        "data": {
+          "delta": "买。"
+        }
+      },
+      {
+        "event": "followups",
+        "data": {
+          "questions": [
+            "怎么筛选商品？",
+            "下单后多久要付款？"
+          ]
+        }
+      },
+      {
+        "event": "message_done",
+        "data": {
+          "run_id": "<run_id>",
+          "status": "completed"
+        }
+      }
+    ]
+  }
+}

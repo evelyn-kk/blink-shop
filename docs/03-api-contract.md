@@ -26,7 +26,7 @@
 
 ## Agent 流式端点
 
-请求：`{client_message_id, content, attachments:[{file_id,mime_type,url?}]}`。`client_message_id` 必填且在会话内唯一。响应 `Content-Type: text/event-stream`，禁用代理缓冲；先 `message_start`（含 run_id、message_id、trace_id），再 0..n 个 `thinking`、`text_delta`、`block`、`followups`，最终仅一个 `message_done` 或 `error`。客户端断开/取消要取消 context 并将 run 写为 cancelled；重复 message id 不重新调用模型而重放/返回既有 run。
+请求：`{client_message_id, content, attachments:[{file_id}]}`（附件类型以服务端记录为准，只能引用本人上传的文件）。`client_message_id` 必填且在会话内唯一。响应 `Content-Type: text/event-stream`，禁用代理缓冲；先 `message_start`（含 run_id、message_id、trace_id），再 0..n 个 `thinking`、`text_delta`、`block`、`followups`，最终仅一个 `message_done` 或 `error`。客户端断开/取消要取消 context 并将 run 写为 cancelled；重复 message id 不重新调用模型而重放/返回既有 run。各事件 data 结构、心跳、取消/超时/重启的最终状态与 `error.code` 见 `backend/openapi.yaml`（AgentStreamEvent）和 `backend/README.md`“导购会话与流式回答”。
 
 `block` 至少支持 `product_list`（可信 product_ids）、`comparison`（字段行）、`citation`、`action`。永远不要把模型未检索到的 product_id 渲染成可购买卡片。
 

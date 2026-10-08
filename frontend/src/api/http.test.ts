@@ -13,7 +13,7 @@ import { ApiError, request, requestBlob } from './http';
 interface Fixture {
   description?: string;
   request: { method: string; path: string; body?: unknown };
-  response: { status: number; body: Record<string, unknown> };
+  response: { status: number; body: Record<string, unknown>; events?: unknown[] };
 }
 
 // vitest 在 frontend 目录下运行。
@@ -55,7 +55,8 @@ describe('错误响应契约', () => {
 });
 
 describe('成功响应契约', () => {
-  it.each(fixtures.filter(({ fx }) => fx.response.status < 300))('$name 原样返回响应体', async ({ fx }) => {
+  // 流式响应（events）由 sse.test.ts 覆盖
+  it.each(fixtures.filter(({ fx }) => fx.response.status < 300 && !fx.response.events))('$name 原样返回响应体', async ({ fx }) => {
     const body = concrete(fx.response.body);
     vi.stubGlobal('fetch', respond(fx.response.status, body));
     await expect(request(fx.request.path.replace(/^\/api\/v1/, ''))).resolves.toEqual(body);

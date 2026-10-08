@@ -28,6 +28,7 @@ const (
 	PrefixMessage   = "msg_"
 	PrefixRun       = "run_"
 	PrefixTrace     = "tr_"
+	PrefixTraceEvt  = "te_"
 	PrefixPrompt    = "prompt_"
 	PrefixPublish   = "pub_"
 	PrefixAudit     = "aud_"

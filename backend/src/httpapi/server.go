@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/evelyn-kk/blink-shop/backend/src/agent"
 	"github.com/evelyn-kk/blink-shop/backend/src/configcenter"
 	"github.com/evelyn-kk/blink-shop/backend/src/ingest"
 	"github.com/evelyn-kk/blink-shop/backend/src/objectstore"
@@ -47,6 +48,12 @@ type Options struct {
 	Now func() time.Time
 	// PaymentTimeout 是下单后的支付期限，0 表示 DefaultPaymentTimeout（30 分钟）。
 	PaymentTimeout time.Duration
+	// AgentRunner 执行导购运行；nil 表示 7.1 的占位运行（7.2 接入规则规划和工具）。测试可替换。
+	AgentRunner agent.Runner
+	// AgentRunTimeout 是一次运行的最长时间，0 表示 DefaultAgentRunTimeout。
+	AgentRunTimeout time.Duration
+	// SSEHeartbeat 是流式响应的心跳间隔，0 表示 DefaultSSEHeartbeat。
+	SSEHeartbeat time.Duration
 }
 
 type Server struct {
@@ -60,6 +67,10 @@ type Server struct {
 	passwords      *passwordHasher
 	now            func() time.Time
 	paymentTimeout time.Duration
+	runner         agent.Runner
+	runTimeout     time.Duration
+	heartbeat      time.Duration
+	runs           *runRegistry
 	configs        ConfigAdmin
 	mux            *http.ServeMux
 	routeAccess    map[string]access // 路由 pattern → 访问规则，RBAC 矩阵测试据此核对
@@ -81,6 +92,10 @@ func NewServer(opts Options) *Server {
 		passwords:      newPasswordHasher(opts.PasswordCost),
 		now:            opts.Now,
 		paymentTimeout: opts.PaymentTimeout,
+		runner:         opts.AgentRunner,
+		runTimeout:     opts.AgentRunTimeout,
+		heartbeat:      opts.SSEHeartbeat,
+		runs:           newRunRegistry(),
 		configs:        opts.Configs,
 		mux:            http.NewServeMux(),
 		routeAccess:    map[string]access{},
@@ -90,6 +105,15 @@ func NewServer(opts Options) *Server {
 	}
 	if s.now == nil {
 		s.now = time.Now
+	}
+	if s.runner == nil {
+		s.runner = agent.PlaceholderRunner{ChunkDelay: 60 * time.Millisecond}
+	}
+	if s.runTimeout <= 0 {
+		s.runTimeout = DefaultAgentRunTimeout
+	}
+	if s.heartbeat <= 0 {
+		s.heartbeat = DefaultSSEHeartbeat
 	}
 	if s.paymentTimeout <= 0 {
 		s.paymentTimeout = DefaultPaymentTimeout
@@ -153,6 +177,16 @@ func (s *Server) routes() {
 	s.handle("GET /api/v1/coupons/available", accessUser, s.handleListAvailableCoupons)
 	s.handle("GET /api/v1/coupons/mine", accessUser, s.handleListMyCoupons)
 	s.handle("POST /api/v1/coupons/{action}", accessUser, s.handleCouponAction)
+
+	s.handle("GET /api/v1/agent/sessions", accessUser, s.handleListSessions)
+	s.handle("POST /api/v1/agent/sessions", accessUser, s.handleCreateSession)
+	s.handle("GET /api/v1/agent/sessions/{id}", accessUser, s.handleGetSession)
+	s.handle("PATCH /api/v1/agent/sessions/{id}", accessUser, s.handleUpdateSession)
+	s.handle("DELETE /api/v1/agent/sessions/{id}", accessUser, s.handleDeleteSession)
+	s.handle("POST /api/v1/agent/sessions/{action}", accessUser, s.handleSessionAction)
+	s.handle("POST /api/v1/agent/sessions/{id}/{action}", accessUser, s.handleSessionSubAction)
+	s.handle("GET /api/v1/agent/runs/{id}/trace", accessUser, s.handleRunTrace)
+	s.handle("POST /api/v1/agent/runs/{action}", accessUser, s.handleRunAction)
 
 	s.handle("GET /api/v1/orders", accessUser, s.handleListMyOrders)
 	s.handle("POST /api/v1/orders:checkout", accessUser, s.handleCheckout)

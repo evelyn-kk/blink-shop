@@ -1,0 +1,33 @@
+{
+  "description": "取消运行（POST /agent/runs/{id}:cancel）：进行中的运行停止并写为 cancelled，流以 error{code: cancelled} 结束；已完成的返回 409 run_finished；重复取消返回当前结果",
+  "setup_requests": [
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions",
+      "body": {}
+    },
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions/{setup_session_id}/messages:stream",
+      "body": {
+        "client_message_id": "fixture-1",
+        "content": "推荐一款通勤降噪耳机"
+      }
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/agent/runs/{setup_run_id}:cancel",
+    "as": "blink_user"
+  },
+  "response": {
+    "status": 409,
+    "body": {
+      "code": "run_finished",
+      "message": "这次回答已经结束，不能取消",
+      "request_id": "<request_id>"
+    }
+  }
+}

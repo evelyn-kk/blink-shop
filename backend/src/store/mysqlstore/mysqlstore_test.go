@@ -56,7 +56,7 @@ func TestMigrateEmptyThenAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(applied, []string{"0001_init.sql", "0002_promotion_discount_rate_check.sql",
-		"0003_knowledge_document_product.sql", "0004_backfill_knowledge_document_product.sql", "0005_admin_audit_logs.sql"}) {
+		"0003_knowledge_document_product.sql", "0004_backfill_knowledge_document_product.sql", "0005_admin_audit_logs.sql", "0006_agent_write_order.sql"}) {
 		t.Fatalf("first run applied %v", applied)
 	}
 	applied, err = s.Migrate(ctx, migrations.FS)
@@ -64,7 +64,7 @@ func TestMigrateEmptyThenAgain(t *testing.T) {
 		t.Fatalf("second run applied %v, err %v; want nothing", applied, err)
 	}
 	var count int
-	if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil || count != 5 {
+	if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil || count != 6 {
 		t.Fatalf("schema_migrations rows = %d, %v", count, err)
 	}
 }
@@ -82,7 +82,8 @@ var expectedUniqueKeys = map[string]map[string]string{
 	"accounts":            {"uk_accounts_username": "username"},
 	"admin_audit_logs":    {"uk_admin_audit_seq": "seq"},
 	"cart_items":          {"uk_cart_items_account_product_sku": "account_id,product_id,sku_id"},
-	"user_messages":       {"uk_user_messages_client_message": "account_id,session_id,client_message_id"},
+	"user_messages":       {"uk_user_messages_client_message": "account_id,session_id,client_message_id", "uk_user_messages_seq": "seq"},
+	"agent_trace_events":  {"uk_agent_trace_events_seq": "seq"},
 	"agent_runs":          {"uk_agent_runs_account_message": "account_id,message_id"},
 	"knowledge_documents": {"uk_knowledge_documents_merchant_hash": "merchant_id,content_hash"},
 	"knowledge_chunks":    {"uk_knowledge_chunks_document_index": "document_id,chunk_index"},
@@ -411,7 +412,7 @@ func TestMigrateUpgradeFrom0001(t *testing.T) {
 	}
 	applied, err := s.Migrate(ctx, migrations.FS)
 	want := []string{"0002_promotion_discount_rate_check.sql", "0003_knowledge_document_product.sql", "0004_backfill_knowledge_document_product.sql",
-		"0005_admin_audit_logs.sql"}
+		"0005_admin_audit_logs.sql", "0006_agent_write_order.sql"}
 	if err != nil || !reflect.DeepEqual(applied, want) {
 		t.Fatalf("upgrade applied %v, %v", applied, err)
 	}

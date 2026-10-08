@@ -152,6 +152,11 @@ func (s RunStatus) CanTransitionTo(to RunStatus) error {
 	return check(runTransitions, "运行", s, to)
 }
 
+// Terminal 是否已结束（completed / failed / cancelled）。
+func (s RunStatus) Terminal() bool {
+	return s == RunCompleted || s == RunFailed || s == RunCancelled
+}
+
 // DocumentStatus 知识文档：uploaded -> parsing -> indexing -> indexed | failed；失败或已索引的文档可重新解析。
 type DocumentStatus string
 

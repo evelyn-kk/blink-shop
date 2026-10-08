@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/domain"
 )
@@ -612,8 +613,53 @@ type Store interface {
 	InsertAuditLog(ctx context.Context, l AuditLog) (AuditLog, error)
 	ListAuditLogs(ctx context.Context, q AuditQuery) ([]AuditLog, int, error)
 
+	// 导购会话。所有方法都按 accountID 限定：别人的会话、消息和运行都按不存在处理（ErrNotFound）；软删的会话同样不存在。
+	// CreateChatSession 在 SessionID 为空时生成，计数和时间由这里填写。
+	CreateChatSession(ctx context.Context, s domain.ChatSession) (domain.ChatSession, error)
+	// ListChatSessions 只列出有消息、未删除的会话：置顶的在前（按置顶时间倒序），其余按最近消息时间倒序。
+	// Keyword 不区分大小写地匹配标题、摘要或任一条用户消息。
+	ListChatSessions(ctx context.Context, q ChatSessionQuery) ([]domain.ChatSession, int, error)
+	GetChatSession(ctx context.Context, accountID, sessionID string) (domain.ChatSession, error)
+	// UpdateChatSession 锁定会话交给 fn，只写回标题、摘要、置顶时间和删除时间；fn 出错时不修改。
+	UpdateChatSession(ctx context.Context, accountID, sessionID string, fn func(s *domain.ChatSession) error) (domain.ChatSession, error)
+	// ListChatMessages 按写入顺序返回会话里的每一轮：用户消息和它的运行结果（同一毫秒内的也有先后）。
+	ListChatMessages(ctx context.Context, accountID, sessionID string) ([]ChatTurn, error)
+	// StartAgentRun 在一个事务里：锁定会话（不存在或已删除返回 ErrNotFound）→ 写入用户消息和状态为 running 的运行 →
+	// 消息数加一、更新最近消息时间，并把会话交给 fn 更新标题/摘要。同一会话里 ClientMessageID 已存在时什么都不写，
+	// 返回已有的消息和运行（Created=false），保证重复提交不会再跑一次。ID、时间由这里填写。
+	StartAgentRun(ctx context.Context, msg domain.UserMessage, fn func(s *domain.ChatSession)) (StartedRun, error)
+	GetAgentRun(ctx context.Context, accountID, runID string) (domain.AgentRun, error)
+	// UpdateAgentRun 锁定运行交给 fn。状态变化必须符合运行状态机，已结束的运行不能再改（ErrInvalid）；fn 出错时不修改。
+	UpdateAgentRun(ctx context.Context, accountID, runID string, fn func(r *domain.AgentRun) error) (domain.AgentRun, error)
+	// AppendTraceEvent 追加一条运行轨迹（ID、时间为空时生成），ListTraceEvents 按写入顺序返回。
+	AppendTraceEvent(ctx context.Context, e domain.AgentTraceEvent) (domain.AgentTraceEvent, error)
+	ListTraceEvents(ctx context.Context, accountID, runID string) ([]domain.AgentTraceEvent, error)
+	// FailInterruptedRuns 把 createdBefore 之前创建、仍是 queued/running 的运行改为 failed（errorCode），返回改了几条。
+	// 服务启动时以进程启动时间调用：上一个进程里没跑完的运行不会再有人写结果；本进程已经开始的运行不受影响。
+	FailInterruptedRuns(ctx context.Context, errorCode string, createdBefore time.Time) (int, error)
+
 	// ApplySeed 在一个事务内写入开发种子：按主键“不存在才插入”，可重复执行；违反其他唯一键时整体回滚并返回 ErrConflict。
 	ApplySeed(ctx context.Context, data SeedData) (SeedResult, error)
+}
+
+// ChatSessionQuery 是会话列表的查询条件。
+type ChatSessionQuery struct {
+	AccountID string
+	Keyword   string
+	Page      Page
+}
+
+// ChatTurn 是会话里的一轮：用户消息和它的运行（还没有运行时为 nil）。
+type ChatTurn struct {
+	Message domain.UserMessage
+	Run     *domain.AgentRun
+}
+
+// StartedRun 是 StartAgentRun 的结果；Created=false 表示这条消息之前已经提交过。
+type StartedRun struct {
+	Message domain.UserMessage
+	Run     domain.AgentRun
+	Created bool
 }
 
 // SeedAccount 是带密码哈希的种子账户。
@@ -822,6 +868,55 @@ func CheckClaim(c domain.Coupon, merchantStatus domain.EntityStatus, owned int, 
 		return ErrCouponSoldOut
 	case owned >= max(c.PerUserLimit, 1):
 		return ErrCouponLimitReached
+	}
+	return nil
+}
+
+// 导购会话的存储上限（与表结构一致）。
+const (
+	MaxSessionTitleRunes   = 128
+	MaxSessionSummaryRunes = 1000
+	MaxClientMessageIDLen  = 128
+	MaxMessageAttachments  = 10
+)
+
+// ValidateChatSession 是写入会话前共用的校验：标题非空且不超过上限，摘要不超过上限。
+func ValidateChatSession(s domain.ChatSession) error {
+	switch n := utf8.RuneCountInString(s.Title); {
+	case n == 0:
+		return fmt.Errorf("%w: 会话标题为空", ErrInvalid)
+	case n > MaxSessionTitleRunes:
+		return fmt.Errorf("%w: 会话标题超过 %d 字", ErrInvalid, MaxSessionTitleRunes)
+	}
+	if utf8.RuneCountInString(s.Summary) > MaxSessionSummaryRunes {
+		return fmt.Errorf("%w: 会话摘要超过 %d 字", ErrInvalid, MaxSessionSummaryRunes)
+	}
+	return nil
+}
+
+// ValidateUserMessage 是写入用户消息前共用的校验：必须有账户、会话和客户端消息 ID，附件数量有上限。内容长度等业务规则由调用方检查。
+func ValidateUserMessage(m domain.UserMessage) error {
+	switch {
+	case m.AccountID == "" || m.SessionID == "":
+		return fmt.Errorf("%w: 消息缺少账户或会话", ErrInvalid)
+	case m.ClientMessageID == "" || len(m.ClientMessageID) > MaxClientMessageIDLen:
+		return fmt.Errorf("%w: client_message_id 为空或过长", ErrInvalid)
+	case len(m.Attachments) > MaxMessageAttachments:
+		return fmt.Errorf("%w: 附件超过 %d 个", ErrInvalid, MaxMessageAttachments)
+	}
+	return nil
+}
+
+// NextRunState 校验运行状态变化：相同状态不算变化；已结束的运行不能再改；其他按运行状态机。
+func NextRunState(from, to domain.RunStatus) error {
+	if from == to {
+		if from.Terminal() {
+			return fmt.Errorf("%w: 运行已结束（%s）", ErrInvalid, from)
+		}
+		return nil
+	}
+	if err := from.CanTransitionTo(to); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	return nil
 }

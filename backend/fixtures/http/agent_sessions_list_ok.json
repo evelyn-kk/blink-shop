@@ -1,0 +1,46 @@
+{
+  "description": "会话列表：只列有消息、未删除的会话，置顶在前，其余按最近消息时间倒序；keyword 匹配标题、摘要和用户消息（不区分大小写）。第一条消息会生成标题（命中品类词为“××咨询”）和摘要",
+  "setup_requests": [
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions",
+      "body": {}
+    },
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions/{setup_session_id}/messages:stream",
+      "body": {
+        "client_message_id": "fixture-1",
+        "content": "推荐一款通勤降噪耳机"
+      }
+    }
+  ],
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/agent/sessions?keyword=降噪",
+    "as": "blink_user"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "items": [
+        {
+          "session_id": "<session_id>",
+          "title": "耳机咨询",
+          "summary": "用户咨询：推荐一款通勤降噪耳机",
+          "message_count": 1,
+          "last_message_at": "<timestamp>",
+          "pinned": false,
+          "pinned_at": null,
+          "created_at": "<timestamp>",
+          "updated_at": "<timestamp>"
+        }
+      ],
+      "page": 1,
+      "page_size": 10,
+      "total": 1
+    }
+  }
+}

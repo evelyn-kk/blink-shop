@@ -1,0 +1,28 @@
+{
+  "description": "改标题：1–128 个字；摘要最多 500 字；至少提供 title 或 summary",
+  "setup_requests": [
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions",
+      "body": {}
+    }
+  ],
+  "request": {
+    "method": "PATCH",
+    "path": "/api/v1/agent/sessions/{setup_session_id}",
+    "as": "blink_user",
+    "body": {
+      "title": "   "
+    }
+  },
+  "response": {
+    "status": 400,
+    "body": {
+      "code": "invalid_argument",
+      "message": "标题需要 1–128 个字",
+      "field": "title",
+      "request_id": "<request_id>"
+    }
+  }
+}

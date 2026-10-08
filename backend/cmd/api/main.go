@@ -26,6 +26,8 @@ import (
 
 const (
 	shutdownTimeout = 10 * time.Second
+	// agentStopTimeout 是关闭时等待进行中的导购运行写完最终状态的时间。
+	agentStopTimeout = 5 * time.Second
 	// orderCloseInterval 是检查超时未支付订单的间隔。
 	orderCloseInterval = time.Minute
 )
@@ -64,6 +66,7 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 		"bootstrap_vector_index", cfg.BootstrapVectorIndex,
 	)
 
+	startedAt := time.Now()
 	st, err := mysqlstore.Open(cfg.MySQLDSN)
 	if err != nil {
 		return err
@@ -98,6 +101,8 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 
 	// 关闭超过支付期限的订单（回补库存、退券）；支付接口也会在发现超时时顺带关闭。
 	go server.RunOrderCloser(ctx, orderCloseInterval)
+	// 上一个进程没跑完的导购运行标为失败（数据库就绪后执行一次；本进程启动后开始的运行不受影响）。
+	go recoverRunsWhenReady(ctx, server, st, startedAt, logger)
 
 	httpServer := &http.Server{
 		Handler:           server.Handler(),
@@ -122,6 +127,8 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 	case <-ctx.Done():
 	}
 
+	// 先停掉进行中的导购运行，让它们写完最终状态（failed: server_shutdown），再关闭 HTTP 服务。
+	server.StopAgentRuns(agentStopTimeout)
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancelShutdown()
 	if err := httpServer.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -176,6 +183,24 @@ func migrateUntilDone(ctx context.Context, st *mysqlstore.Store, logger *slog.Lo
 }
 
 // schemaReady 是 /ready 的数据库检查：能连上，且没有未执行的迁移。
+// recoverRunsWhenReady 等数据库迁移完成后把中断的运行标为失败；失败时稍后重试，直到成功或服务退出。
+func recoverRunsWhenReady(ctx context.Context, server *httpapi.Server, st *mysqlstore.Store, startedAt time.Time, logger *slog.Logger) {
+	for {
+		if schemaReady(ctx, st) == nil {
+			_, err := server.RecoverInterruptedRuns(ctx, startedAt)
+			if err == nil {
+				return
+			}
+			logger.Error("recover interrupted agent runs failed, will retry", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(migrateRetryInterval):
+		}
+	}
+}
+
 func schemaReady(ctx context.Context, st *mysqlstore.Store) error {
 	if err := st.Ping(ctx); err != nil {
 		return err
