@@ -104,3 +104,12 @@ func mapDecodeError(err error) error {
 		return ErrInvalidJSON
 	}
 }
+
+func contains(list []string, v string) bool {
+	for _, item := range list {
+		if item == v {
+			return true
+		}
+	}
+	return false
+}

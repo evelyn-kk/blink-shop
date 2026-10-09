@@ -32,25 +32,91 @@
       {
         "event": "message_start",
         "data": {
-          "run_id": "<run_id>",
           "message_id": "<message_id>",
+          "replayed": true,
+          "run_id": "<run_id>",
           "session_id": "<session_id>",
-          "trace_id": "<trace_id>",
-          "replayed": true
+          "trace_id": "<trace_id>"
         }
       },
       {
         "event": "text_delta",
         "data": {
-          "delta": "你好，我是 Blink 导购助手。商品推荐、对比、加购和订单查询的能力正在接入中，现在可以先在首页搜索和筛选商品，在购物车和“我的订单”里完成购买。"
+          "delta": "按“通勤降噪耳机”找到 1 件在售商品，优先推荐 Blink Air 降噪耳机（¥599）：通勤降噪性价比高。主要卖点：主动降噪、30 小时续航。注意：不支持游泳佩戴。价格、库存和卖点都来自商品库，点卡片可以看详情。想加购的话告诉我“把第一个加入购物车”。"
+        }
+      },
+      {
+        "event": "block",
+        "data": {
+          "block": {
+            "products": [
+              {
+                "attributes": [
+                  {
+                    "key": "续航",
+                    "unit": "小时",
+                    "value": "30"
+                  },
+                  {
+                    "key": "防水",
+                    "value": "IPX4"
+                  }
+                ],
+                "brand": "Blink",
+                "category_id": "c_audio",
+                "category_name": "耳机音箱",
+                "image_url": "/api/v1/assets/catalog/products/p_seed_earbuds.png",
+                "market_price": "699.00",
+                "merchant_id": "m_seed_digital",
+                "merchant_name": "Blink 数码旗舰店",
+                "name": "Blink Air 降噪耳机",
+                "not_suitable_for": [
+                  "运动防水场景"
+                ],
+                "price": "599.00",
+                "product_id": "p_seed_earbuds",
+                "recommend_reason": "通勤降噪性价比高。",
+                "risk_notes": [
+                  "不支持游泳佩戴"
+                ],
+                "selling_points": [
+                  "主动降噪",
+                  "30 小时续航"
+                ],
+                "skus": [
+                  {
+                    "is_default": true,
+                    "price": "599.00",
+                    "sku_id": "sku_seed_earbuds_white",
+                    "sku_name": "Blink Air 白色",
+                    "stock_quantity": 5,
+                    "stock_status": "low_stock"
+                  }
+                ],
+                "stock_quantity": 5,
+                "stock_status": "low_stock",
+                "suitable_for": [
+                  "通勤",
+                  "办公"
+                ],
+                "tags": [
+                  "降噪",
+                  "通勤"
+                ]
+              }
+            ],
+            "title": "为你找到的商品",
+            "type": "product_list"
+          }
         }
       },
       {
         "event": "followups",
         "data": {
           "questions": [
-            "怎么筛选商品？",
-            "下单后多久要付款？"
+            "把第一个加入购物车",
+            "Blink Air 降噪耳机 的评价怎么样",
+            "有什么优惠券"
           ]
         }
       },

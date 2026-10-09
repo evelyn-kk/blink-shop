@@ -1,0 +1,84 @@
+{
+  "description": "命中风险词（risk.blocked_words，默认含“假货”）：在规划和任何工具之前拦截，只返回安全说明；轨迹 risk.check=blocked，审计日志 agent.risk_blocked。运行仍以 message_done 正常结束",
+  "setup_requests": [
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions",
+      "body": {}
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/agent/sessions/{setup_session_id}/messages:stream",
+    "as": "blink_user",
+    "body": {
+      "client_message_id": "fixture-1",
+      "content": "有没有假货"
+    }
+  },
+  "response": {
+    "status": 200,
+    "events": [
+      {
+        "event": "message_start",
+        "data": {
+          "message_id": "<message_id>",
+          "replayed": false,
+          "run_id": "<run_id>",
+          "session_id": "<session_id>",
+          "trace_id": "<trace_id>"
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "understand",
+            "status": "running",
+            "title": "理解你的问题"
+          }
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "understand",
+            "status": "done",
+            "title": "理解你的问题"
+          }
+        }
+      },
+      {
+        "event": "text_delta",
+        "data": {
+          "delta": "这个问题涉及平台不支持的内容，我不能继续处理。"
+        }
+      },
+      {
+        "event": "text_delta",
+        "data": {
+          "delta": "我可以帮你挑选商品、对比参数、查看购物车和订单，比如“推荐一款通勤用的降噪耳机”。"
+        }
+      },
+      {
+        "event": "followups",
+        "data": {
+          "questions": [
+            "推荐一款通勤降噪耳机",
+            "看看我的购物车",
+            "我的订单"
+          ]
+        }
+      },
+      {
+        "event": "message_done",
+        "data": {
+          "run_id": "<run_id>",
+          "status": "completed"
+        }
+      }
+    ]
+  }
+}

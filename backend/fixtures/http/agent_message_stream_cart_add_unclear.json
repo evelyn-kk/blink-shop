@@ -1,0 +1,94 @@
+{
+  "description": "会话里还没有给用户看过商品时说“把第一个加入购物车”：不猜测、不调用任何写工具，向用户提问；轨迹里只有规划和回答",
+  "setup_requests": [
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions",
+      "body": {}
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/agent/sessions/{setup_session_id}/messages:stream",
+    "as": "blink_user",
+    "body": {
+      "client_message_id": "fixture-1",
+      "content": "把第一个加入购物车"
+    }
+  },
+  "response": {
+    "status": 200,
+    "events": [
+      {
+        "event": "message_start",
+        "data": {
+          "message_id": "<message_id>",
+          "replayed": false,
+          "run_id": "<run_id>",
+          "session_id": "<session_id>",
+          "trace_id": "<trace_id>"
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "understand",
+            "status": "running",
+            "title": "理解你的问题"
+          }
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "understand",
+            "status": "done",
+            "title": "理解你的问题"
+          }
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "plan",
+            "status": "done",
+            "title": "判断需求：购物车"
+          }
+        }
+      },
+      {
+        "event": "text_delta",
+        "data": {
+          "delta": "我还没有给你推荐过商品，不确定你指的是哪一件，所以没有加入购物车。"
+        }
+      },
+      {
+        "event": "text_delta",
+        "data": {
+          "delta": "先告诉我想买什么，我推荐后你再说“把第一个加入购物车”。"
+        }
+      },
+      {
+        "event": "followups",
+        "data": {
+          "questions": [
+            "推荐一款通勤降噪耳机",
+            "看看我的购物车",
+            "3000 以内的手机"
+          ]
+        }
+      },
+      {
+        "event": "message_done",
+        "data": {
+          "run_id": "<run_id>",
+          "status": "completed"
+        }
+      }
+    ]
+  }
+}

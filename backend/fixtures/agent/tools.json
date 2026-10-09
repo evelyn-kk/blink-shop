@@ -1,0 +1,657 @@
+{
+  "policy": {
+    "cart": [
+      "get_cart",
+      "add_cart_item",
+      "update_cart_item",
+      "delete_cart_item",
+      "preview_discount",
+      "search_products"
+    ],
+    "checkout": [
+      "get_cart",
+      "preview_discount",
+      "checkout"
+    ],
+    "coupon": [
+      "list_coupons",
+      "list_user_coupons",
+      "claim_coupon",
+      "list_promotions",
+      "get_cart",
+      "preview_discount"
+    ],
+    "guide": [
+      "search_products",
+      "search_knowledge",
+      "list_promotions"
+    ],
+    "image_search": [],
+    "knowledge": [
+      "search_knowledge",
+      "search_products"
+    ],
+    "navigation": [],
+    "non_guide": [],
+    "order": [
+      "list_orders",
+      "get_order",
+      "pay_order",
+      "cancel_order",
+      "confirm_receipt"
+    ],
+    "product_compare": [
+      "search_products",
+      "search_knowledge",
+      "list_reviews"
+    ],
+    "product_search": [
+      "search_products",
+      "search_knowledge",
+      "list_promotions",
+      "list_reviews"
+    ],
+    "review": [
+      "list_reviews",
+      "create_review",
+      "list_orders",
+      "get_order",
+      "search_products"
+    ]
+  },
+  "tools": [
+    {
+      "description": "把商品加入当前用户的购物车；product_id 必须是本轮给用户看过的商品。",
+      "intents": [
+        "cart"
+      ],
+      "name": "add_cart_item",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "product_id": {
+            "description": "商品 ID",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "quantity": {
+            "default": 1,
+            "description": "数量",
+            "maximum": 99,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "sku_id": {
+            "description": "规格 ID，空表示默认规格",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_id"
+        ],
+        "type": "object"
+      },
+      "write": true
+    },
+    {
+      "description": "取消当前用户的待支付订单（回补库存、退券）。",
+      "intents": [
+        "order"
+      ],
+      "name": "cancel_order",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "order_id": {
+            "description": "订单 ID",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "description": "取消原因",
+            "maxLength": 200,
+            "minLength": 0,
+            "type": "string"
+          }
+        },
+        "required": [
+          "order_id"
+        ],
+        "type": "object"
+      },
+      "write": true
+    },
+    {
+      "description": "把当前用户购物车里选中的商品下单（按店铺拆单）；同一次运行重复调用不会重复下单。",
+      "intents": [
+        "checkout"
+      ],
+      "name": "checkout",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "user_coupon_ids": {
+            "description": "指定使用的券，不传自动选券",
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "write": true
+    },
+    {
+      "description": "为当前用户领取一张优惠券。",
+      "intents": [
+        "coupon"
+      ],
+      "name": "claim_coupon",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "coupon_id": {
+            "description": "优惠券 ID",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "coupon_id"
+        ],
+        "type": "object"
+      },
+      "write": true
+    },
+    {
+      "description": "确认当前用户已发货订单的收货。",
+      "intents": [
+        "order"
+      ],
+      "name": "confirm_receipt",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "order_id": {
+            "description": "订单 ID",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "order_id"
+        ],
+        "type": "object"
+      },
+      "write": true
+    },
+    {
+      "description": "评价当前用户已完成订单里的某件商品，每件只能评价一次。",
+      "intents": [
+        "review"
+      ],
+      "name": "create_review",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "description": "评价内容",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "order_id": {
+            "description": "订单 ID",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "order_item_id": {
+            "description": "订单项 ID",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "rating": {
+            "description": "评分",
+            "maximum": 5,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "tags": {
+            "description": "标签",
+            "items": {
+              "maxLength": 20,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 5,
+            "type": "array"
+          }
+        },
+        "required": [
+          "order_id",
+          "order_item_id",
+          "rating",
+          "content"
+        ],
+        "type": "object"
+      },
+      "write": true
+    },
+    {
+      "description": "删除当前用户的购物车项。",
+      "intents": [
+        "cart"
+      ],
+      "name": "delete_cart_item",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "cart_item_id": {
+            "description": "购物车项 ID",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "cart_item_id"
+        ],
+        "type": "object"
+      },
+      "write": true
+    },
+    {
+      "description": "读取当前用户的购物车（含每项是否可购买、自动选券后的金额）。",
+      "intents": [
+        "cart",
+        "checkout",
+        "coupon"
+      ],
+      "name": "get_cart",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "write": false
+    },
+    {
+      "description": "查询当前用户某个订单的详情（含支付单和已评价的订单项）。",
+      "intents": [
+        "order",
+        "review"
+      ],
+      "name": "get_order",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "order_id": {
+            "description": "订单 ID",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "order_id"
+        ],
+        "type": "object"
+      },
+      "write": false
+    },
+    {
+      "description": "查询当前可领取的优惠券（含本人已领张数和能否再领）。",
+      "intents": [
+        "coupon"
+      ],
+      "name": "list_coupons",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "default": 10,
+            "description": "返回数量",
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "write": false
+    },
+    {
+      "description": "查询当前用户的订单（最新的在前），可按状态或订单号筛选。",
+      "intents": [
+        "order",
+        "review"
+      ],
+      "name": "list_orders",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "default": 5,
+            "description": "返回数量",
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "order_no": {
+            "description": "订单号",
+            "type": "string"
+          },
+          "status": {
+            "description": "订单状态",
+            "enum": [
+              "pending_payment",
+              "paid",
+              "shipped",
+              "completed",
+              "cancelled"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "write": false
+    },
+    {
+      "description": "查询当前有效的促销活动；给 product_id 时只看适用于该商品的活动。",
+      "intents": [
+        "coupon",
+        "guide",
+        "product_search"
+      ],
+      "name": "list_promotions",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "default": 10,
+            "description": "返回数量",
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "merchant_id": {
+            "description": "店铺 ID",
+            "type": "string"
+          },
+          "product_id": {
+            "description": "商品 ID",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "write": false
+    },
+    {
+      "description": "查询某个商品的可见评价和评分摘要。",
+      "intents": [
+        "product_compare",
+        "product_search",
+        "review"
+      ],
+      "name": "list_reviews",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "default": 5,
+            "description": "返回数量",
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "product_id": {
+            "description": "商品 ID",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_id"
+        ],
+        "type": "object"
+      },
+      "write": false
+    },
+    {
+      "description": "查询当前用户已领取的优惠券。",
+      "intents": [
+        "coupon"
+      ],
+      "name": "list_user_coupons",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "default": 10,
+            "description": "返回数量",
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "status": {
+            "description": "状态",
+            "enum": [
+              "unused",
+              "used",
+              "expired"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "write": false
+    },
+    {
+      "description": "模拟支付当前用户的待支付订单。",
+      "intents": [
+        "order"
+      ],
+      "name": "pay_order",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "method": {
+            "description": "支付方式",
+            "enum": [
+              "mock_balance",
+              "mock_wechat",
+              "mock_alipay"
+            ],
+            "type": "string"
+          },
+          "order_id": {
+            "description": "订单 ID",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "order_id"
+        ],
+        "type": "object"
+      },
+      "write": true
+    },
+    {
+      "description": "对当前购物车做优惠试算：不传 user_coupon_ids 自动选最优券，传了只用指定的券。",
+      "intents": [
+        "cart",
+        "checkout",
+        "coupon"
+      ],
+      "name": "preview_discount",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "user_coupon_ids": {
+            "description": "指定使用的券",
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "write": false
+    },
+    {
+      "description": "检索知识库（商品说明、售后政策、使用指南），返回可引用的分块；回答只能引用返回的片段。",
+      "intents": [
+        "guide",
+        "knowledge",
+        "product_compare",
+        "product_search"
+      ],
+      "name": "search_knowledge",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "default": 3,
+            "description": "返回数量",
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "product_id": {
+            "description": "只看某个商品的资料",
+            "type": "string"
+          },
+          "query": {
+            "description": "要查证的问题",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "write": false
+    },
+    {
+      "description": "搜索当前商品库：按关键词召回，按预算和排除词过滤，再按相关性排序。只有 relevance=ok 的结果能当作推荐。",
+      "intents": [
+        "cart",
+        "guide",
+        "knowledge",
+        "product_compare",
+        "product_search",
+        "review"
+      ],
+      "name": "search_products",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "category_id": {
+            "description": "限定分类 ID（含子分类）",
+            "type": "string"
+          },
+          "exclude": {
+            "description": "排除词：名称、品牌、标签或卖点包含任一词的商品不返回",
+            "items": {
+              "maxLength": 30,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 10,
+            "type": "array"
+          },
+          "limit": {
+            "default": 5,
+            "description": "返回数量",
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_price": {
+            "description": "价格上限（元）",
+            "minimum": 0,
+            "type": "number"
+          },
+          "product_id": {
+            "description": "直接按商品 ID 取一件商品（用户明确指定时）",
+            "type": "string"
+          },
+          "query": {
+            "description": "商品关键词（品类、品牌、型号、用途）",
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "write": false
+    },
+    {
+      "description": "修改当前用户购物车项的数量或选中状态。",
+      "intents": [
+        "cart"
+      ],
+      "name": "update_cart_item",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "cart_item_id": {
+            "description": "购物车项 ID",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "quantity": {
+            "description": "数量",
+            "maximum": 99,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "selected": {
+            "description": "是否选中",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cart_item_id"
+        ],
+        "type": "object"
+      },
+      "write": true
+    }
+  ]
+}

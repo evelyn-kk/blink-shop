@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -17,7 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/evelyn-kk/blink-shop/backend/src/agent"
 	"github.com/evelyn-kk/blink-shop/backend/src/seed"
 )
 
@@ -194,6 +194,15 @@ func matchFixture(want, got any, rec *httptest.ResponseRecorder, path string) st
 			}
 			return ""
 		}
+		// "<pattern:正则>"：文本里嵌着订单号等随机值时，整段按正则匹配。
+		if expr, ok := strings.CutPrefix(s, "<pattern:"); ok && strings.HasSuffix(expr, ">") {
+			re, err := regexp.Compile("^" + strings.TrimSuffix(expr, ">") + "$")
+			gs, isStr := got.(string)
+			if err != nil || !isStr || !re.MatchString(gs) {
+				return fmt.Sprintf("%s = %q, want %s", path, got, s)
+			}
+			return ""
+		}
 	}
 	switch w := want.(type) {
 	case map[string]any:
@@ -260,7 +269,6 @@ func TestHTTPFixtures(t *testing.T) {
 			if fx.Request.ObjectStorage == "unavailable" {
 				ts.Server.objects = nil
 			}
-			ts.runner = agent.PlaceholderRunner{} // 导购占位回复不等待，流式 fixture 的事件固定
 
 			path := fx.Request.Path
 			subs := map[string]string{}
@@ -360,6 +368,9 @@ func TestHTTPFixtures(t *testing.T) {
 					t.Errorf("header %s = %q, want %q", k, got, want)
 				}
 			}
+			if os.Getenv("BLINK_UPDATE_FIXTURES") == "1" && strings.HasPrefix(name, "agent_") {
+				fx.Response = recordFixtureResponse(t, file, raw, fx, rec)
+			}
 			if len(fx.Response.Events) > 0 {
 				evs := parseSSE(t, rec.Body.String())
 				if len(evs) != len(fx.Response.Events) {
@@ -396,4 +407,148 @@ func fixtureUploadRequest(t *testing.T, m *fixtureMultipart) *http.Request {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/files", body)
 	req.Header.Set("Content-Type", ct)
 	return req
+}
+
+// ---------- 录制 ----------
+
+// recordedPlaceholders 把随机或随时间变化的字段替换成占位符（按字段名），录制导购 fixture 时使用。
+var recordedPlaceholders = map[string]string{
+	"run_id": "<run_id>", "message_id": "<message_id>", "session_id": "<session_id>", "trace_id": "<trace_id>", "trace_event_id": "<trace_event_id>",
+	"duration_ms": "<duration_ms>", "request_id": "<request_id>", "cart_item_id": "<cart_item_id>", "order_id": "<order_id>",
+	"order_item_id": "<order_item_id>", "payment_id": "<payment_id>", "order_no": "<order_no>", "transaction_no": "<transaction_no>",
+	"checkout_request_id": "<checkout_request_id>", "user_coupon_id": "<user_coupon_id>", "review_id": "<review_id>",
+	"created_at": "<timestamp>", "updated_at": "<timestamp>", "claimed_at": "<timestamp>", "paid_at": "<timestamp>", "expires_at": "<timestamp>",
+	"payment_deadline_at": "<timestamp>", "last_message_at": "<timestamp>", "pinned_at": "<timestamp>",
+}
+
+func placeholderize(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, val := range x {
+			if ph, ok := recordedPlaceholders[k]; ok {
+				if s, isStr := val.(string); (isStr && s != "") || (!isStr && val != nil) {
+					out[k] = ph
+					continue
+				}
+			}
+			out[k] = placeholderize(val)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, val := range x {
+			out[i] = placeholderize(val)
+		}
+		return out
+	case string:
+		// 文本里嵌着的订单号 / 交易号：换成正则占位。
+		if embeddedRandom.MatchString(x) {
+			parts := embeddedRandom.Split(x, -1)
+			found := embeddedRandom.FindAllString(x, -1)
+			var b strings.Builder
+			for i, p := range parts {
+				b.WriteString(regexp.QuoteMeta(p))
+				if i < len(found) {
+					if strings.HasPrefix(found[i], "BS") {
+						b.WriteString(`BS\d{20}`)
+					} else {
+						b.WriteString(`MOCK[0-9A-F]{20}`)
+					}
+				}
+			}
+			return "<pattern:" + b.String() + ">"
+		}
+	}
+	return v
+}
+
+var embeddedRandom = regexp.MustCompile(`BS\d{20}|MOCK[0-9A-F]{20}`)
+
+// marshalFixture 序列化而不转义 < >（占位符要原样可读）。
+func marshalFixture(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil
+}
+
+type recordedResponse struct {
+	Status  int               `json:"status"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Body    map[string]any    `json:"body,omitempty"`
+	Events  []fixtureEvent    `json:"events,omitempty"`
+}
+
+func (e fixtureEvent) MarshalJSON() ([]byte, error) {
+	return marshalFixture(struct {
+		Event string         `json:"event"`
+		Data  map[string]any `json:"data"`
+	}{e.Event, e.Data})
+}
+
+// recordFixtureResponse 用实际响应重写 fixture 的 response 段（BLINK_UPDATE_FIXTURES=1，只对 agent_* 生效）：
+// 其他段原样保留；随机 ID 和时间按字段名换成占位符。写回后返回新的期望值，随后仍按正常流程比对一次。
+func recordFixtureResponse(t *testing.T, file string, raw []byte, fx fixture, rec *httptest.ResponseRecorder) (out struct {
+	Status  int               `json:"status"`
+	Headers map[string]string `json:"headers"`
+	Body    map[string]any    `json:"body"`
+	Events  []struct {
+		Event string         `json:"event"`
+		Data  map[string]any `json:"data"`
+	} `json:"events"`
+}) {
+	t.Helper()
+	var sections map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &sections); err != nil {
+		t.Fatal(err)
+	}
+	resp := recordedResponse{Status: rec.Code, Headers: fx.Response.Headers}
+	if strings.HasPrefix(rec.Header().Get("Content-Type"), "text/event-stream") {
+		for _, ev := range parseSSE(t, rec.Body.String()) {
+			resp.Events = append(resp.Events, fixtureEvent{Event: ev.Event, Data: placeholderize(ev.Data).(map[string]any)})
+		}
+	} else {
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		resp.Body = placeholderize(body).(map[string]any)
+	}
+	respRaw, err := marshalFixture(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sections["response"] = respRaw
+	var buf strings.Builder
+	buf.WriteString("{\n")
+	order := []string{"description", "setup", "setup_requests", "request", "response"}
+	first := true
+	for _, k := range order {
+		v, ok := sections[k]
+		if !ok {
+			continue
+		}
+		if !first {
+			buf.WriteString(",\n")
+		}
+		first = false
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, v, "  ", "  "); err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(&buf, "  %q: %s", k, pretty.String())
+	}
+	buf.WriteString("\n}\n")
+	if err := os.WriteFile(file, []byte(buf.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var reread fixture
+	if err := json.Unmarshal([]byte(buf.String()), &reread); err != nil {
+		t.Fatal(err)
+	}
+	return reread.Response
 }

@@ -94,6 +94,8 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 		ObjectStore: objects,
 		AvatarDir:   cfg.AvatarUploadDir,
 		Configs:     configcenter.NewAdmin(resolver, dynamic),
+		// 导购风险词跟随动态配置（管理后台风控页可改，立即生效）。
+		RiskWords: func(ctx context.Context) []string { return configcenter.RiskBlockedWords(ctx, resolver) },
 		Readiness: []httpapi.ReadinessCheck{
 			{Name: "mysql", Check: func(ctx context.Context) error { return schemaReady(ctx, st) }},
 		},

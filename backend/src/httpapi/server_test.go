@@ -57,6 +57,7 @@ func newTestServer(t *testing.T, env map[string]string, readiness []ReadinessChe
 		PasswordCost: bcrypt.MinCost,
 		Now:          func() time.Time { return testNow },
 		Configs:      configcenter.NewAdmin(resolver, dynamic),
+		RiskWords:    func(ctx context.Context) []string { return configcenter.RiskBlockedWords(ctx, resolver) },
 	})
 	if extra != nil {
 		extra(s.mux)

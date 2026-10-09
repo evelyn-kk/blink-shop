@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Blink Shop API
-  version: 0.11.0
+  version: 0.12.0
   description: |
     Blink Shop 的单一接口契约。约定：
     - 所有路径前缀为 `/api/v1`，JSON 字段使用 snake_case。
@@ -5129,11 +5129,318 @@ components:
     AgentBlock:
       type: object
       required: [type]
-      description: 结构化块：`product_list`（可信 product_ids）、`comparison`、`citation`、`action` 等（7.2 起由工具结果生成）。
+      description: |
+        结构化块，全部由工具返回的数据生成，客户端只渲染不推断。按 `type` 区分：
+        `product_list`（AgentBlockProductList）、`comparison`（AgentBlockComparison）、`citation`（AgentBlockCitation）、
+        `action`（AgentBlockAction）、`cart`（AgentBlockCart）、`order_list`（AgentBlockOrderList）、`coupon_list`（AgentBlockCouponList）、
+        `promotion_list`（AgentBlockPromotionList）、`review_list`（AgentBlockReviewList）。客户端遇到未知 `type` 应忽略而不是报错。
       properties:
         type:
           type: string
+          enum: [product_list, comparison, citation, action, cart, order_list, coupon_list, promotion_list, review_list]
       additionalProperties: true
+    AgentProductCard:
+      type: object
+      description: 商品卡：字段全部来自商品库（search_products 工具）。只有这里出现过的 product_id 才能被加购。
+      required: [product_id, name, brand, image_url, price, market_price, stock_quantity, stock_status, merchant_id, merchant_name, category_id, category_name, tags, selling_points, recommend_reason, risk_notes, suitable_for, not_suitable_for, attributes, skus]
+      properties:
+        product_id:
+          type: string
+        name:
+          type: string
+        brand:
+          type: string
+        image_url:
+          type: string
+        price:
+          $ref: "#/components/schemas/Money"
+        market_price:
+          $ref: "#/components/schemas/Money"
+        stock_quantity:
+          type: integer
+        stock_status:
+          $ref: "#/components/schemas/StockStatus"
+        merchant_id:
+          type: string
+        merchant_name:
+          type: string
+        category_id:
+          type: string
+        category_name:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        selling_points:
+          type: array
+          items:
+            type: string
+        recommend_reason:
+          type: string
+        risk_notes:
+          type: array
+          items:
+            type: string
+        suitable_for:
+          type: array
+          items:
+            type: string
+        not_suitable_for:
+          type: array
+          items:
+            type: string
+        attributes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductAttribute"
+        skus:
+          type: array
+          items:
+            type: object
+            required: [sku_id, sku_name, price, stock_quantity, stock_status, is_default]
+            properties:
+              sku_id:
+                type: string
+              sku_name:
+                type: string
+              price:
+                $ref: "#/components/schemas/Money"
+              stock_quantity:
+                type: integer
+              stock_status:
+                $ref: "#/components/schemas/StockStatus"
+              is_default:
+                type: boolean
+    AgentBlockProductList:
+      type: object
+      description: 块 `product_list`：推荐或候选商品，按展示顺序。“把第一个加购物车”按这个顺序解析。
+      required: [type, title, products]
+      properties:
+        type:
+          type: string
+          const: product_list
+        title:
+          type: string
+        products:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentProductCard"
+    AgentBlockComparison:
+      type: object
+      description: 块 `comparison`：对比表，rows 每行一个字段，values 与 products 一一对应。
+      required: [type, products, rows]
+      properties:
+        type:
+          type: string
+          const: comparison
+        products:
+          type: array
+          items:
+            type: object
+            required: [product_id, name, image_url]
+            properties:
+              product_id:
+                type: string
+              name:
+                type: string
+              image_url:
+                type: string
+        rows:
+          type: array
+          items:
+            type: object
+            required: [label, values]
+            properties:
+              label:
+                type: string
+              values:
+                type: array
+                items:
+                  type: string
+    AgentBlockCitation:
+      type: object
+      description: 块 `citation`：回答引用的知识分块（search_knowledge 工具）。
+      required: [type, citations]
+      properties:
+        type:
+          type: string
+          const: citation
+        citations:
+          type: array
+          items:
+            type: object
+            required: [chunk_id, document_id, merchant_id, title, document_title, snippet, source, score, matched_by]
+            properties:
+              chunk_id:
+                type: string
+              document_id:
+                type: string
+              merchant_id:
+                type: string
+              product_id:
+                type: string
+              title:
+                type: string
+              document_title:
+                type: string
+              snippet:
+                type: string
+              source:
+                type: string
+              source_url:
+                type: string
+              score:
+                type: number
+              matched_by:
+                type: array
+                items:
+                  type: string
+                  enum: [keyword, vector]
+    AgentBlockAction:
+      type: object
+      description: 块 `action`：建议客户端执行的动作，目前只有 `navigate`。target 为 products / product_detail / cart / orders / order_detail / coupons / sessions / settings；params 带 product_id、order_id 等。
+      required: [type, action, target, label, params]
+      properties:
+        type:
+          type: string
+          const: action
+        action:
+          type: string
+          enum: [navigate]
+        target:
+          type: string
+          enum: [products, product_detail, cart, orders, order_detail, coupons, sessions, settings]
+        label:
+          type: string
+        params:
+          type: object
+          additionalProperties:
+            type: string
+    AgentBlockCart:
+      description: 块 `cart`：购物车当前状态（与 GET /cart 的响应相同）加凑单提示。
+      allOf:
+        - $ref: "#/components/schemas/Cart"
+        - type: object
+          required: [type, hints]
+          properties:
+            type:
+              type: string
+              const: cart
+            hints:
+              type: array
+              items:
+                type: object
+                required: [promotion_id, name, shortfall]
+                properties:
+                  promotion_id:
+                    type: string
+                  name:
+                    type: string
+                  shortfall:
+                    $ref: "#/components/schemas/Money"
+    AgentBlockOrderList:
+      type: object
+      description: 块 `order_list`：订单（与 GET /orders 的条目相同，操作结果带 payment）。
+      required: [type, orders]
+      properties:
+        type:
+          type: string
+          const: order_list
+        orders:
+          type: array
+          items:
+            $ref: "#/components/schemas/Order"
+    AgentBlockCouponList:
+      type: object
+      description: 块 `coupon_list`：可领的券（available，与 GET /coupons/available 的条目相同）和我的券（mine，与 GET /coupons/mine 的条目相同）。
+      required: [type, available, mine]
+      properties:
+        type:
+          type: string
+          const: coupon_list
+        available:
+          type: array
+          items:
+            $ref: "#/components/schemas/AvailableCoupon"
+        mine:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserCoupon"
+    AgentBlockPromotionList:
+      type: object
+      description: 块 `promotion_list`：进行中的促销活动及说明。
+      required: [type, promotions]
+      properties:
+        type:
+          type: string
+          const: promotion_list
+        promotions:
+          type: array
+          items:
+            type: object
+            required: [promotion_id, name, scope, merchant_id, product_id, category_id, type, description, threshold_amount, stackable]
+            properties:
+              promotion_id:
+                type: string
+              name:
+                type: string
+              scope:
+                type: string
+              merchant_id:
+                type: string
+              product_id:
+                type: string
+              category_id:
+                type: string
+              type:
+                type: string
+              description:
+                type: string
+              threshold_amount:
+                $ref: "#/components/schemas/Money"
+              stackable:
+                type: boolean
+    AgentBlockReviewList:
+      type: object
+      description: 块 `review_list`：某商品的评价和评分摘要。
+      required: [type, product_id, product_name, total, average_rating, reviews]
+      properties:
+        type:
+          type: string
+          const: review_list
+        product_id:
+          type: string
+        product_name:
+          type: string
+        total:
+          type: integer
+        average_rating:
+          type: number
+        reviews:
+          type: array
+          items:
+            type: object
+            required: [review_id, rating, content, tags, reviewer_name, merchant_reply, created_at]
+            properties:
+              review_id:
+                type: string
+              rating:
+                type: integer
+              content:
+                type: string
+              tags:
+                type: array
+                items:
+                  type: string
+              reviewer_name:
+                type: string
+                description: 已脱敏的显示名。
+              merchant_reply:
+                type: string
+              created_at:
+                type: string
+                description: 日期（YYYY-MM-DD）。
     AgentTraceEvent:
       type: object
       required: [trace_event_id, stage, event_type, model, status, duration_ms, error, metadata, created_at]
@@ -5227,11 +5534,20 @@ components:
           type: string
     AgentEventBlock:
       type: object
-      description: 事件 `block`。
+      description: 事件 `block`：块的通用形状是 AgentBlock，按 `type` 对应到具体 schema。
       required: [block]
       properties:
         block:
-          $ref: "#/components/schemas/AgentBlock"
+          oneOf:
+            - $ref: "#/components/schemas/AgentBlockProductList"
+            - $ref: "#/components/schemas/AgentBlockComparison"
+            - $ref: "#/components/schemas/AgentBlockCitation"
+            - $ref: "#/components/schemas/AgentBlockAction"
+            - $ref: "#/components/schemas/AgentBlockCart"
+            - $ref: "#/components/schemas/AgentBlockOrderList"
+            - $ref: "#/components/schemas/AgentBlockCouponList"
+            - $ref: "#/components/schemas/AgentBlockPromotionList"
+            - $ref: "#/components/schemas/AgentBlockReviewList"
     AgentEventFollowups:
       type: object
       description: 事件 `followups`：推荐的追问。

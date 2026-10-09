@@ -13,7 +13,7 @@
 
 ## 工具安全边界
 
-允许工具：`search_products`、`search_image_products`、`search_knowledge`、`get_cart`、`add/update/delete_cart_item`、`preview_discount`、`checkout`、`list/get/pay/cancel/confirm_receipt order`、`list/claim coupon`、`list promotions/reviews`、`create review`。工具参数须 JSON schema 校验。加购必须使用“当前轮搜索结果或用户明确指定”的 product_id；按“第一个”操作时先向用户确认或基于上一条可见商品卡。支付、取消、收货、评价必须先解析到当前用户订单。
+允许工具：`search_products`、`search_image_products`、`search_knowledge`、`get_cart`、`add/update/delete_cart_item`、`preview_discount`、`checkout`、`list/get/pay/cancel/confirm_receipt order`、`list/claim coupon`、`list promotions/reviews`、`create review`。工具参数须 JSON schema 校验。加购必须使用“当前轮搜索结果或用户明确指定”的 product_id；按“第一个”操作时先向用户确认或基于上一条可见商品卡。支付、取消、收货、评价必须先解析到当前用户订单。实现（意图白名单、来源校验、风险策略、轨迹）见 `backend/README.md`“导购规划与工具”，工具清单见 `backend/fixtures/agent/tools.json`。
 
 ## 检索
 

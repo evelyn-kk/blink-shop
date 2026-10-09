@@ -308,3 +308,8 @@ func without(list []string, v string) []string {
 	}
 	return out
 }
+
+// RiskBlockedWords 返回当前生效的风险词表（环境变量 > 动态配置 > 默认值）。
+func RiskBlockedWords(ctx context.Context, r *Resolver) []string {
+	return splitList(r.Get(ctx, KeyRiskBlockedWords))
+}

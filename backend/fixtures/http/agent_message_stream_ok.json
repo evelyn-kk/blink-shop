@@ -1,5 +1,5 @@
 {
-  "description": "流式提问（POST /agent/sessions/{id}/messages:stream，text/event-stream）：先 message_start，再 thinking / text_delta / block / followups，最后恰好一个 message_done 或 error；每个事件立即发送，空闲时有“: ping”心跳。client_message_id 必填且在会话内唯一。7.1 的回答是占位说明（7.2 接入规划和工具）",
+  "description": "流式提问（POST /agent/sessions/{id}/messages:stream，text/event-stream）：先 message_start，再 thinking / text_delta / block / followups，最后恰好一个 message_done 或 error；每个事件立即发送，空闲时有“: ping”心跳。client_message_id 必填且在会话内唯一。规则运行器：风险词检查 → 规则规划（product_search）→ search_products → 只用工具返回的商品生成回答和 product_list 块",
   "setup_requests": [
     {
       "as": "blink_user",
@@ -27,11 +27,11 @@
       {
         "event": "message_start",
         "data": {
-          "run_id": "<run_id>",
           "message_id": "<message_id>",
+          "replayed": false,
+          "run_id": "<run_id>",
           "session_id": "<session_id>",
-          "trace_id": "<trace_id>",
-          "replayed": false
+          "trace_id": "<trace_id>"
         }
       },
       {
@@ -39,8 +39,8 @@
         "data": {
           "step": {
             "id": "understand",
-            "title": "理解你的问题",
-            "status": "running"
+            "status": "running",
+            "title": "理解你的问题"
           }
         }
       },
@@ -49,59 +49,143 @@
         "data": {
           "step": {
             "id": "understand",
-            "title": "理解你的问题",
-            "status": "done"
+            "status": "done",
+            "title": "理解你的问题"
+          }
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "plan",
+            "status": "done",
+            "title": "判断需求：商品推荐"
+          }
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "tool-1",
+            "status": "running",
+            "title": "搜索商品：通勤降噪耳机"
+          }
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "tool-1",
+            "status": "done",
+            "title": "搜索商品：通勤降噪耳机"
           }
         }
       },
       {
         "event": "text_delta",
         "data": {
-          "delta": "你好，我是 Blink "
+          "delta": "按“通勤降噪耳机”找到 1 件在售商品，优先推荐 Blink Air 降噪耳机（¥599）：通勤降噪性价比高。"
         }
       },
       {
         "event": "text_delta",
         "data": {
-          "delta": "导购助手。商品推荐、对比"
+          "delta": "主要卖点：主动降噪、30 小时续航。"
         }
       },
       {
         "event": "text_delta",
         "data": {
-          "delta": "、加购和订单查询的能力正"
+          "delta": "注意：不支持游泳佩戴。"
         }
       },
       {
         "event": "text_delta",
         "data": {
-          "delta": "在接入中，现在可以先在首"
+          "delta": "价格、库存和卖点都来自商品库，点卡片可以看详情。"
         }
       },
       {
         "event": "text_delta",
         "data": {
-          "delta": "页搜索和筛选商品，在购物"
+          "delta": "想加购的话告诉我“把第一个加入购物车”。"
         }
       },
       {
-        "event": "text_delta",
+        "event": "block",
         "data": {
-          "delta": "车和“我的订单”里完成购"
-        }
-      },
-      {
-        "event": "text_delta",
-        "data": {
-          "delta": "买。"
+          "block": {
+            "products": [
+              {
+                "attributes": [
+                  {
+                    "key": "续航",
+                    "unit": "小时",
+                    "value": "30"
+                  },
+                  {
+                    "key": "防水",
+                    "value": "IPX4"
+                  }
+                ],
+                "brand": "Blink",
+                "category_id": "c_audio",
+                "category_name": "耳机音箱",
+                "image_url": "/api/v1/assets/catalog/products/p_seed_earbuds.png",
+                "market_price": "699.00",
+                "merchant_id": "m_seed_digital",
+                "merchant_name": "Blink 数码旗舰店",
+                "name": "Blink Air 降噪耳机",
+                "not_suitable_for": [
+                  "运动防水场景"
+                ],
+                "price": "599.00",
+                "product_id": "p_seed_earbuds",
+                "recommend_reason": "通勤降噪性价比高。",
+                "risk_notes": [
+                  "不支持游泳佩戴"
+                ],
+                "selling_points": [
+                  "主动降噪",
+                  "30 小时续航"
+                ],
+                "skus": [
+                  {
+                    "is_default": true,
+                    "price": "599.00",
+                    "sku_id": "sku_seed_earbuds_white",
+                    "sku_name": "Blink Air 白色",
+                    "stock_quantity": 5,
+                    "stock_status": "low_stock"
+                  }
+                ],
+                "stock_quantity": 5,
+                "stock_status": "low_stock",
+                "suitable_for": [
+                  "通勤",
+                  "办公"
+                ],
+                "tags": [
+                  "降噪",
+                  "通勤"
+                ]
+              }
+            ],
+            "title": "为你找到的商品",
+            "type": "product_list"
+          }
         }
       },
       {
         "event": "followups",
         "data": {
           "questions": [
-            "怎么筛选商品？",
-            "下单后多久要付款？"
+            "把第一个加入购物车",
+            "Blink Air 降噪耳机 的评价怎么样",
+            "有什么优惠券"
           ]
         }
       },

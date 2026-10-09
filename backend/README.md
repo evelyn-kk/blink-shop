@@ -315,8 +315,8 @@ sequenceDiagram
 ## 导购会话与流式回答
 
 会话、消息、运行和轨迹都按账户隔离（别人的一律 404），只有普通用户可用。一条用户消息对应一次运行：
-`queued → running → completed | failed | cancelled`，已结束的运行不再变化。7.1 的运行器是占位实现（如实说明能力还在接入，
-不假装调用模型或工具），7.2 起换成规则规划和工具；运行器通过 `httpapi.Options.AgentRunner` 注入。
+`queued → running → completed | failed | cancelled`，已结束的运行不再变化。默认运行器是不依赖模型的规则运行器
+（`agent.RuleRunner`，见下一节“导购规划与工具”）；运行器通过 `httpapi.Options.AgentRunner` 注入，8.1 接入模型后替换规划和生成，工具层不变。
 
 ### 事件流
 
@@ -328,7 +328,7 @@ sequenceDiagram
 | `message_start` | `run_id, message_id, session_id, trace_id, replayed` | 总是第一个；`replayed=true` 表示重复提交，随后是保存的回答 |
 | `thinking` | `step: {id, title, status}` | 同一 `id` 以后到的状态为准（running → done） |
 | `text_delta` | `delta` | 按顺序拼接得到完整回答 |
-| `block` | `block: {type, ...}` | 结构化块（7.2 起由工具结果生成） |
+| `block` | `block: {type, ...}` | 结构化块，全部由工具返回的数据生成；类型见“导购规划与工具 → 结构化块” |
 | `followups` | `questions` | 推荐追问 |
 | `message_done` | `run_id, status` | 正常结束 |
 | `error` | `run_id, code, message` | 没有正常结束：`cancelled`、`agent_failed`、`run_timeout`、`server_shutdown`、`interrupted` |
@@ -362,9 +362,100 @@ curl -s -X POST $API/agent/runs/<run_id>:cancel -H "Authorization: Bearer $TOKEN
 ```
 
 录制的请求/响应样例见 `fixtures/http/agent_*.json`（含完整事件流），Web（`frontend/src/api/sse.ts`）和 Android（`ShopApi.streamAgentMessage`）
-的流式客户端用同一份样例做契约测试。
+的流式客户端用同一份样例做契约测试。导购样例由真实运行录制：`BLINK_UPDATE_FIXTURES=1 go test -run 'TestHTTPFixtures/agent_' ./src/httpapi`
+会用实际响应重写 `agent_*` 样例的 `response` 段（随机 ID 和时间按字段名换成占位符，正文里嵌着的订单号换成 `<pattern:…>` 正则占位），
+其他段原样保留；改了回答文案或块结构后重新录制即可。
+
+## 导购规划与工具
+
+没有配置任何模型时，导购也必须能完成真实的购物动作，而且不能比用户在页面上多做任何事。实现分三层（`src/agent`）：
+
+```text
+用户消息 → 风险词检查（risk）→ 规则规划 Classify → 按意图白名单调用工具 Registry.Call → 只用工具返回的数据生成回答、块和追问
+```
+
+### 风险策略
+
+- **检查位置**：在规划和任何工具之前（`RuleRunner.Run` 第一步）。命中就不再规划、不调用任何工具（更不会写购物车/订单），
+  只回复一段固定的安全说明并给出替代建议；运行以 `message_done` 正常结束，`error` 事件只用于取消/超时等运行故障。
+- **词表**：`risk.blocked_words`（环境变量 `RISK_BLOCKED_WORDS`，默认 `违法,违禁,假货,绕过风控`），管理后台风控页可改，
+  每次运行都重新读取，改完立即生效；匹配不区分大小写、忽略空白（“绕过 风控”也命中）。
+- **留痕**：轨迹写一条 `risk.check` 事件（`status=blocked`，metadata 只记命中的词，不记原文），日志写一条审计
+  `action=agent.risk_blocked`（账号、运行、会话、命中词、原文长度）。未命中的运行也有 `risk.check=ok` 事件，便于确认检查确实执行了。
+- 与模型无关：8.1 接入模型后，风险检查仍在模型调用之前。
+
+### 规则规划
+
+`agent.Classify` 把一句话分到一个意图，并抽出槽位（预算、排除词、序号、数量、订单号、评分、评价正文、导航目标）。规则按
+“具体 → 泛化”排列：固定短语（打招呼）→ 带图 / 识图词 → 导航动词 + 页面名 → 购物车动作 → 结算 / 支付 / 取消 / 收货 → 订单查询 →
+优惠券 / 促销 → 评价 → 售后与用法问答 → 对比 → 非购物话题 → 购物动词或品类词（商品搜索）→ 兜底。兜底先按商品需求搜一次，
+只有可靠命中才按推荐回答，否则说明能力边界，不虚构商品。
+
+| 意图 | 典型说法 | 允许的工具 |
+| --- | --- | --- |
+| `guide` | 你好 / 你能做什么 | search_products、search_knowledge、list_promotions |
+| `product_search` | 推荐一款通勤降噪耳机 / 3000 以内拍照好的手机，不要 Vista | search_products、search_knowledge、list_promotions、list_reviews |
+| `product_compare` | 对比 Nova 12 和 Vista Pro / 哪个好 | search_products、search_knowledge、list_reviews |
+| `knowledge` | 七天无理由怎么退 / 保修多久 / 鼠标怎么连接 | search_knowledge、search_products |
+| `cart` | 把第一个加入购物车 / 看看购物车 / 删掉鼠标 / 改成 3 件 / 取消选中 | get_cart、add_cart_item、update_cart_item、delete_cart_item、preview_discount、search_products |
+| `checkout` | 结算 / 下单 | get_cart、preview_discount、checkout |
+| `order` | 我的订单 / 支付订单 / 取消订单 / 确认收货 | list_orders、get_order、pay_order、cancel_order、confirm_receipt |
+| `coupon` | 有什么优惠券 / 帮我领券 / 有什么活动 | list_coupons、list_user_coupons、claim_coupon、list_promotions、get_cart、preview_discount |
+| `review` | Nova 12 的评价怎么样 / 给鼠标打五星，评价：很好用 | list_reviews、create_review、list_orders、get_order、search_products |
+| `navigation` | 打开购物车页面 | （无，只返回 action 块） |
+| `image_search` | 带图片 / 拍照找同款 | （无，如实说明图搜还在接入） |
+| `non_guide` | 天气 / 写代码 / 笑话 | （无） |
+
+预算：`3000 以内`、`预算三千`、`两千五左右`（左右放宽 15%）、`1k`；排除：`不要 X`、`不买 X`、`除了 X`；序号：`第 N 个`、`最后一个`；
+指代：`这个 / 那个 / 刚才的`；数量：`两件`、`3 个`；评分：`五星`、`4 分`；订单号：`BS…` 或 `o_…`。
+
+### 工具层
+
+`agent.Registry` 注册 19 个工具，每个工具有名字、说明、是否写操作和参数 JSON Schema（子集：object / string / integer / number /
+boolean / array，required、additionalProperties=false、enum、minimum/maximum、minLength/maxLength、maxItems）。清单和白名单导出在
+`fixtures/agent/tools.json`，由 `TestToolCatalogFixture` 比对（改了工具契约用 `BLINK_UPDATE_FIXTURES=1` 重新生成）。
+
+`Registry.Call` 的顺序：工具存在 → 当前意图允许（白名单，见上表）→ 有当前用户 → 参数符合 schema → 写操作的目标来源可信 → 执行。
+任何一步失败都返回 `OK=false` 的观察（错误码 + 可展示的说明），不会执行工具；业务层拒绝（库存不足、状态不允许、不是本人的订单）同样
+以观察返回；存储错误只记日志，观察里是统一的“服务暂时不可用”。所有工具都以当前用户执行，别人的资源一律按不存在处理。
+
+- **业务规则共用**：购物车、试算、结算、订单、券、评价的规则在 `src/shop`，HTTP 接口和工具调用同一份代码——校验、金额、状态机、
+  幂等完全一致（结算幂等键是 `agent-<run_id>`，同一次运行里重复调用不会重复下单；重复提交的消息本来就会重放而不再运行）。
+- **商品来源**：`add_cart_item` 只接受“本轮可信”的 `product_id`——本次运行搜索到的，加上会话里之前商品卡 / 对比表列出过的；
+  用户显式写出的商品 ID 会先查一次再加入可信集。规则里“把第一个加购物车”按会话里**上一张**商品卡的顺序解析；没有看过商品、
+  说“那个”但看过多件、说“第三个”但只有两件，都只提问不写。按名称加购要求匹配唯一且可靠，多件候选时列出来让用户选。
+- **订单目标**：支付 / 取消 / 收货只在当前用户、状态允许（待支付 / 已发货）的订单里找；订单号或 ID 明确、只有一个候选、
+  说了“第 N 个 / 最近的”才执行，否则列出候选让用户选。评价只能针对自己已完成订单里尚未评价的商品，目标不唯一就问。
+- **审计与轨迹**：每次工具调用写一条轨迹 `tool.<name>`（参数脱敏：长字符串截断、数组只记长度；成功记结果摘要如数量 / ID，
+  失败记错误码）；写操作另写一条审计日志 `action=agent.tool`。规划写 `planner.rule`（意图、动作、槽位），回答写 `answer.rule`
+  （字数、块数、工具次数、是否在向用户提问）。
+
+### 结构化块
+
+回答里的商品、订单、券、引用都放在 `block` 事件里（schema 见 `openapi.yaml` 的 `AgentBlock*`），正文只负责解释：
+
+| type | 内容 | 来源工具 |
+| --- | --- | --- |
+| `product_list` | `title`、`products: [AgentProductCard]`，按展示顺序 | search_products |
+| `comparison` | `products: [{product_id, name, image_url}]`、`rows: [{label, values}]`（价格、品牌、库存、卖点、适合、属性并集） | search_products |
+| `citation` | `citations`（与检索引用一致） | search_knowledge |
+| `action` | `action: navigate`、`target`、`label`、`params` | — |
+| `cart` | 与 `GET /cart` 相同 + `hints` 凑单提示 | get_cart、preview_discount |
+| `order_list` | `orders`（与订单接口相同） | list_orders、checkout、pay/cancel/confirm |
+| `coupon_list` | `available`、`mine` | list_coupons、list_user_coupons |
+| `promotion_list` | `promotions`（含说明） | list_promotions |
+| `review_list` | 评价与评分摘要 | list_reviews |
+
+客户端遇到未知 `type` 应忽略。弱命中的搜索结果只作为“相近商品”展示，正文会说明没有完全匹配。
+
+### 无模型闭环
+
+`TestAgentShoppingLoopHTTP / MySQL`（`src/httpapi/agent_rule_test.go`）和 `quality/e2e/agent-api.spec.mjs` 用真实 HTTP + SSE 走通
+“推荐一款静音无线鼠标 → 把第一个加入购物车 → 结算 → 我的订单 → 支付订单”，并核对 REST 接口看到的购物车和订单状态；
+`fixtures/http/agent_message_stream_{ok,cart_add_ok,cart_add_unclear,checkout_ok,risk_blocked}.json` 是对应的录制样例。
 
 ## 认证与权限
+
 
 - **token**：注册/登录返回 32 字节随机 token（base64url），`auth_tokens` 只存 SHA-256 摘要和过期时间。每个请求都按 token 重新读取账户，所以管理员改账户状态立即生效。登出撤销当前 token，注销撤销全部 token。
 - **密码**：bcrypt（`DefaultCost`）。兼容上游遗留的 SHA-256 hex 哈希，登录成功后自动升级；bcrypt 成本低于当前设置时同样升级。用户不存在时也做一次 bcrypt 比较，避免按响应时间枚举用户名。

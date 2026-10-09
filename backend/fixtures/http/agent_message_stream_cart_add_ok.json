@@ -1,0 +1,192 @@
+{
+  "description": "“把第一个加入购物车”：按会话里上一张商品卡的第一件解析目标，先按 ID 取最新商品数据再加购（add_cart_item 只接受本轮给用户看过的商品）；回答带 cart 块和去购物车的 action 块",
+  "setup_requests": [
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions",
+      "body": {}
+    },
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions/{setup_session_id}/messages:stream",
+      "body": {
+        "client_message_id": "fixture-1",
+        "content": "推荐一款通勤降噪耳机"
+      }
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/agent/sessions/{setup_session_id}/messages:stream",
+    "as": "blink_user",
+    "body": {
+      "client_message_id": "fixture-2",
+      "content": "把第一个加入购物车"
+    }
+  },
+  "response": {
+    "status": 200,
+    "events": [
+      {
+        "event": "message_start",
+        "data": {
+          "message_id": "<message_id>",
+          "replayed": false,
+          "run_id": "<run_id>",
+          "session_id": "<session_id>",
+          "trace_id": "<trace_id>"
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "understand",
+            "status": "running",
+            "title": "理解你的问题"
+          }
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "understand",
+            "status": "done",
+            "title": "理解你的问题"
+          }
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "plan",
+            "status": "done",
+            "title": "判断需求：购物车"
+          }
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "tool-1",
+            "status": "running",
+            "title": "查看商品：Blink Air 降噪耳机"
+          }
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "tool-1",
+            "status": "done",
+            "title": "查看商品：Blink Air 降噪耳机"
+          }
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "tool-2",
+            "status": "running",
+            "title": "加入购物车：Blink Air 降噪耳机"
+          }
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "tool-2",
+            "status": "done",
+            "title": "加入购物车：Blink Air 降噪耳机"
+          }
+        }
+      },
+      {
+        "event": "text_delta",
+        "data": {
+          "delta": "已把 Blink Air 降噪耳机 × 1 加入购物车（现在这件共 1 件）。"
+        }
+      },
+      {
+        "event": "text_delta",
+        "data": {
+          "delta": "购物车共 1 种商品，应付 ¥569.05。"
+        }
+      },
+      {
+        "event": "block",
+        "data": {
+          "block": {
+            "hints": [],
+            "items": [
+              {
+                "amount": "599.00",
+                "available": true,
+                "cart_item_id": "<cart_item_id>",
+                "discount_amount": "29.95",
+                "image_url": "/api/v1/assets/catalog/products/p_seed_earbuds.png",
+                "merchant_id": "m_seed_digital",
+                "merchant_name": "Blink 数码旗舰店",
+                "pay_amount": "569.05",
+                "product_id": "p_seed_earbuds",
+                "product_name": "Blink Air 降噪耳机",
+                "quantity": 1,
+                "selected": true,
+                "sku_id": "sku_seed_earbuds_white",
+                "sku_name": "Blink Air 白色",
+                "stock_quantity": 5,
+                "unavailable_reason": "",
+                "unit_price": "599.00"
+              }
+            ],
+            "summary": {
+              "discount_amount": "29.95",
+              "item_count": 1,
+              "pay_amount": "569.05",
+              "selected_count": 1,
+              "total_amount": "599.00"
+            },
+            "type": "cart"
+          }
+        }
+      },
+      {
+        "event": "block",
+        "data": {
+          "block": {
+            "action": "navigate",
+            "label": "去购物车",
+            "params": {},
+            "target": "cart",
+            "type": "action"
+          }
+        }
+      },
+      {
+        "event": "followups",
+        "data": {
+          "questions": [
+            "去结算",
+            "有什么优惠券",
+            "再推荐几款"
+          ]
+        }
+      },
+      {
+        "event": "message_done",
+        "data": {
+          "run_id": "<run_id>",
+          "status": "completed"
+        }
+      }
+    ]
+  }
+}

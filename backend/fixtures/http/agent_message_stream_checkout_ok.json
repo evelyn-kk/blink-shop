@@ -1,0 +1,222 @@
+{
+  "description": "“结算”：get_cart 确认有选中商品后调用 checkout（幂等键为本次运行 ID），按店铺拆单；回答带 order_list 块和去订单页的 action 块。无模型的“商品查询 → 加购 → 结算 → 订单查询”闭环的第三步",
+  "setup_requests": [
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions",
+      "body": {}
+    },
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions/{setup_session_id}/messages:stream",
+      "body": {
+        "client_message_id": "fixture-1",
+        "content": "推荐一款通勤降噪耳机"
+      }
+    },
+    {
+      "as": "blink_user",
+      "method": "POST",
+      "path": "/api/v1/agent/sessions/{setup_session_id}/messages:stream",
+      "body": {
+        "client_message_id": "fixture-2",
+        "content": "把第一个加入购物车"
+      }
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/agent/sessions/{setup_session_id}/messages:stream",
+    "as": "blink_user",
+    "body": {
+      "client_message_id": "fixture-3",
+      "content": "结算"
+    }
+  },
+  "response": {
+    "status": 200,
+    "events": [
+      {
+        "event": "message_start",
+        "data": {
+          "message_id": "<message_id>",
+          "replayed": false,
+          "run_id": "<run_id>",
+          "session_id": "<session_id>",
+          "trace_id": "<trace_id>"
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "understand",
+            "status": "running",
+            "title": "理解你的问题"
+          }
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "understand",
+            "status": "done",
+            "title": "理解你的问题"
+          }
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "plan",
+            "status": "done",
+            "title": "判断需求：结算下单"
+          }
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "tool-1",
+            "status": "running",
+            "title": "查看购物车"
+          }
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "tool-1",
+            "status": "done",
+            "title": "查看购物车"
+          }
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "tool-2",
+            "status": "running",
+            "title": "提交订单"
+          }
+        }
+      },
+      {
+        "event": "thinking",
+        "data": {
+          "step": {
+            "id": "tool-2",
+            "status": "done",
+            "title": "提交订单"
+          }
+        }
+      },
+      {
+        "event": "text_delta",
+        "data": {
+          "delta": "已为你生成 1 个订单（按店铺拆单），实付合计 ¥569.05。"
+        }
+      },
+      {
+        "event": "text_delta",
+        "data": {
+          "delta": "<pattern:Blink 数码旗舰店：订单号 BS\\d{20}，待支付，实付 ¥569\\.05，请在 30 分钟内支付，超时会自动关闭。>"
+        }
+      },
+      {
+        "event": "text_delta",
+        "data": {
+          "delta": "说“支付订单”我可以帮你完成（模拟）支付，或者到“我的订单”里操作。"
+        }
+      },
+      {
+        "event": "block",
+        "data": {
+          "block": {
+            "orders": [
+              {
+                "account_id": "acct_seed_user",
+                "cancel_reason": "",
+                "closed_at": null,
+                "completed_at": null,
+                "created_at": "<timestamp>",
+                "discount_amount": "29.95",
+                "items": [
+                  {
+                    "amount": "599.00",
+                    "image_url": "/api/v1/assets/catalog/products/p_seed_earbuds.png",
+                    "name": "Blink Air 降噪耳机",
+                    "order_item_id": "<order_item_id>",
+                    "price": "599.00",
+                    "product_id": "p_seed_earbuds",
+                    "quantity": 1,
+                    "review_id": "",
+                    "sku_id": "sku_seed_earbuds_white",
+                    "sku_name": "Blink Air 白色"
+                  }
+                ],
+                "merchant_id": "m_seed_digital",
+                "merchant_name": "Blink 数码旗舰店",
+                "order_id": "<order_id>",
+                "order_no": "<order_no>",
+                "paid_at": null,
+                "pay_amount": "569.05",
+                "payment": {
+                  "amount": "569.05",
+                  "expires_at": "<timestamp>",
+                  "method": "",
+                  "paid_at": null,
+                  "payment_id": "<payment_id>",
+                  "status": "pending",
+                  "transaction_no": ""
+                },
+                "payment_deadline_at": "<timestamp>",
+                "shipped_at": null,
+                "status": "pending_payment",
+                "total_amount": "599.00",
+                "updated_at": "<timestamp>"
+              }
+            ],
+            "type": "order_list"
+          }
+        }
+      },
+      {
+        "event": "block",
+        "data": {
+          "block": {
+            "action": "navigate",
+            "label": "去我的订单",
+            "params": {},
+            "target": "orders",
+            "type": "action"
+          }
+        }
+      },
+      {
+        "event": "followups",
+        "data": {
+          "questions": [
+            "支付订单",
+            "我的订单",
+            "推荐一款通勤降噪耳机"
+          ]
+        }
+      },
+      {
+        "event": "message_done",
+        "data": {
+          "run_id": "<run_id>",
+          "status": "completed"
+        }
+      }
+    ]
+  }
+}

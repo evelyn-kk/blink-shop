@@ -12,6 +12,8 @@ import (
 	"github.com/evelyn-kk/blink-shop/backend/src/ingest"
 	"github.com/evelyn-kk/blink-shop/backend/src/objectstore"
 	"github.com/evelyn-kk/blink-shop/backend/src/rag"
+	"github.com/evelyn-kk/blink-shop/backend/src/risk"
+	"github.com/evelyn-kk/blink-shop/backend/src/shop"
 	"github.com/evelyn-kk/blink-shop/backend/src/store"
 )
 
@@ -48,8 +50,10 @@ type Options struct {
 	Now func() time.Time
 	// PaymentTimeout 是下单后的支付期限，0 表示 DefaultPaymentTimeout（30 分钟）。
 	PaymentTimeout time.Duration
-	// AgentRunner 执行导购运行；nil 表示 7.1 的占位运行（7.2 接入规则规划和工具）。测试可替换。
+	// AgentRunner 执行导购运行；nil 表示默认的规则运行器（agent.RuleRunner：风险词检查、规则规划、工具白名单）。测试可替换。
 	AgentRunner agent.Runner
+	// RiskWords 返回当前生效的导购风险词（configcenter.RiskBlockedWords）；nil 表示用 risk.blocked_words 的默认词表。
+	RiskWords func(ctx context.Context) []string
 	// AgentRunTimeout 是一次运行的最长时间，0 表示 DefaultAgentRunTimeout。
 	AgentRunTimeout time.Duration
 	// SSEHeartbeat 是流式响应的心跳间隔，0 表示 DefaultSSEHeartbeat。
@@ -106,8 +110,19 @@ func NewServer(opts Options) *Server {
 	if s.now == nil {
 		s.now = time.Now
 	}
+	if s.store == nil {
+		panic("httpapi: Options.Store is required")
+	}
+	if s.logger == nil {
+		s.logger = slog.New(slog.DiscardHandler)
+	}
 	if s.runner == nil {
-		s.runner = agent.PlaceholderRunner{ChunkDelay: 60 * time.Millisecond}
+		words := opts.RiskWords
+		if words == nil {
+			words = func(context.Context) []string { return risk.Split(configcenter.KeyRiskBlockedWords.Default) }
+		}
+		s.runner = agent.NewRuleRunner(agent.Deps{Store: s.store, Shop: s.shop(), Retriever: rag.NewRetriever(s.store, opts.VectorIndex, s.logger),
+			Risk: risk.WordList{Words: words}, Logger: s.logger, Now: func() time.Time { return s.now() }})
 	}
 	if s.runTimeout <= 0 {
 		s.runTimeout = DefaultAgentRunTimeout
@@ -118,12 +133,6 @@ func NewServer(opts Options) *Server {
 	if s.paymentTimeout <= 0 {
 		s.paymentTimeout = DefaultPaymentTimeout
 	}
-	if s.store == nil {
-		panic("httpapi: Options.Store is required")
-	}
-	if s.logger == nil {
-		s.logger = slog.New(slog.DiscardHandler)
-	}
 	fetcher := opts.Fetcher
 	if fetcher == nil {
 		fetcher = ingest.NewFetcher(ingest.FetcherOptions{})
@@ -132,6 +141,10 @@ func NewServer(opts Options) *Server {
 	s.routes()
 	return s
 }
+
+// shop 返回购物车、结算、订单的业务层（与导购 Agent 的工具共用同一套规则）。每次按当前的 Store 和时钟构造，
+// 测试替换 Store 或时钟后立即生效。
+func (s *Server) shop() *shop.Service { return shop.New(s.store, s.now, s.paymentTimeout) }
 
 // routes 注册全部路由。访问规则含义见 auth.go 的 access；RBAC 矩阵见 backend/README.md。
 func (s *Server) routes() {

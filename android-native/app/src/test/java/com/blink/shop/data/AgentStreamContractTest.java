@@ -92,12 +92,17 @@ public class AgentStreamContractTest {
         assertEquals("message_start", r.events.get(0).event);
         assertEquals("message_done", r.events.get(r.events.size() - 1).event);
         StringBuilder text = new StringBuilder();
+        boolean productList = false;
         for (SseParser.Event e : r.events) {
             if ("text_delta".equals(e.event)) {
                 text.append(new JSONObject(e.data).getString("delta"));
+            } else if ("block".equals(e.event)) {
+                productList |= "product_list".equals(new JSONObject(e.data).getJSONObject("block").getString("type"));
             }
         }
-        assertTrue(text.toString().startsWith("你好，我是 Blink 导购助手。"));
+        // 规则运行器的回答只用工具返回的商品：正文提到推荐的商品，并带 product_list 块
+        assertTrue(text.toString().contains("Blink Air 降噪耳机"));
+        assertTrue(productList);
 
         RecordedRequest req = server.takeRequest();
         assertEquals("POST", req.getMethod());
