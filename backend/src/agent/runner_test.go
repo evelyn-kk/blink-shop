@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/domain"
 	"github.com/evelyn-kk/blink-shop/backend/src/seed"
@@ -374,9 +376,25 @@ func TestCouponAndReviewFlows(t *testing.T) {
 	if containsStr(r.toolCalls(), ToolCreateReview) || !strings.Contains(r.text.String(), "打几星") {
 		t.Fatalf("ask rating: %v %q", r.toolCalls(), r.text.String())
 	}
-	r = e.run(t, seed.UserID, sid2, "给 Nova 9 打四星，评价：老机器还能用")
+	e.logs.Reset()
+	r = e.run(t, seed.UserID, sid2, "给 Nova 9 打四星，评价：老机器还能用，联系我 138-0000-0000")
 	if !containsStr(r.toolCalls(), ToolCreateReview) || !strings.Contains(r.text.String(), "已为 Blink Nova 9（停产） 发布 4 星评价") {
 		t.Fatalf("create review: %v %q", r.toolCalls(), r.text.String())
+	}
+	// REV-018：评价正文（少于 80 字）不进任何轨迹元数据，也不进日志；轨迹仍保留订单项 ID、评分和正文长度
+	for _, tr := range r.traces {
+		if raw := fmt.Sprint(tr.Meta); strings.Contains(raw, "老机器") || strings.Contains(raw, "138-0000") {
+			t.Fatalf("trace %s.%s leaks review text: %v", tr.Stage, tr.Type, tr.Meta)
+		}
+		if tr.Stage == "tool" && tr.Type == ToolCreateReview {
+			args := tr.Meta["args"].(map[string]any)
+			if c, _ := args["content"].(map[string]any); c["redacted"] != true || c["runes"] != utf8.RuneCountInString("老机器还能用，联系我 138-0000-0000") || args["rating"] != 4 || args["order_item_id"] != "o_seed_completed_item2" {
+				t.Fatalf("create_review trace args: %v", args)
+			}
+		}
+	}
+	if logs := e.logs.String(); strings.Contains(logs, "老机器") || strings.Contains(logs, "138-0000") || !strings.Contains(logs, `"tool":"create_review"`) {
+		t.Fatalf("logs leak review text: %s", logs)
 	}
 	r = e.run(t, seed.UserID, sid2, "给 Nova 9 打四星，评价：再评一次")
 	if containsStr(r.toolCalls(), ToolCreateReview) || !strings.Contains(r.text.String(), "没有找到还能评价的商品") {

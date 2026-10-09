@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/domain"
 	"github.com/evelyn-kk/blink-shop/backend/src/seed"
@@ -314,6 +316,49 @@ func TestReviewTools(t *testing.T) {
 		t.Fatalf("create: %+v", got)
 	}
 	e.mustFail(t, me, ToolCreateReview, base, "review_exists")
+}
+
+// TestPrivateArgsRedacted（REV-018）：评价正文、标签和取消原因不进审计日志；轨迹用的 Sanitize 同样只留长度。
+func TestPrivateArgsRedacted(t *testing.T) {
+	e := newEnv(t)
+	me := e.tc(seed.UserID, IntentReview)
+	content, tag := "联系我 138-0000-0000，住朝阳区某小区 3 号楼", "私密标签X"
+	args := map[string]any{"order_id": "o_seed_completed", "order_item_id": "o_seed_completed_item2", "rating": float64(5), "content": content, "tags": []any{tag}}
+	got := e.mustOK(t, me, ToolCreateReview, args).(shop.Review)
+	if got.Content != content || len(got.Tags) != 1 || got.Tags[0] != tag {
+		t.Fatalf("review itself must keep the text: %+v", got)
+	}
+	logs := e.logs.String()
+	if !strings.Contains(logs, `"tool":"create_review"`) || strings.Contains(logs, content) || strings.Contains(logs, tag) || strings.Contains(logs, "138-0000") {
+		t.Fatalf("audit leaked review text: %s", logs)
+	}
+	if !strings.Contains(logs, fmt.Sprintf(`"content":{"redacted":true,"runes":%d}`, utf8.RuneCountInString(content))) || !strings.Contains(logs, `"tags":{"items":1,"redacted":true}`) || !strings.Contains(logs, `"order_item_id":"o_seed_completed_item2"`) || !strings.Contains(logs, `"rating":5`) {
+		t.Fatalf("audit should keep ids, rating and lengths: %s", logs)
+	}
+	san := toJSONMap(e.reg.Sanitize(ToolCreateReview, args))
+	if c, _ := san["content"].(map[string]any); c["redacted"] != true || c["runes"] != float64(utf8.RuneCountInString(content)) || san["rating"] != float64(5) {
+		t.Fatalf("sanitize: %v", san)
+	}
+	reason := "搬家了不要了，电话 139-0000-0000"
+	san = toJSONMap(e.reg.Sanitize(ToolCancelOrder, map[string]any{"order_id": "o_1", "reason": reason}))
+	if r, _ := san["reason"].(map[string]any); r["redacted"] != true || strings.Contains(fmt.Sprint(san), "139") {
+		t.Fatalf("cancel reason: %v", san)
+	}
+	// 未标记的参数仍按通用规则处理；未知工具只做通用处理
+	san = e.reg.Sanitize(ToolSearchProducts, map[string]any{"query": "耳机", "exclude": []any{"a"}})
+	if san["query"] != "耳机" || san["exclude"] != "[1 items]" {
+		t.Fatalf("generic: %v", san)
+	}
+	if san = e.reg.Sanitize("nope", map[string]any{"x": strings.Repeat("长", 100)}); utf8.RuneCountInString(san["x"].(string)) != 81 {
+		t.Fatalf("unknown tool: %v", san)
+	}
+	for _, tool := range e.reg.Tools() {
+		for _, p := range tool.Private {
+			if _, ok := tool.Schema.Properties[p]; !ok {
+				t.Fatalf("%s: private field %s not in schema", tool.Name, p)
+			}
+		}
+	}
 }
 
 func with(m map[string]any, k string, v any) map[string]any {

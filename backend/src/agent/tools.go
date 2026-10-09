@@ -96,10 +96,12 @@ type Observation struct {
 }
 
 // Tool 是一个可调用的能力。Write 为 true 表示会改变数据（审计记录）。
+// Private 列出不得留存的自由文本参数（评价正文、取消原因等）：写轨迹和审计时只记长度，不记内容也不记可逆片段。
 type Tool struct {
 	Name        string
 	Description string
 	Write       bool
+	Private     []string
 	Schema      *Schema
 	Run         func(ctx context.Context, tc *ToolContext, args map[string]any) (any, error)
 }
@@ -212,7 +214,7 @@ func (r *Registry) call(ctx context.Context, tc *ToolContext, name string, args 
 	}
 	if t.Write {
 		r.deps.Logger.InfoContext(ctx, "audit", "action", "agent.tool", "tool", name, "account_id", tc.AccountID, "run_id", tc.RunID,
-			"session_id", tc.SessionID, "args", SanitizeArgs(args))
+			"session_id", tc.SessionID, "args", r.Sanitize(name, args))
 	}
 	return Observation{OK: true, Data: data}
 }
@@ -232,7 +234,43 @@ func (r *Registry) failure(ctx context.Context, tc *ToolContext, t *Tool, args m
 	return Observation{Code: CodeInternal, Message: "服务暂时不可用，请稍后再试"}
 }
 
+// Sanitize 返回工具 name 可写入审计和轨迹的参数：先按工具的 Private 列表剔除自由文本（只留长度），再做通用处理（SanitizeArgs）。
+// 未注册的工具只做通用处理。
+func (r *Registry) Sanitize(name string, args map[string]any) map[string]any {
+	t, ok := r.tools[name]
+	if !ok {
+		return SanitizeArgs(args)
+	}
+	return SanitizeArgs(redact(args, t.Private))
+}
+
+// redact 把 private 列出的参数替换成不含内容的描述：字符串记 rune 数，数组记项数，其他类型记类型名。
+func redact(args map[string]any, private []string) map[string]any {
+	if len(private) == 0 {
+		return args
+	}
+	out := make(map[string]any, len(args))
+	for k, v := range args {
+		out[k] = v
+		if !containsStr(private, k) || v == nil {
+			continue
+		}
+		switch x := v.(type) {
+		case string:
+			out[k] = map[string]any{"redacted": true, "runes": utf8.RuneCountInString(x)}
+		case []any:
+			out[k] = map[string]any{"redacted": true, "items": len(x)}
+		case []string:
+			out[k] = map[string]any{"redacted": true, "items": len(x)}
+		default:
+			out[k] = map[string]any{"redacted": true}
+		}
+	}
+	return out
+}
+
 // SanitizeArgs 返回可写入审计和轨迹的参数：字符串截断到 80 个字，数组只保留长度，避免把长文本写进日志。
+// 这只是防止日志膨胀，不是脱敏；不得留存的字段用工具的 Private 列表剔除（见 Registry.Sanitize）。
 func SanitizeArgs(args map[string]any) map[string]any {
 	out := make(map[string]any, len(args))
 	for k, v := range args {
@@ -265,7 +303,9 @@ func (r *Registry) ExportTools() []map[string]any {
 	for _, t := range r.Tools() {
 		intents := append([]string{}, intentsOf[t.Name]...)
 		sort.Strings(intents)
-		out = append(out, map[string]any{"name": t.Name, "description": t.Description, "write": t.Write,
+		private := append([]string{}, t.Private...)
+		sort.Strings(private)
+		out = append(out, map[string]any{"name": t.Name, "description": t.Description, "write": t.Write, "private": private,
 			"parameters": t.Schema.Export(), "intents": intents})
 	}
 	return out

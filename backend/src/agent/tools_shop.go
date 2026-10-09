@@ -515,7 +515,7 @@ func (r *Registry) shopTools() []*Tool {
 			Run: func(ctx context.Context, tc *ToolContext, args map[string]any) (any, error) {
 				return sh.PayOrder(ctx, tc.AccountID, argString(args, "order_id"), argString(args, "method"))
 			}},
-		{Name: ToolCancelOrder, Write: true, Description: "取消当前用户的待支付订单（回补库存、退券）。",
+		{Name: ToolCancelOrder, Write: true, Private: []string{"reason"}, Description: "取消当前用户的待支付订单（回补库存、退券）。",
 			Schema: object([]string{"order_id"}, map[string]*Schema{
 				"order_id": strLen("订单 ID", 1, 64),
 				"reason":   strLen("取消原因", 0, shop.MaxCancelReasonRunes),
@@ -571,7 +571,7 @@ func (r *Registry) shopTools() []*Tool {
 			Run: func(ctx context.Context, _ *ToolContext, args map[string]any) (any, error) {
 				return r.listReviews(ctx, args)
 			}},
-		{Name: ToolCreateReview, Write: true, Description: "评价当前用户已完成订单里的某件商品，每件只能评价一次。",
+		{Name: ToolCreateReview, Write: true, Private: []string{"content", "tags"}, Description: "评价当前用户已完成订单里的某件商品，每件只能评价一次。",
 			Schema: object([]string{"order_id", "order_item_id", "rating", "content"}, map[string]*Schema{
 				"order_id":      strLen("订单 ID", 1, 64),
 				"order_item_id": strLen("订单项 ID", 1, 64),

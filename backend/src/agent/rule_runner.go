@@ -176,7 +176,7 @@ func (s *session) call(ctx context.Context, title, tool string, args map[string]
 	obs := s.r.reg.Call(ctx, s.tc, tool, args)
 	s.out.Thinking(Step{ID: stepID, Title: title, Status: StepDone})
 	status := "ok"
-	meta := map[string]any{"args": SanitizeArgs(args)}
+	meta := map[string]any{"args": s.r.reg.Sanitize(tool, args)}
 	if !obs.OK {
 		status = "error"
 		meta["code"], meta["message"] = obs.Code, obs.Message
