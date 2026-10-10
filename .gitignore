@@ -20,3 +20,6 @@ quality/reports/
 .ai/tech/**/*.png
 .ai/tech/**/*.webp
 .DS_Store
+
+# Python 脚本缓存（android-native/e2e）
+__pycache__/

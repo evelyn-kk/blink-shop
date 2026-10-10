@@ -25,6 +25,7 @@ import java.util.List;
 import com.blink.shop.R;
 import com.blink.shop.account.AccountActivity;
 import com.blink.shop.account.LoginActivity;
+import com.blink.shop.chat.ChatActivity;
 import com.blink.shop.model.Cart;
 import com.blink.shop.model.Category;
 import com.blink.shop.model.PageResult;
@@ -139,6 +140,8 @@ public final class ProductListActivity extends BaseActivity implements ProductAd
         });
         findViewById(R.id.search_button).setOnClickListener(v -> submitSearch());
         accountButton.setOnClickListener(v -> openAccount());
+        // AI 导购需要登录；未登录时聊天页会转到登录页
+        findViewById(R.id.chat_button).setOnClickListener(v -> startActivity(ChatActivity.intent(this, "")));
         cartButton = new CartButton(this, findViewById(R.id.cart_button));
 
         renderAccountButton(app.sessions().current());

@@ -17,8 +17,9 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 | `ui` | 页面基类、后台调用、图片加载、加载/空/出错占位 |
 | `catalog` / `account` / `settings` | 商品列表与详情、登录注册与账户、设置与帮助、调试版接口设置 |
 | `cart` / `order` / `coupon` | 购物车与确认订单、支付/订单列表/详情/评价、领券与我的券 |
+| `chat` | AI 导购：`ChatController`（纯 Java 的发送/接收/停止/重试/恢复流程）、`ChatTurn`（一轮的状态）、`MarkdownLite`（Markdown 子集解析，纯 Java）、`MarkdownView`、`BlockViews`（结构化块卡片）、`ChatAdapter`、`ChatHistoryAdapter`、`ChatActivity` |
 
-单测里的 `ShopApiContractTest`、`TradeContractTest` 直接读取 `backend/fixtures/http` 的接口样例：检查 App 发出的请求与样例一致、样例响应能正确解析。
+单测里的 `ShopApiContractTest`、`TradeContractTest`、`ChatApiContractTest`、`AgentStreamContractTest` 直接读取 `backend/fixtures/http` 的接口样例：检查 App 发出的请求与样例一致、样例响应能正确解析。
 
 ## 服务地址
 
@@ -64,6 +65,17 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - 支付页按订单 ID 重新查询状态，App 被杀后重进不会重复支付；支付失败（含断网）后以服务端状态为准，未付的可以重新支付。
 - 订单列表和详情每次回到页面都重新查询；取消、确认收货需要二次确认；评价内容随时存为本地草稿。
 - 端到端脚本见 `e2e/README.md`。
+
+## AI 导购聊天
+
+- **分层**：`ChatController` 不依赖 Android，持有会话 ID 和每一轮（`ChatTurn`）的状态，阻塞的接口调用放到后台执行器、SSE 回调先切回主线程再处理；`ChatActivity` 只渲染和转发操作。单测用假后端逐个推事件，也用 MockWebServer + 真实 `SseClient` 跑传输层。
+- **发送与去重**：每条消息生成一个 `client_message_id`；正在生成、正在创建会话时再点发送不会发第二条。事件按 `run_id` 过滤，停止或切换会话后迟到的事件一律忽略（代号 generation）。
+- **流式渲染**：`thinking` 步骤面板（可展开）、`text_delta` 用 `MarkdownLite` 解析后就地刷新（标题、列表、引用、代码、粗斜体、行内代码、http(s) 链接；不完整或不认识的写法按原文显示，不会丢字也不会崩）、`block` 卡片只追加（商品卡点开详情、对比表、引用、跳转按钮、购物车、订单卡点开详情、券、活动、评价）、结束后显示追问 chip，点一下即发送。
+- **停止**：按钮在生成中变为“停止”：断开连接、本地标为“已停止生成”，并调用 `POST /agent/runs/{id}:cancel`；已生成的内容保留，可“重新提问”。
+- **失败与重试**：断网、连不上、连接中断、提前关闭按传输错误处理，“重试”复用同一个 `client_message_id`（服务端幂等：已有结果就重放，还在跑就等它结束），重放前清空本地已收到的半截内容；服务端 `error` 事件（超时、重启中断）则“重试”用新的 ID 重新提问。
+- **后台与恢复**：进入后台只停止刷新界面，流继续接收，回到前台一次补齐。进程被系统回收后按保存的会话 ID 读取会话详情重建每一轮（含卡片和追问）；最后一轮还在运行时用同一个 `client_message_id` 重新连接等服务端重放，不会重复发送。
+- **历史抽屉**：列表（置顶在前）、搜索、置顶/取消、重命名、删除、新对话；没有消息的会话不会出现在列表里，服务端会话等第一条消息发送时才创建。
+- 端到端脚本 `e2e/chat_flow.py`（见 `e2e/README.md`）。
 
 ## 旋转与后台
 

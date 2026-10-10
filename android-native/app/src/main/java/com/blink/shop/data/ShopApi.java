@@ -12,6 +12,7 @@ import org.json.JSONObject;
 import com.blink.shop.model.Account;
 import com.blink.shop.model.Cart;
 import com.blink.shop.model.Category;
+import com.blink.shop.model.ChatSession;
 import com.blink.shop.model.Coupon;
 import com.blink.shop.model.DiscountPreview;
 import com.blink.shop.model.Order;
@@ -30,6 +31,7 @@ import okhttp3.RequestBody;
 public final class ShopApi {
 
     public static final int PRODUCT_PAGE_SIZE = 20;
+    static final int CHAT_SESSION_PAGE_SIZE = 20;
 
     private final ApiClient api;
 
@@ -265,7 +267,45 @@ public final class ShopApi {
         return api.post("/orders/" + enc(orderId) + "/items/" + enc(orderItemId) + ":review", body).optString("review_id", "");
     }
 
-    // ---------- 导购（7.1 基础；聊天界面在 7.3） ----------
+    // ---------- 导购 ----------
+
+    /** 会话列表：置顶在前、按最近消息倒序；keyword 为空表示全部。只列有消息的会话。 */
+    public PageResult<ChatSession> chatSessions(String keyword, int page) throws ApiException {
+        StringBuilder path = new StringBuilder("/agent/sessions?page=").append(page).append("&page_size=").append(CHAT_SESSION_PAGE_SIZE);
+        if (keyword != null && !keyword.trim().isEmpty()) {
+            path.append("&keyword=").append(enc(keyword.trim()));
+        }
+        return PageResult.fromJson(api.get(path.toString()), ChatSession::fromJson);
+    }
+
+    /** 会话详情：{session, messages:[{message_id, client_message_id, content, attachments, created_at, run}]}。 */
+    public JSONObject chatSessionDetail(String sessionId) throws ApiException {
+        return api.get("/agent/sessions/" + enc(sessionId));
+    }
+
+    public ChatSession renameChatSession(String sessionId, String title) throws ApiException {
+        return ChatSession.fromJson(api.patch("/agent/sessions/" + enc(sessionId), obj("title", title)));
+    }
+
+    /** 显式设置置顶状态（不是切换）。 */
+    public ChatSession pinChatSession(String sessionId, boolean pinned) throws ApiException {
+        JSONObject body = new JSONObject();
+        try {
+            body.put("pinned", pinned);
+        } catch (JSONException e) {
+            throw new IllegalStateException(e);
+        }
+        return ChatSession.fromJson(api.post("/agent/sessions/" + enc(sessionId) + ":pin", body));
+    }
+
+    public void deleteChatSession(String sessionId) throws ApiException {
+        api.delete("/agent/sessions/" + enc(sessionId));
+    }
+
+    /** 停止一次运行。已经结束的运行服务端返回 409 run_finished；已取消的幂等。 */
+    public void cancelAgentRun(String runId) throws ApiException {
+        api.post("/agent/runs/" + enc(runId) + ":cancel", new JSONObject());
+    }
 
     /** 新建导购会话，返回 session_id。 */
     public String createChatSession() throws ApiException {

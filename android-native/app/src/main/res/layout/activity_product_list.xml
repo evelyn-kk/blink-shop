@@ -12,6 +12,12 @@
             android:text="@string/app_name" />
 
         <TextView
+            android:id="@+id/chat_button"
+            style="@style/TopBarButton"
+            android:contentDescription="AI 导购"
+            android:text="导购" />
+
+        <TextView
             android:id="@+id/cart_button"
             style="@style/TopBarButton"
             android:text="购物车" />

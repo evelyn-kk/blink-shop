@@ -6,12 +6,12 @@ import android.widget.TextView;
 import com.blink.shop.model.Product;
 
 /** 库存状态：文字为主，颜色只是辅助。 */
-final class StockLabels {
+public final class StockLabels {
 
     private StockLabels() {
     }
 
-    static void apply(TextView view, String status) {
+    public static void apply(TextView view, String status) {
         String label = Product.stockLabel(status);
         view.setText(label);
         view.setVisibility(label.isEmpty() ? View.GONE : View.VISIBLE);
