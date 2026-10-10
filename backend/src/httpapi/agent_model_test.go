@@ -72,7 +72,7 @@ func TestAgentModelThroughHTTP(t *testing.T) {
 	if got := strings.Join(stages, ","); got != "run.start.ok,risk.check.ok,planner.model.ok,planner.rule.ok,react.step.1.ok,tool.search_products.ok,react.step.2.ok,answer.model.ok,answer.rule.ok,run.end.completed" {
 		t.Fatalf("trace: %s", got)
 	}
-	if models["planner.model"] != "qwen-turbo" || models["react.step.1"] != "qwen-plus" || models["answer.model"] != "qwen-plus" {
+	if models["planner.model"] != "deepseek-chat" || models["react.step.1"] != "deepseek-chat" || models["answer.model"] != "deepseek-chat" {
 		t.Fatalf("model field: %v", models)
 	}
 	if mock.Count() != 3 {

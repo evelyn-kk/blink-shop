@@ -25,7 +25,7 @@ type SettingsSource func(ctx context.Context) ModelSettings
 
 // DefaultModelSettings 是没有配置来源时的设置：模型都打开（是否真用取决于有没有 LLM）。
 func DefaultModelSettings() ModelSettings {
-	return ModelSettings{PlannerEnabled: true, AgentEnabled: true, PlannerModel: "qwen-turbo", AgentModel: "qwen-plus",
+	return ModelSettings{PlannerEnabled: true, AgentEnabled: true, PlannerModel: "deepseek-chat", AgentModel: "deepseek-chat",
 		Timeout: 30 * time.Second, MaxToolRounds: 6}
 }
 

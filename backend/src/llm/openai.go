@@ -20,7 +20,7 @@ const (
 	maxErrorBody   = 4 << 10
 )
 
-// Client 调用 OpenAI 兼容的 /chat/completions（DashScope、OpenAI、vLLM 等）。
+// Client 调用 OpenAI 兼容的 /chat/completions（DeepSeek、DashScope、OpenAI、vLLM 等）。
 type Client struct {
 	opts Options
 	http *http.Client

@@ -569,10 +569,10 @@ boolean / array，required、additionalProperties=false、enum、minimum/maximum
 | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | — | `minioadmin` | 密钥类 |
 | `MILVUS_TOKEN` | — | 空 | 密钥类 |
 | `AI_API_KEY` | — | 空 | 密钥类。为空时不创建模型客户端，导购完全走规则 |
-| `AI_BASE_URL` | — | `https://dashscope.aliyuncs.com/compatible-mode/v1` | OpenAI 兼容的模型服务地址（`/chat/completions`） |
+| `AI_BASE_URL` | — | `https://api.deepseek.com/v1` | OpenAI 兼容的模型服务地址（`/chat/completions`）；换别家（如千问 `https://dashscope.aliyuncs.com/compatible-mode/v1`）改这里和模型名即可 |
 | `AI_PLANNER_ENABLED` | `ai.planner_enabled` | `true` | 用小模型规划意图（失败回退规则） |
 | `AI_AGENT_ENABLED` | `ai.agent_enabled` | `true` | 用大模型做工具循环和最终回答（关闭或失败都回到规则回答） |
-| `AI_PLANNER_MODEL` / `AI_AGENT_MODEL` | `ai.planner_model` / `ai.agent_model` | `qwen-turbo` / `qwen-plus` | 小模型 / 大模型名 |
+| `AI_PLANNER_MODEL` / `AI_AGENT_MODEL` | `ai.planner_model` / `ai.agent_model` | `deepseek-chat` / `deepseek-chat` | 小模型 / 大模型名 |
 | `AI_TIMEOUT` | `ai.timeout` | `30s` | 单次模型调用超时 |
 | `AI_MAX_RETRIES` | `ai.max_retries` | `2` | 429 / 5xx / 网络错误的重试次数（0–5；客户端在启动时读取） |
 | `AI_MAX_TOOL_ROUNDS` | `ai.max_tool_rounds` | `6` | 一次回答最多的工具循环轮数（1–12） |

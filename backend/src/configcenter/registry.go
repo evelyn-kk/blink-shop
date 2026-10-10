@@ -59,9 +59,9 @@ var (
 
 // 模型与导购 Agent。密钥（ai.api_key）和服务地址只在启动时读取；其余每次运行读取，可在运行中开关和切换模型。
 var (
-	KeyAIBaseURL        = Key{Name: "ai.base_url", Env: "AI_BASE_URL", Default: "https://dashscope.aliyuncs.com/compatible-mode/v1"}
-	KeyAIPlannerModel   = Key{Name: "ai.planner_model", Env: "AI_PLANNER_MODEL", Default: "qwen-turbo"}
-	KeyAIAgentModel     = Key{Name: "ai.agent_model", Env: "AI_AGENT_MODEL", Default: "qwen-plus"}
+	KeyAIBaseURL        = Key{Name: "ai.base_url", Env: "AI_BASE_URL", Default: "https://api.deepseek.com/v1"}
+	KeyAIPlannerModel   = Key{Name: "ai.planner_model", Env: "AI_PLANNER_MODEL", Default: "deepseek-chat"}
+	KeyAIAgentModel     = Key{Name: "ai.agent_model", Env: "AI_AGENT_MODEL", Default: "deepseek-chat"}
 	KeyAIPlannerEnabled = Key{Name: "ai.planner_enabled", Env: "AI_PLANNER_ENABLED", Default: "true"}
 	KeyAIAgentEnabled   = Key{Name: "ai.agent_enabled", Env: "AI_AGENT_ENABLED", Default: "true"}
 	KeyAITimeout        = Key{Name: "ai.timeout", Env: "AI_TIMEOUT", Default: "30s"}
