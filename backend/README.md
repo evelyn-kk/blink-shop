@@ -587,7 +587,7 @@ boolean / array，required、additionalProperties=false、enum、minimum/maximum
 - `CORS_ALLOWED_ORIGINS` 为空或包含 `*`；
 - `MINIO_ACCESS_KEY` 或 `MINIO_SECRET_KEY` 为空或 `minioadmin`；
 - `MILVUS_TOKEN` 为空或 `root:Milvus`；
-- `AI_API_KEY` 为空或示例值（`changeme`、`your-api-key`、`sk-xxx`）；
+- `AI_API_KEY` 非空但是示例值（`changeme`、`your-api-key`、`sk-xxx`）；为空允许，表示不接模型，导购只走规则；
 - `TRUST_ALL_PROXIES` 开启。
 
 错误信息只列出配置名，不回显配置值。

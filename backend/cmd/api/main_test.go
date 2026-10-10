@@ -171,3 +171,47 @@ func get(t *testing.T, url string) int {
 	defer resp.Body.Close()
 	return resp.StatusCode
 }
+
+// 生产环境没有 AI_API_KEY 也能启动：模型是可选的，导购走规则；非空的示例值仍被拒绝。
+func TestRunProductionWithoutAIKeyStartsRulesOnly(t *testing.T) {
+	addr := freeAddr(t)
+	env := map[string]string{
+		"APP_ENV":              "production",
+		"API_ADDR":             addr,
+		"MYSQL_DSN":            "blink_app:S3cure-Long-Pass@tcp(" + freeAddr(t) + ")/blink_shop?timeout=200ms",
+		"CORS_ALLOWED_ORIGINS": "https://admin.blink.example",
+		"MINIO_ACCESS_KEY":     "blink-prod-access",
+		"MINIO_SECRET_KEY":     "blink-prod-secret-value",
+		"MILVUS_TOKEN":         "blink:prod-token",
+		"AI_API_KEY":           "",
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	logs := &syncBuffer{}
+	done := make(chan error, 1)
+	go func() { done <- run(ctx, envOf(env), logs) }()
+	base := "http://" + addr + "/api/v1"
+	waitUntilUp(t, base+"/health")
+	if code := get(t, base+"/health"); code != http.StatusOK {
+		t.Fatalf("/health = %d, want 200", code)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("run returned %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not shut down")
+	}
+	out := logs.String()
+	if !strings.Contains(out, "AI_API_KEY not set, agent runs on rules only") || strings.Contains(out, "llm configured") {
+		t.Fatalf("expected rules-only startup log: %s", out)
+	}
+	// 示例值：启动前拒绝
+	env["AI_API_KEY"] = "sk-xxx"
+	env["API_ADDR"] = freeAddr(t)
+	err := run(context.Background(), envOf(env), io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "AI_API_KEY") {
+		t.Fatalf("placeholder key should be rejected: %v", err)
+	}
+}

@@ -163,7 +163,11 @@ func TestValidateProduction(t *testing.T) {
 		{name: "wildcard cors", override: map[string]string{"CORS_ALLOWED_ORIGINS": "https://admin.blink.example,*"}, wantErr: []string{"CORS_ALLOWED_ORIGINS"}},
 		{name: "default minio", override: map[string]string{"MINIO_SECRET_KEY": "minioadmin"}, wantErr: []string{"MINIO"}},
 		{name: "default milvus", override: map[string]string{"MILVUS_TOKEN": "root:Milvus"}, wantErr: []string{"MILVUS_TOKEN"}},
+		{name: "no ai key is allowed (rules only)", override: map[string]string{"AI_API_KEY": ""}},
+		{name: "blank ai key is allowed", override: map[string]string{"AI_API_KEY": "   "}},
 		{name: "placeholder ai key", override: map[string]string{"AI_API_KEY": "ChangeMe"}, wantErr: []string{"AI_API_KEY"}},
+		{name: "placeholder ai key 2", override: map[string]string{"AI_API_KEY": "your-api-key"}, wantErr: []string{"AI_API_KEY"}},
+		{name: "placeholder ai key 3", override: map[string]string{"AI_API_KEY": "sk-xxx"}, wantErr: []string{"AI_API_KEY"}},
 		{name: "trust all proxies", override: map[string]string{"TRUST_ALL_PROXIES": "true"}, wantErr: []string{"TRUST_ALL_PROXIES"}},
 	}
 	for _, tt := range tests {
@@ -207,10 +211,14 @@ func TestValidateProductionReportsEveryProblem(t *testing.T) {
 	if err == nil {
 		t.Fatal("production with all defaults must fail")
 	}
-	for _, want := range []string{"MYSQL_DSN", "CORS_ALLOWED_ORIGINS", "MINIO", "MILVUS_TOKEN", "AI_API_KEY"} {
+	for _, want := range []string{"MYSQL_DSN", "CORS_ALLOWED_ORIGINS", "MINIO", "MILVUS_TOKEN"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %s: %v", want, err)
 		}
+	}
+	// 没有 AI_API_KEY 不是问题：模型可选，导购走规则
+	if strings.Contains(err.Error(), "AI_API_KEY") {
+		t.Errorf("empty AI_API_KEY must not be reported: %v", err)
 	}
 	// 错误信息不能带出密钥原文
 	if strings.Contains(err.Error(), "blink_dev_password") || strings.Contains(err.Error(), "minioadmin") {

@@ -173,7 +173,8 @@ var (
 	devDBPasswords  = []string{"", "root", "password", "123456", "blink_dev_password", "blink_dev_root"}
 	devMinIOValues  = []string{"", "minioadmin"}
 	devMilvusTokens = []string{"", "root:Milvus"}
-	devAIKeys       = []string{"", "changeme", "your-api-key", "sk-xxx"}
+	// 模型是可选的：AI_API_KEY 为空表示不接模型（导购走规则），生产允许；非空时不能是示例值。
+	devAIKeys = []string{"changeme", "your-api-key", "sk-xxx"}
 )
 
 // ValidateProduction 检查生产环境的危险配置；非生产环境直接通过。返回所有问题，而不是只报第一个。
@@ -196,8 +197,8 @@ func ValidateProduction(ctx context.Context, cfg Config, r *Resolver) error {
 	if contains(devMilvusTokens, cfg.MilvusToken) {
 		errs = append(errs, errors.New("MILVUS_TOKEN 不能为空或使用默认凭证"))
 	}
-	if contains(devAIKeys, strings.ToLower(cfg.AIAPIKey)) {
-		errs = append(errs, errors.New("AI_API_KEY 不能为空或使用示例值"))
+	if key := strings.ToLower(strings.TrimSpace(cfg.AIAPIKey)); key != "" && contains(devAIKeys, key) {
+		errs = append(errs, errors.New("AI_API_KEY 不能使用示例值（为空表示不接模型，导购走规则）"))
 	}
 	if trustAll, _ := parseBool(r.Get(ctx, KeyTrustAllProxies), false); trustAll {
 		errs = append(errs, errors.New("TRUST_ALL_PROXIES 不能在生产环境开启"))
