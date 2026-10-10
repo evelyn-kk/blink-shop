@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/evelyn-kk/blink-shop/backend/assets"
 	"github.com/evelyn-kk/blink-shop/backend/src/domain"
@@ -254,5 +255,43 @@ func TestSyncRechecksAfterWrite(t *testing.T) {
 		if id == "p_seed_mouse" {
 			t.Fatal("inactive product still indexed")
 		}
+	}
+}
+
+// 写入期间商品连续换了 6 次图（超过以前的 3 轮上限）后不再变：最终索引是最后一次的图。
+func TestSyncKeepsLastChangeAfterManyRounds(t *testing.T) {
+	old := RecheckDelay
+	RecheckDelay = func(int) time.Duration { return 0 }
+	t.Cleanup(func() { RecheckDelay = old })
+	ctx := context.Background()
+	e := newTestEnv(t)
+	imgs := []string{"/api/v1/assets/catalog/products/p_seed_lamp.png", "/api/v1/assets/catalog/products/p_seed_keyboard.png"}
+	hook := &replaceHook{MemoryIndex: e.index}
+	svc := New(imagevector.Local{}, hook, NewSource(nil), e.mem, nil, nil)
+	changes := 0
+	var next func()
+	next = func() {
+		if changes == 6 {
+			return
+		}
+		changes++
+		u := imgs[changes%2]
+		_, _ = e.mem.UpdateProduct(ctx, "p_seed_mouse", func(p *domain.Product) error { p.ImageURL, p.ImageURLs = u, []string{u}; return nil })
+		hook.fn = next
+	}
+	hook.fn = next
+	if _, err := svc.Sync(ctx, "p_seed_mouse"); err != nil {
+		t.Fatal(err)
+	}
+	want := imgs[6%2]
+	hits, _ := e.index.Search(ctx, make([]float32, (imagevector.Local{}).Dim()), 100)
+	var got []string
+	for _, h := range hits {
+		if h.ProductID == "p_seed_mouse" {
+			got = append(got, h.ImageURL)
+		}
+	}
+	if changes != 6 || len(got) != 1 || got[0] != want {
+		t.Fatalf("changes=%d images=%v want %s", changes, got, want)
 	}
 }

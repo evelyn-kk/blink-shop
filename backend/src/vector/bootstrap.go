@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/domain"
+	"github.com/evelyn-kk/blink-shop/backend/src/imagesearch"
 	"github.com/evelyn-kk/blink-shop/backend/src/rag"
 	"github.com/evelyn-kk/blink-shop/backend/src/store"
 )
@@ -95,12 +97,11 @@ func Bootstrap(ctx context.Context, st store.Store, k *KnowledgeIndex, p *Produc
 	return s, nil
 }
 
-const maxRecheckRounds = 3
-
-// recheckProduct 重新读取商品：索引内容（文本、分类、商家）没变就结束；变了按新内容重写，不可见了就删除，最多重做几轮。
+// recheckProduct 重新读取商品：索引内容（文本、分类、商家）没变就结束；变了按新内容重写，不可见了就删除。
+// 一直做到某一轮复查一致（没有轮数上限，多轮后退避，与 imagesearch.RecheckDelay 相同），ctx 取消时返回错误。
 func recheckProduct(ctx context.Context, st store.Store, p rag.ProductIndex, names map[string]string, written rag.IndexedProduct) error {
 	deleted := false
-	for round := 0; round < maxRecheckRounds; round++ {
+	for round := 1; ; round++ {
 		cur, err := st.GetVisibleProduct(ctx, written.ProductID)
 		switch {
 		case errors.Is(err, store.ErrNotFound):
@@ -111,18 +112,28 @@ func recheckProduct(ctx context.Context, st store.Store, p rag.ProductIndex, nam
 				return err
 			}
 			deleted = true
-			continue
 		case err != nil:
 			return err
+		default:
+			now := rag.IndexedProduct{ProductID: cur.ProductID, MerchantID: cur.MerchantID, CategoryID: cur.CategoryID, Text: rag.ProductText(cur, names[cur.CategoryID])}
+			if now == written && !deleted {
+				return nil
+			}
+			if err := p.UpsertProducts(ctx, []rag.IndexedProduct{now}); err != nil {
+				return err
+			}
+			written, deleted = now, false
 		}
-		now := rag.IndexedProduct{ProductID: cur.ProductID, MerchantID: cur.MerchantID, CategoryID: cur.CategoryID, Text: rag.ProductText(cur, names[cur.CategoryID])}
-		if now == written && !deleted {
-			return nil
-		}
-		if err := p.UpsertProducts(ctx, []rag.IndexedProduct{now}); err != nil {
+		if d := imagesearch.RecheckDelay(round); d > 0 {
+			t := time.NewTimer(d)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return ctx.Err()
+			case <-t.C:
+			}
+		} else if err := ctx.Err(); err != nil {
 			return err
 		}
-		written, deleted = now, false
 	}
-	return nil
 }

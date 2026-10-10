@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sort"
 	"sync"
@@ -54,9 +55,11 @@ func (g *gate) pass() {
 	g.mu.Unlock()
 }
 
+type passer interface{ pass() }
+
 // gatedTextIndex 是商品文本向量索引：记录每个商品最后写入的文本，写入前过 gate。
 type gatedTextIndex struct {
-	g    *gate
+	g    passer
 	mu   sync.Mutex
 	text map[string]string
 }
@@ -262,6 +265,101 @@ func TestVectorSyncStaleVisibleTaskAfterRemoval(t *testing.T) {
 			}
 			if got := imageURLs(t, e.images, e.id); len(got) != 0 {
 				t.Fatalf("image index still has removed product: %v", got)
+			}
+		})
+	}
+}
+
+// stepGate 让每一轮写入都停住，由测试逐轮放行（覆盖超过任意固定轮数的连续变更）。
+type stepGate struct {
+	mu      sync.Mutex
+	on      bool
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (g *stepGate) pass() {
+	g.mu.Lock()
+	on := g.on
+	g.mu.Unlock()
+	if on {
+		g.entered <- struct{}{}
+		<-g.release
+	}
+}
+
+func (g *stepGate) waitEntered(t *testing.T) {
+	t.Helper()
+	select {
+	case <-g.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("sync round never reached the index write")
+	}
+}
+
+// stop 关掉逐轮放行并放开当前停住的一轮。
+func (g *stepGate) stop() {
+	g.mu.Lock()
+	g.on = false
+	g.mu.Unlock()
+	g.release <- struct{}{}
+}
+
+// 每轮写入都停住，连续 8 次修改（超过以前的 5 轮上限）后不再修改：最终索引是最后一次修改，而不是倒数一次；
+// 最后一次是删除 / 下架时两个索引都没有这个商品。
+func TestVectorSyncKeepsLastChangeAfterManyRounds(t *testing.T) {
+	old := syncDelay
+	syncDelay = func(int) time.Duration { return 0 }
+	t.Cleanup(func() { syncDelay = old })
+	const updates = 8
+	for _, last := range []string{"update", "delete", "inactive"} {
+		t.Run(last, func(t *testing.T) {
+			e := newRaceEnv(t)
+			g := &stepGate{on: true, entered: make(chan struct{}), release: make(chan struct{})}
+			e.text.g = g
+			img := func(k int) string {
+				if k%2 == 0 {
+					return lampImg
+				}
+				return mouseImg
+			}
+			e.patch(t, "Blink 键盘 第1版", img(1))
+			for k := 2; k <= updates; k++ {
+				g.waitEntered(t) // 第 k-1 轮读到第 k-1 版后停住
+				if k == updates && last == "delete" {
+					expectStatus(t, e.ts.call(t, http.MethodDelete, merchantProducts+"/"+e.id, e.tok, nil), http.StatusOK, "")
+				} else if k == updates && last == "inactive" {
+					expectStatus(t, e.ts.call(t, http.MethodPatch, merchantProducts+"/"+e.id, e.tok, map[string]any{"status": "inactive"}), http.StatusOK, "")
+				} else {
+					e.patch(t, fmt.Sprintf("Blink 键盘 第%d版", k), img(k))
+				}
+				g.release <- struct{}{}
+			}
+			g.waitEntered(t) // 按最后一次修改写入的那一轮
+			g.stop()
+			e.ts.WaitVectorSync()
+
+			txt, ok := e.text.get(e.id)
+			urls := imageURLs(t, e.images, e.id)
+			if last != "update" {
+				if ok || len(urls) != 0 {
+					t.Fatalf("removed product still indexed: %q %v", txt, urls)
+				}
+				return
+			}
+			if !containsAll(txt, fmt.Sprintf("第%d版", updates)) {
+				t.Fatalf("text index = %q, want 第%d版", txt, updates)
+			}
+			if len(urls) != 1 || urls[0] != img(updates) {
+				t.Fatalf("image index = %v, want %s", urls, img(updates))
+			}
+			user := e.ts.login(t, seed.UserUsername, seed.DevPassword).Token
+			photo := e.ts.upload(t, user, productPhoto(t, "p_seed_lamp", "crop:0.9"))
+			res := decodeBody[searchImageResponse](t, e.ts.call(t, http.MethodPost, "/api/v1/search/image", user, map[string]any{"file_id": photo.FileID, "top_k": 10}))
+			for _, it := range res.Items {
+				if it.Product.ProductID == e.id && it.MatchedImageURL != img(updates) {
+					t.Fatalf("matched_image_url = %s", it.MatchedImageURL)
+				}
 			}
 		})
 	}

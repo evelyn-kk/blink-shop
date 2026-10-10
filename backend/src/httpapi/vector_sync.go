@@ -13,10 +13,21 @@ import (
 )
 
 const (
+	// vectorSyncTimeout 是一轮（读快照 → 写两个索引 → 复查）的时限；每轮重新计时。
 	vectorSyncTimeout = 20 * time.Second
-	// maxSyncRounds：商品在同步期间一直在变时，一个任务最多重做的轮数；超出后等下一次变更再触发。
-	maxSyncRounds = 5
+	// 一轮结束发现还要重做时的等待：前 syncFastRounds 轮立即重做，之后退避，最长 syncMaxBackoff。
+	syncFastRounds = 3
+	syncBackoff    = 100 * time.Millisecond
+	syncMaxBackoff = 2 * time.Second
 )
+
+// syncDelay 是第 round 轮结束后、下一轮开始前的等待时间（测试可调小）。
+var syncDelay = func(round int) time.Duration {
+	if round < syncFastRounds {
+		return 0
+	}
+	return min(syncBackoff<<(round-syncFastRounds), syncMaxBackoff)
+}
 
 // productSyncs 保证同一商品同时只有一个同步任务：任务进行中又收到同步请求时只记 dirty，
 // 当前一轮写完后再按 Store 的最新状态重做一轮。这样任务之间不会乱序覆盖，最后写入的总是最新快照。
@@ -54,42 +65,50 @@ func (s *Server) syncProductVectors(ids ...string) {
 
 // runProductSync 是一个商品的同步任务：读快照 → 写两个索引 → 再读一次；期间有新请求（dirty）或者
 // 内容指纹变了（例如另一个进程的 cmd/vectorindex 写过旧快照、或改动没经过本进程），就再做一轮。
+// 没有轮数上限：只要观察到索引与 Store 不一致就继续，直到某一轮写完复查确认一致才退出（多轮之后退避），
+// 不会把已经看到的最后一次变更丢在索引外。只有写入出错且期间没有新变更时才放弃（记日志，等下次变更或全量重建）。
 func (s *Server) runProductSync(id string) {
 	defer s.vectorSync.Done()
-	ctx, cancel := context.WithTimeout(context.Background(), vectorSyncTimeout)
-	defer cancel()
 	for round := 1; ; round++ {
 		s.syncs.mu.Lock()
 		s.syncs.running[id].dirty = false
 		s.syncs.mu.Unlock()
 
-		snap, err := s.indexSnapshot(ctx, id)
-		if err == nil {
-			err = s.applySnapshot(ctx, snap)
-		}
-		var again indexSnapshot
-		if err == nil {
-			again, err = s.indexSnapshot(ctx, id)
-		}
+		converged, err := s.syncRound(id)
 		if err != nil {
 			s.logger.Warn("product vector sync failed", "product_id", id, "round", round, "error", err)
 		}
 
 		s.syncs.mu.Lock()
-		redo := err == nil && (s.syncs.running[id].dirty || again.fingerprint() != snap.fingerprint())
-		if err != nil && s.syncs.running[id].dirty {
-			redo = true // 失败了但又有新的变更：用新状态再试一次
-		}
-		if !redo || round >= maxSyncRounds || ctx.Err() != nil {
-			if redo {
-				s.logger.Warn("product vector sync gave up after repeated changes", "product_id", id, "rounds", round)
-			}
+		dirty := s.syncs.running[id].dirty
+		if (err == nil && converged && !dirty) || (err != nil && !dirty) {
 			delete(s.syncs.running, id)
 			s.syncs.mu.Unlock()
 			return
 		}
 		s.syncs.mu.Unlock()
+		if d := syncDelay(round); d > 0 {
+			time.Sleep(d)
+		}
 	}
+}
+
+// syncRound 做一轮同步，converged 表示写完后复查与写入的快照一致。
+func (s *Server) syncRound(id string) (converged bool, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), vectorSyncTimeout)
+	defer cancel()
+	snap, err := s.indexSnapshot(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	if err := s.applySnapshot(ctx, snap); err != nil {
+		return false, err
+	}
+	again, err := s.indexSnapshot(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	return again.fingerprint() == snap.fingerprint(), nil
 }
 
 // indexSnapshot 是一个商品写进索引的全部内容（同一次读取，文本和图片保持一致）。

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/domain"
 	"github.com/evelyn-kk/blink-shop/backend/src/imagevector"
@@ -149,12 +150,17 @@ func (s *Service) Remove(ctx context.Context, ids ...string) error {
 	return nil
 }
 
-// maxSyncRounds：写完复查时发现商品又变了，最多重做的轮数。
-const maxSyncRounds = 3
+// RecheckDelay 是写完复查发现商品又变了、重做前的等待（第 round 轮之后；测试可调小）。
+var RecheckDelay = func(round int) time.Duration {
+	if round < 3 {
+		return 0
+	}
+	return min(100*time.Millisecond<<(round-3), 2*time.Second)
+}
 
 // Sync 按商品当前状态更新索引：公开可见的重建，不可见（下架、风控、删除、不存在）的删除。
 // 每个商品写完后再读一次：图片列表或可见性在此期间变了（同时有别的进程在改、在同步）就按新状态重做，
-// 不会把读取时的旧快照留在索引里。
+// 一直做到某一轮复查一致（没有轮数上限，多轮后退避），不会把已观察到的最后一次变更丢在索引外；ctx 取消时返回错误。
 func (s *Service) Sync(ctx context.Context, ids ...string) (IndexStats, error) {
 	var total IndexStats
 	for _, id := range ids {
@@ -179,10 +185,13 @@ func (s *Service) Sync(ctx context.Context, ids ...string) (IndexStats, error) {
 			if err != nil {
 				return total, err
 			}
-			if again == key || round >= maxSyncRounds {
+			if again == key {
 				break
 			}
 			key, p = again, next
+			if err := sleepCtx(ctx, RecheckDelay(round)); err != nil {
+				return total, err
+			}
 		}
 	}
 	return total, nil
@@ -359,4 +368,18 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }

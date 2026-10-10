@@ -192,8 +192,10 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
   不可见的删除）。非生产环境启动时（`BOOTSTRAP_VECTOR_INDEX`）在迁移完成后全量写一次；生产用 `cmd/vectorindex` 显式执行。
 - **同步顺序**（`httpapi/vector_sync.go`）：同一商品同时只有一个同步任务；任务进行中又有变更只记 dirty，当前一轮写完后按 Store
   最新状态再做一轮。每轮从同一次读取得到文本和商品图快照，两个索引都按它写；写完再读一次，内容指纹（可见性、商家、分类、
-  检索文本、图片列表）变了就重做（最多 5 轮），所以别的进程（另一个 API 实例、`cmd/vectorindex`）在中间写过旧快照也会被纠正。
-  启动时的全量索引走同一套任务（`Server.ResyncAllProducts`）；`cmd/vectorindex` 与 `imagesearch.Sync` 写完也会复查。
+  检索文本、图片列表）变了就重做，所以别的进程（另一个 API 实例、`cmd/vectorindex`）在中间写过旧快照也会被纠正。
+  没有轮数上限：只要观察到不一致就继续（每轮单独 20 秒时限，前 3 轮立即重做，之后退避到最长 2 秒），直到某轮复查一致才结束，
+  已看到的最后一次变更不会被丢下；只有写入出错且期间没有新变更时才放弃（记日志）。启动时的全量索引走同一套任务
+  （`Server.ResyncAllProducts`）；`cmd/vectorindex` 与 `imagesearch.Sync` 写完也会复查，同样做到一致为止（ctx 取消时报错）。
 - **安全**：向量结果只是候选，一律回到 Store 按可见性和过滤条件取回——索引过期（例如店铺停业后商品没逐个同步）只影响召回，
   不会把下架、删除、风控的商品或分块返回出去。Milvus 或 Embedding 出错时降级关键词并记 `vector_error`。
 - 本地 Milvus 集成测试：`BLINK_TEST_MILVUS_ADDR=127.0.0.1:19530 go test ./src/vector`（用带随机后缀的临时集合，结束删除；CI 没有 Milvus，自动跳过）。
