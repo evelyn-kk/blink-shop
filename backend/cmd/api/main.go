@@ -20,7 +20,6 @@ import (
 	"github.com/evelyn-kk/blink-shop/backend/src/agent"
 	"github.com/evelyn-kk/blink-shop/backend/src/configcenter"
 	"github.com/evelyn-kk/blink-shop/backend/src/httpapi"
-	"github.com/evelyn-kk/blink-shop/backend/src/imagesearch"
 	"github.com/evelyn-kk/blink-shop/backend/src/llm"
 	"github.com/evelyn-kk/blink-shop/backend/src/logging"
 	"github.com/evelyn-kk/blink-shop/backend/src/objectstore"
@@ -139,7 +138,7 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 	go recoverRunsWhenReady(ctx, server, st, startedAt, logger)
 	// 非生产默认在启动时把已有知识和商品写入向量索引（BOOTSTRAP_VECTOR_INDEX）；生产用 cmd/vectorindex 显式执行。
 	if cfg.BootstrapVectorIndex && (vec.enabled() || images != nil) {
-		go bootstrapVectorsWhenReady(ctx, st, vec, images, logger)
+		go bootstrapVectorsWhenReady(ctx, st, vec, server, logger)
 	}
 
 	httpServer := &http.Server{
@@ -293,8 +292,8 @@ func openVectorIndexes(cfg configcenter.Config, logger *slog.Logger) vectorIndex
 }
 
 // bootstrapVectorsWhenReady 等数据库迁移完成后建一次全量向量索引；失败只记日志（关键词检索照常可用）。
-// 商品图索引同理（images 不为 nil 时）。
-func bootstrapVectorsWhenReady(ctx context.Context, st *mysqlstore.Store, vec vectorIndexes, images *imagesearch.Service, logger *slog.Logger) {
+// 知识分块直接写；商品文本向量和商品图向量走 Server 的按商品串行同步，不会和同时发生的增量同步互相覆盖。
+func bootstrapVectorsWhenReady(ctx context.Context, st *mysqlstore.Store, vec vectorIndexes, server *httpapi.Server, logger *slog.Logger) {
 	for schemaReady(ctx, st) != nil {
 		select {
 		case <-ctx.Done():
@@ -303,19 +302,17 @@ func bootstrapVectorsWhenReady(ctx context.Context, st *mysqlstore.Store, vec ve
 		}
 	}
 	if vec.enabled() {
-		stats, err := vector.Bootstrap(ctx, st, vec.knowledge, vec.products, logger)
+		stats, err := vector.Bootstrap(ctx, st, vec.knowledge, nil, logger)
 		if err != nil {
-			logger.Error("vector bootstrap failed", "error", err)
+			logger.Error("knowledge vector bootstrap failed", "error", err)
 		} else {
-			logger.Info("vector bootstrap done", "documents", stats.Documents, "chunks", stats.Chunks, "products", stats.Products, "failed", stats.Failed)
+			logger.Info("knowledge vector bootstrap done", "documents", stats.Documents, "chunks", stats.Chunks, "failed", stats.Failed)
 		}
 	}
-	if images != nil {
-		stats, err := images.Bootstrap(ctx)
-		if err != nil {
-			logger.Error("image index bootstrap failed", "error", err)
-			return
-		}
-		logger.Info("image index bootstrap done", "products", stats.Products, "images", stats.Images, "skipped", stats.Skipped, "failed", stats.Failed)
+	n, err := server.ResyncAllProducts(ctx)
+	if err != nil {
+		logger.Error("product vector bootstrap failed", "error", err)
+		return
 	}
+	logger.Info("product vector bootstrap done", "products", n)
 }

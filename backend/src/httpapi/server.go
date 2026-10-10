@@ -86,6 +86,7 @@ type Server struct {
 	productIndex   rag.ProductIndex
 	imageSearch    *imagesearch.Service
 	vectorSync     sync.WaitGroup
+	syncs          productSyncs
 	runTimeout     time.Duration
 	heartbeat      time.Duration
 	runs           *runRegistry

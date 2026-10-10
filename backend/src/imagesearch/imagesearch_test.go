@@ -200,3 +200,59 @@ func (failingIndex) DeleteProducts(context.Context, []string) error { return err
 func (failingIndex) Search(context.Context, []float32, int) ([]Hit, error) {
 	return nil, errors.New("down")
 }
+
+// replaceHook 在第一次写入后执行 fn（模拟写入期间商品又被改）。
+type replaceHook struct {
+	*MemoryIndex
+	fn func()
+}
+
+func (h *replaceHook) ReplaceProduct(ctx context.Context, id string, images []IndexedImage) error {
+	err := h.MemoryIndex.ReplaceProduct(ctx, id, images)
+	if h.fn != nil {
+		fn := h.fn
+		h.fn = nil
+		fn()
+	}
+	return err
+}
+
+// Sync 写完复查：写入期间商品换了图片或被下架，按最新状态重写 / 删除，不留旧图。
+func TestSyncRechecksAfterWrite(t *testing.T) {
+	ctx := context.Background()
+	e := newTestEnv(t)
+	hook := &replaceHook{MemoryIndex: e.index}
+	svc := New(imagevector.Local{}, hook, NewSource(nil), e.mem, nil, nil)
+	lamp := "/api/v1/assets/catalog/products/p_seed_lamp.png"
+	hook.fn = func() {
+		_, _ = e.mem.UpdateProduct(ctx, "p_seed_mouse", func(p *domain.Product) error {
+			p.ImageURL, p.ImageURLs = lamp, []string{lamp}
+			return nil
+		})
+	}
+	if _, err := svc.Sync(ctx, "p_seed_mouse"); err != nil {
+		t.Fatal(err)
+	}
+	vec, _ := imagevector.Local{}.Embed(ctx, asset(t, "p_seed_lamp"))
+	hits, _ := e.index.Search(ctx, vec, 10)
+	var urls []string
+	for _, h := range hits {
+		if h.ProductID == "p_seed_mouse" {
+			urls = append(urls, h.ImageURL)
+		}
+	}
+	if len(urls) != 1 || urls[0] != lamp {
+		t.Fatalf("after recheck: %v", urls)
+	}
+	hook.fn = func() {
+		_, _ = e.mem.UpdateProduct(ctx, "p_seed_mouse", func(p *domain.Product) error { p.Status = domain.ProductInactive; return nil })
+	}
+	if _, err := svc.Sync(ctx, "p_seed_mouse"); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range e.index.Products() {
+		if id == "p_seed_mouse" {
+			t.Fatal("inactive product still indexed")
+		}
+	}
+}

@@ -2,6 +2,7 @@ package vector
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/domain"
@@ -78,6 +79,13 @@ func Bootstrap(ctx context.Context, st store.Store, k *KnowledgeIndex, p *Produc
 				logger.WarnContext(ctx, "vector bootstrap: product batch failed", "page", page, "error", err)
 			} else {
 				s.Products += len(batch)
+				// 写完复查：读取之后商品又被改、下架或删除（API 进程同时在同步）时，按最新状态重写，不留旧快照
+				for _, it := range batch {
+					if err := recheckProduct(ctx, st, p, names, it); err != nil {
+						s.Failed++
+						logger.WarnContext(ctx, "vector bootstrap: product recheck failed", "product_id", it.ProductID, "error", err)
+					}
+				}
 			}
 			if page*bootstrapPage >= total {
 				break
@@ -85,4 +93,36 @@ func Bootstrap(ctx context.Context, st store.Store, k *KnowledgeIndex, p *Produc
 		}
 	}
 	return s, nil
+}
+
+const maxRecheckRounds = 3
+
+// recheckProduct 重新读取商品：索引内容（文本、分类、商家）没变就结束；变了按新内容重写，不可见了就删除，最多重做几轮。
+func recheckProduct(ctx context.Context, st store.Store, p rag.ProductIndex, names map[string]string, written rag.IndexedProduct) error {
+	deleted := false
+	for round := 0; round < maxRecheckRounds; round++ {
+		cur, err := st.GetVisibleProduct(ctx, written.ProductID)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			if deleted {
+				return nil
+			}
+			if err := p.DeleteProducts(ctx, []string{written.ProductID}); err != nil {
+				return err
+			}
+			deleted = true
+			continue
+		case err != nil:
+			return err
+		}
+		now := rag.IndexedProduct{ProductID: cur.ProductID, MerchantID: cur.MerchantID, CategoryID: cur.CategoryID, Text: rag.ProductText(cur, names[cur.CategoryID])}
+		if now == written && !deleted {
+			return nil
+		}
+		if err := p.UpsertProducts(ctx, []rag.IndexedProduct{now}); err != nil {
+			return err
+		}
+		written, deleted = now, false
+	}
+	return nil
 }

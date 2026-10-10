@@ -138,37 +138,71 @@ func (s *Service) IndexProduct(ctx context.Context, p domain.Product) (IndexStat
 	return st, nil
 }
 
+// Remove 从索引删除商品的全部图片。
+func (s *Service) Remove(ctx context.Context, ids ...string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := s.index.DeleteProducts(ctx, ids); err != nil {
+		return fmt.Errorf("%w: %v", ErrIndex, err)
+	}
+	return nil
+}
+
+// maxSyncRounds：写完复查时发现商品又变了，最多重做的轮数。
+const maxSyncRounds = 3
+
 // Sync 按商品当前状态更新索引：公开可见的重建，不可见（下架、风控、删除、不存在）的删除。
+// 每个商品写完后再读一次：图片列表或可见性在此期间变了（同时有别的进程在改、在同步）就按新状态重做，
+// 不会把读取时的旧快照留在索引里。
 func (s *Service) Sync(ctx context.Context, ids ...string) (IndexStats, error) {
 	var total IndexStats
-	var remove []string
 	for _, id := range ids {
-		p, err := s.store.GetVisibleProduct(ctx, id)
-		if errors.Is(err, store.ErrNotFound) {
-			remove = append(remove, id)
-			continue
-		}
+		key, p, err := s.snapshot(ctx, id)
 		if err != nil {
 			return total, err
 		}
-		st, err := s.IndexProduct(ctx, p.Product)
-		total.add(st)
-		if err != nil {
-			return total, err
+		for round := 1; ; round++ {
+			if p == nil {
+				if err := s.Remove(ctx, id); err != nil {
+					return total, err
+				}
+				total.Removed++
+			} else {
+				st, err := s.IndexProduct(ctx, *p)
+				total.add(st)
+				if err != nil {
+					return total, err
+				}
+			}
+			again, next, err := s.snapshot(ctx, id)
+			if err != nil {
+				return total, err
+			}
+			if again == key || round >= maxSyncRounds {
+				break
+			}
+			key, p = again, next
 		}
-	}
-	if len(remove) > 0 {
-		if err := s.index.DeleteProducts(ctx, remove); err != nil {
-			return total, fmt.Errorf("%w: %v", ErrIndex, err)
-		}
-		total.Removed += len(remove)
 	}
 	return total, nil
 }
 
+// snapshot 返回商品当前会写进索引的内容（可见性 + 图片列表）和商品本身；不可见时商品为 nil。
+func (s *Service) snapshot(ctx context.Context, id string) (string, *domain.Product, error) {
+	p, err := s.store.GetVisibleProduct(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return "hidden", nil, nil
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	return p.MerchantID + "\x00" + strings.Join(ProductImages(p.Product), "\x00"), &p.Product, nil
+}
+
 const bootstrapPage = 100
 
-// Bootstrap 为全部在售商品建图片索引（可重复执行：按商品整体覆盖）。单个商品写索引失败计入 Failed 并继续。
+// Bootstrap 为全部在售商品建图片索引（可重复执行：按商品整体覆盖，写完复查，见 Sync）。单个商品失败计入 Failed 并继续。
 func (s *Service) Bootstrap(ctx context.Context) (IndexStats, error) {
 	var total IndexStats
 	for page := 1; ; page++ {
@@ -177,7 +211,7 @@ func (s *Service) Bootstrap(ctx context.Context) (IndexStats, error) {
 			return total, err
 		}
 		for _, it := range items {
-			st, err := s.IndexProduct(ctx, it.Product)
+			st, err := s.Sync(ctx, it.ProductID)
 			total.add(st)
 			if err != nil {
 				if ctx.Err() != nil {
