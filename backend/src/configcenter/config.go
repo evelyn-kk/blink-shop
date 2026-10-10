@@ -341,6 +341,22 @@ func ValidateProduction(ctx context.Context, cfg Config, r *Resolver) error {
 	if cfg.Speech.STTProvider == "mock" || cfg.Speech.TTSProvider == "mock" {
 		errs = append(errs, errors.New("STT_PROVIDER / TTS_PROVIDER 不能是 mock（生产环境请配置真实供应商或 off）"))
 	}
+	// 真实语音供应商只能走 TLS：讯飞的 AppID、API Key、签名和实时音频，豆包的 token（头和请求体里都有）在明文链路上会被窃听。
+	// 开发 / 测试环境仍允许 ws:// 和 http://（本地假服务）。
+	sp := cfg.Speech
+	if sp.STTProvider == "xunfei" && !strings.HasPrefix(strings.ToLower(sp.STTEndpoint), "wss://") {
+		errs = append(errs, fmt.Errorf("STT_ENDPOINT 在生产环境必须是 wss:// 地址（当前 %q），语音凭据和音频不能走明文链路", sp.STTEndpoint))
+	}
+	switch sp.TTSProvider {
+	case "xunfei":
+		if !strings.HasPrefix(strings.ToLower(sp.TTSEndpoint), "wss://") {
+			errs = append(errs, fmt.Errorf("TTS_ENDPOINT 在生产环境必须是 wss:// 地址（当前 %q），语音凭据不能走明文链路", sp.TTSEndpoint))
+		}
+	case "doubao":
+		if !strings.HasPrefix(strings.ToLower(sp.TTSEndpoint), "https://") {
+			errs = append(errs, fmt.Errorf("TTS_ENDPOINT 在生产环境必须是 https:// 地址（当前 %q），语音凭据不能走明文链路", sp.TTSEndpoint))
+		}
+	}
 	for env, v := range map[string]string{"STT_API_KEY": cfg.Speech.STTAPIKey, "STT_API_SECRET": cfg.Speech.STTAPISecret,
 		"TTS_API_KEY": cfg.Speech.TTSAPIKey, "TTS_API_SECRET": cfg.Speech.TTSAPISecret} {
 		if key := strings.ToLower(v); key != "" && contains(devAIKeys, key) {

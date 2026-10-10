@@ -236,7 +236,7 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 | 识别 `STT_PROVIDER` | `mock` / `xunfei` | mock 不调外部服务，按收到的音频时长逐字“识别”出固定文字（本地演示和测试）；xunfei 为讯飞实时转写（签名 URL：查询参数排序后 HMAC-SHA1，结果按稳定段累积 + 当前段拼整句） |
 | 合成 `TTS_PROVIDER` | `mock` / `xunfei` / `doubao` | mock 生成提示音 WAV；xunfei 为在线合成 WebSocket（HMAC-SHA256 鉴权，Base64 分帧）；doubao 为 HTTP（`Bearer;<token>`，不跟随重定向） |
 
-生产环境不允许 mock，凭据不能是示例值。供应商错误只记服务端日志，日志里的地址去掉查询串（签名、密钥都在查询串里）。
+生产环境不允许 mock，凭据不能是示例值，供应商地址必须是 TLS（讯飞 `wss://`、豆包 `https://`）。供应商错误只记服务端日志，日志里的地址去掉查询串（签名、密钥都在查询串里）。
 
 - **能力配置** `GET /speech/tts/config`：`{enabled, provider, voice, max_text_chars, stt:{enabled, provider, sample_rate, encoding, max_seconds}}`，
   客户端据此显示 / 隐藏朗读和麦克风按钮；不含任何凭据。
@@ -725,9 +725,9 @@ go run ./cmd/eval -suite=images -image-embedder=env       # 用 IMAGE_EMBEDDING_
 | `IMAGE_EMBEDDING_BASE_URL` / `IMAGE_EMBEDDING_MODEL` / `IMAGE_EMBEDDING_DIM` | — | `https://dashscope.aliyuncs.com` / `qwen3-vl-embedding` / `512` | dashscope 多模态 Embedding（local 固定 160 维，不看这三项）；换模型或维度要重建集合 |
 | `STT_PROVIDER` / `TTS_PROVIDER` | — | `off` | 语音识别 / 合成供应商：off、mock（演示，生产拒绝）、xunfei、doubao（仅合成） |
 | `STT_APP_ID` / `STT_API_KEY` / `STT_API_SECRET` | — | 空 | 讯飞实时转写凭据（后两个是密钥类） |
-| `STT_ENDPOINT` / `STT_LANG` / `STT_MAX_SECONDS` | — | 讯飞实时转写地址 / `autodialect` / `60` | ws(s) 地址、语种；单次语音输入最长秒数（5–300） |
+| `STT_ENDPOINT` / `STT_LANG` / `STT_MAX_SECONDS` | — | 讯飞实时转写地址 / `autodialect` / `60` | ws(s) 地址（生产只允许 `wss://`）、语种；单次语音输入最长秒数（5–300） |
 | `TTS_APP_ID` / `TTS_API_KEY` / `TTS_API_SECRET` | — | 空 | 合成凭据：讯飞三项都要；豆包为 appid + token（`TTS_API_KEY`） |
-| `TTS_ENDPOINT` / `TTS_DEFAULT_VOICE` / `TTS_CLUSTER` / `TTS_MAX_RUNES` | — | 按供应商默认 / 按供应商默认 / `volcano_tts` / `800` | 合成地址和默认音色（为空用供应商默认）、豆包集群、单次朗读最多字数（1–2000） |
+| `TTS_ENDPOINT` / `TTS_DEFAULT_VOICE` / `TTS_CLUSTER` / `TTS_MAX_RUNES` | — | 按供应商默认 / 按供应商默认 / `volcano_tts` / `800` | 合成地址（生产讯飞只允许 `wss://`、豆包只允许 `https://`；默认地址都是 TLS）和默认音色（为空用供应商默认）、豆包集群、单次朗读最多字数（1–2000） |
 | `IMAGE_FETCH_ALLOWED_HOSTS` | — | 空 | 服务端可以下载商品图的 https 域名（逗号分隔，只写主机名，不接受 IP）；为空只读平台内图片 |
 | `RISK_BLOCKED_WORDS` | `risk.blocked_words` | `违法,违禁,假货,绕过风控` | 导购对话的风险词，逗号分隔（最多 200 个、每个 20 字内） |
 
@@ -741,6 +741,8 @@ go run ./cmd/eval -suite=images -image-embedder=env       # 用 IMAGE_EMBEDDING_
 - 配置了 `MILVUS_ADDR` 时 `MILVUS_TOKEN` 为空或 `root:Milvus`（不用 Milvus 时不检查）；
 - `EMBEDDING_API_KEY` 非空但是示例值；
 - `STT_PROVIDER` / `TTS_PROVIDER` 为 mock，或 `STT_API_KEY`、`STT_API_SECRET`、`TTS_API_KEY`、`TTS_API_SECRET` 非空但是示例值；
+- 启用了真实语音供应商但地址不是 TLS：讯飞（`STT_ENDPOINT`、`TTS_ENDPOINT`）不是 `wss://`、豆包（`TTS_ENDPOINT`）不是 `https://`——
+  否则讯飞的 AppID、API Key、签名和实时音频，豆包的 token（请求头和请求体里都有）会走明文链路；开发 / 测试环境仍可用 `ws://`、`http://` 接本地假服务；
 - `AI_API_KEY` 非空但是示例值（`changeme`、`your-api-key`、`sk-xxx`）；为空允许，表示不接模型，导购只走规则；
 - `TRUST_ALL_PROXIES` 开启。
 

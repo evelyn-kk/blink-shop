@@ -181,6 +181,16 @@ func TestLoad(t *testing.T) {
 	}
 }
 
+// speechProd 是生产环境下启用真实语音供应商的配置（凭据非示例值）；endpoint 为空用供应商默认地址。
+func speechProd(kind, provider, endpoint string) map[string]string {
+	m := map[string]string{kind + "_PROVIDER": provider, kind + "_APP_ID": "blink-prod-app", kind + "_API_KEY": "prod-" + strings.ToLower(kind) + "-key-7f3a",
+		kind + "_API_SECRET": "prod-" + strings.ToLower(kind) + "-secret-91c2"}
+	if endpoint != "" {
+		m[kind+"_ENDPOINT"] = endpoint
+	}
+	return m
+}
+
 func safeProductionEnv() map[string]string {
 	return map[string]string{
 		"APP_ENV":              "production",
@@ -217,6 +227,23 @@ func TestValidateProduction(t *testing.T) {
 		{name: "trust all proxies", override: map[string]string{"TRUST_ALL_PROXIES": "true"}, wantErr: []string{"TRUST_ALL_PROXIES"}},
 		{name: "no milvus: token not required", override: map[string]string{"MILVUS_ADDR": "", "MILVUS_TOKEN": ""}},
 		{name: "placeholder embedding key", override: map[string]string{"EMBEDDING_API_KEY": "sk-xxx"}, wantErr: []string{"EMBEDDING_API_KEY"}},
+		// 真实语音供应商：生产只接受 TLS 地址（其他前置条件均合法、凭据非示例值）
+		{name: "xunfei stt over wss allowed", override: speechProd("STT", "xunfei", "wss://rtasr.xfyun.example/ast")},
+		{name: "xunfei stt over ws rejected", override: speechProd("STT", "xunfei", "ws://rtasr.xfyun.example/ast"), wantErr: []string{"STT_ENDPOINT", "wss://"}},
+		{name: "xunfei tts over wss allowed", override: speechProd("TTS", "xunfei", "wss://tts-api.xfyun.example/v2/tts")},
+		{name: "xunfei tts default endpoint allowed", override: speechProd("TTS", "xunfei", "")},
+		{name: "xunfei tts over ws rejected", override: speechProd("TTS", "xunfei", "ws://tts-api.xfyun.example/v2/tts"), wantErr: []string{"TTS_ENDPOINT", "wss://"}},
+		{name: "doubao tts over https allowed", override: speechProd("TTS", "doubao", "https://openspeech.bytedance.example/api/v1/tts")},
+		{name: "doubao tts default endpoint allowed", override: speechProd("TTS", "doubao", "")},
+		{name: "doubao tts over http rejected", override: speechProd("TTS", "doubao", "http://openspeech.bytedance.example/api/v1/tts"), wantErr: []string{"TTS_ENDPOINT", "https://"}},
+		{name: "development keeps ws/http for local fakes", override: func() map[string]string {
+			m := speechProd("STT", "xunfei", "ws://127.0.0.1:9100/ast")
+			for k, v := range speechProd("TTS", "doubao", "http://127.0.0.1:9101/tts") {
+				m[k] = v
+			}
+			m["APP_ENV"] = "development"
+			return m
+		}()},
 		{name: "mock speech in production", override: map[string]string{"STT_PROVIDER": "mock"}, wantErr: []string{"mock"}},
 		{name: "placeholder speech secret", override: map[string]string{"TTS_PROVIDER": "doubao", "TTS_APP_ID": "a", "TTS_API_KEY": "changeme"}, wantErr: []string{"TTS_API_KEY"}},
 		{name: "placeholder image embedding key", override: map[string]string{"IMAGE_EMBEDDING_PROVIDER": "dashscope", "IMAGE_EMBEDDING_API_KEY": "changeme"}, wantErr: []string{"IMAGE_EMBEDDING_API_KEY"}},
