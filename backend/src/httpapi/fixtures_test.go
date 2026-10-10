@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -205,6 +206,13 @@ func matchFixture(want, got any, rec *httptest.ResponseRecorder, path string) st
 			}
 			return ""
 		}
+	}
+	// 图片相似度是浮点运算的结果，不同 CPU（如 arm64 的乘加融合）末位可能不同：score 允许 ±0.001。
+	if wf, ok := want.(float64); ok && strings.HasSuffix(path, ".score") {
+		if gf, ok := got.(float64); !ok || math.Abs(gf-wf) > 0.001 {
+			return fmt.Sprintf("%s = %v, want %v ± 0.001", path, got, wf)
+		}
+		return ""
 	}
 	switch w := want.(type) {
 	case map[string]any:
