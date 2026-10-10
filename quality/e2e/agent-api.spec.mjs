@@ -50,7 +50,7 @@ test('无模型闭环：商品查询 → 把第一个加购物车 → 结算 →
   const list = r.blocks.find((b) => b.type === 'product_list');
   expect(list.products[0]).toMatchObject({ product_id: 'p_seed_mouse', name: 'Blink 静音无线鼠标 M2', price: '129.00' });
   expect(r.text).toContain('Blink 静音无线鼠标 M2');
-  expect(await u.trace(r.runId)).toEqual(['run.start.ok', 'risk.check.ok', 'planner.rule.ok', 'tool.search_products.ok', 'answer.rule.ok', 'run.end.completed']);
+  expect(await u.trace(r.runId)).toEqual(['run.start.ok', 'risk.check.ok', 'memory.retrieval.skipped', 'planner.rule.ok', 'tool.search_products.ok', 'retrieval.products.ok', 'rerank.products.ok', 'followup.rule.ok', 'answer.rule.ok', 'memory.summary.ok', 'run.end.completed']);
 
   r = await u.ask('把第一个加入购物车');
   expect(r.text).toContain('已把 Blink 静音无线鼠标 M2 × 1 加入购物车');
@@ -91,7 +91,7 @@ test('安全边界：没有上文不猜商品、风险词在规划前拦截、�
 
   r = await u.ask('有没有假货');
   expect(r.text).toContain('不能继续处理');
-  expect(await u.trace(r.runId)).toEqual(['run.start.ok', 'risk.check.blocked', 'answer.rule.ok', 'run.end.completed']);
+  expect(await u.trace(r.runId)).toEqual(['run.start.ok', 'risk.check.blocked', 'followup.rule.ok', 'answer.rule.ok', 'run.end.completed']);
 
   r = await u.ask('打开购物车页面');
   expect(r.blocks).toEqual([{ type: 'action', action: 'navigate', target: 'cart', label: '去购物车', params: {} }]);
