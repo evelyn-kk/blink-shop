@@ -54,6 +54,22 @@
           "created_at": "<timestamp>",
           "duration_ms": "<duration_ms>",
           "error": "",
+          "event_type": "retrieval",
+          "metadata": {
+            "inherited": false,
+            "relevant_message_ids": [],
+            "turns": 0,
+            "visible_products": 0
+          },
+          "model": "",
+          "stage": "memory",
+          "status": "skipped",
+          "trace_event_id": "<trace_event_id>"
+        },
+        {
+          "created_at": "<timestamp>",
+          "duration_ms": "<duration_ms>",
+          "error": "",
           "event_type": "rule",
           "metadata": {
             "intent": "product_search",
@@ -93,6 +109,59 @@
           "created_at": "<timestamp>",
           "duration_ms": "<duration_ms>",
           "error": "",
+          "event_type": "products",
+          "metadata": {
+            "conflicts": 0,
+            "filtered": 0,
+            "keyword": 1,
+            "relevance": "ok",
+            "vector": 0,
+            "vector_error": ""
+          },
+          "model": "",
+          "stage": "retrieval",
+          "status": "ok",
+          "trace_event_id": "<trace_event_id>"
+        },
+        {
+          "created_at": "<timestamp>",
+          "duration_ms": "<duration_ms>",
+          "error": "",
+          "event_type": "products",
+          "metadata": {
+            "mode": "rule",
+            "scores": [
+              {
+                "product_id": "p_seed_earbuds",
+                "reasons": [
+                  "keyword=1.00"
+                ],
+                "score": 1
+              }
+            ]
+          },
+          "model": "",
+          "stage": "rerank",
+          "status": "ok",
+          "trace_event_id": "<trace_event_id>"
+        },
+        {
+          "created_at": "<timestamp>",
+          "duration_ms": "<duration_ms>",
+          "error": "",
+          "event_type": "rule",
+          "metadata": {
+            "count": 3
+          },
+          "model": "",
+          "stage": "followup",
+          "status": "ok",
+          "trace_event_id": "<trace_event_id>"
+        },
+        {
+          "created_at": "<timestamp>",
+          "duration_ms": "<duration_ms>",
+          "error": "",
           "event_type": "rule",
           "metadata": {
             "action": "",
@@ -104,6 +173,20 @@
           },
           "model": "",
           "stage": "answer",
+          "status": "ok",
+          "trace_event_id": "<trace_event_id>"
+        },
+        {
+          "created_at": "<timestamp>",
+          "duration_ms": "<duration_ms>",
+          "error": "",
+          "event_type": "summary",
+          "metadata": {
+            "mode": "rule",
+            "runes": 17
+          },
+          "model": "",
+          "stage": "memory",
           "status": "ok",
           "trace_event_id": "<trace_event_id>"
         },

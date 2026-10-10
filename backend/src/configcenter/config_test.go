@@ -143,6 +143,7 @@ func safeProductionEnv() map[string]string {
 		"CORS_ALLOWED_ORIGINS": "https://admin.blink.example",
 		"MINIO_ACCESS_KEY":     "blink-prod-access",
 		"MINIO_SECRET_KEY":     "blink-prod-secret-value",
+		"MILVUS_ADDR":          "milvus.internal:19530",
 		"MILVUS_TOKEN":         "blink:prod-token",
 		"AI_API_KEY":           "sk-live-real-key",
 	}
@@ -169,6 +170,8 @@ func TestValidateProduction(t *testing.T) {
 		{name: "placeholder ai key 2", override: map[string]string{"AI_API_KEY": "your-api-key"}, wantErr: []string{"AI_API_KEY"}},
 		{name: "placeholder ai key 3", override: map[string]string{"AI_API_KEY": "sk-xxx"}, wantErr: []string{"AI_API_KEY"}},
 		{name: "trust all proxies", override: map[string]string{"TRUST_ALL_PROXIES": "true"}, wantErr: []string{"TRUST_ALL_PROXIES"}},
+		{name: "no milvus: token not required", override: map[string]string{"MILVUS_ADDR": "", "MILVUS_TOKEN": ""}},
+		{name: "placeholder embedding key", override: map[string]string{"EMBEDDING_API_KEY": "sk-xxx"}, wantErr: []string{"EMBEDDING_API_KEY"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -211,7 +214,7 @@ func TestValidateProductionReportsEveryProblem(t *testing.T) {
 	if err == nil {
 		t.Fatal("production with all defaults must fail")
 	}
-	for _, want := range []string{"MYSQL_DSN", "CORS_ALLOWED_ORIGINS", "MINIO", "MILVUS_TOKEN"} {
+	for _, want := range []string{"MYSQL_DSN", "CORS_ALLOWED_ORIGINS", "MINIO"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %s: %v", want, err)
 		}

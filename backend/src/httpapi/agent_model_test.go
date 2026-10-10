@@ -69,7 +69,7 @@ func TestAgentModelThroughHTTP(t *testing.T) {
 			models[it.Stage+"."+it.EventType] = it.Model
 		}
 	}
-	if got := strings.Join(stages, ","); got != "run.start.ok,risk.check.ok,planner.model.ok,planner.rule.ok,react.step.1.ok,tool.search_products.ok,react.step.2.ok,answer.model.ok,answer.rule.ok,run.end.completed" {
+	if got := strings.Join(stages, ","); got != "run.start.ok,risk.check.ok,planner.model.ok,memory.retrieval.skipped,planner.rule.ok,react.step.1.ok,tool.search_products.ok,retrieval.products.ok,rerank.products.ok,react.step.2.ok,followup.model.ok,answer.model.ok,answer.rule.ok,memory.summary.ok,run.end.completed" {
 		t.Fatalf("trace: %s", got)
 	}
 	if models["planner.model"] != "deepseek-chat" || models["react.step.1"] != "deepseek-chat" || models["answer.model"] != "deepseek-chat" {

@@ -19,8 +19,10 @@ var fillers = []string{
 	"一款", "一个", "一台", "一副", "一只", "一套", "一些", "几款", "几个", "哪款", "哪个", "哪些", "什么样的", "什么", "怎么样", "怎样", "如何", "多少钱", "价格",
 	"便宜点的", "便宜的", "便宜", "实惠", "好用的", "好用", "好点的", "好一点的", "不错的", "好的", "好", "靓", "适合", "合适", "用的", "用来", "送给", "给",
 	"一下", "一点", "左右", "大概", "大约", "差不多", "以内", "以下", "之内", "不超过", "预算", "元", "块钱", "块",
+	"这款", "那款", "这个", "那个", "这件", "那件", "一件", "几件", "一些", "有点", "比较",
+	// 单字只保留几乎不会出现在商品词里的虚词；量词、方位词（台、件、个、款、上、下、中…）会切坏“台灯”“上衣”这类词，不删
 	"的", "吗", "呢", "吧", "啊", "呀", "哦", "啦", "嘛", "了", "请", "谢谢", "你好", "您好", "和", "或者", "或", "还是", "以及", "跟", "与", "我", "你", "他", "她", "它",
-	"这", "那", "这个", "那个", "有", "是", "在", "也", "都", "就", "又", "再", "最", "很", "太", "比较", "点", "些", "款", "个", "台", "件", "下", "上", "里", "中",
+	"也", "都", "就", "又", "很", "太",
 }
 
 var (
@@ -114,6 +116,67 @@ func ParseBudget(text string) domain.Money {
 	return m
 }
 
+var (
+	// 价格区间：1000 到 3000 / 1000-3000 / 1000~3000 元之间。
+	priceRangePattern = regexp.MustCompile(numberPattern + `\s*(元|块钱|块|k|K|千)?\s*(?:到|至|-|~|～|—)\s*` + numberPattern + `\s*(元|块钱|块|k|K|千)?`)
+	// 价格下限：1000 以上 / 1000 起 / 不低于 1000 / 至少 1000。
+	priceFloorTail = regexp.MustCompile(numberPattern + `\s*(元|块钱|块|k|K|千)?\s*(以上|起步|往上|之上)`)
+	priceFloorHead = regexp.MustCompile(`(不低于|至少|高于|超过)\s*` + numberPattern + `\s*(元|块钱|块|k|K|千)?`)
+)
+
+func priceOf(num, unit string) (domain.Money, bool) {
+	n, ok := ChineseNumber(num)
+	if !ok || n <= 0 {
+		return 0, false
+	}
+	if unit == "k" || unit == "K" || unit == "千" {
+		n *= 1000
+	}
+	return domain.Money(n * 100), true
+}
+
+// ParsePriceRange 解析价格区间：返回下限和上限（0 表示没有）。“1000 到 3000”两端都有；“1000 以上”只有下限；
+// 只有上限的写法（“3000 以内”）交给 ParseBudget。
+func ParsePriceRange(text string) (lo, hi domain.Money) {
+	if m := priceRangePattern.FindStringSubmatch(text); m != nil {
+		a, okA := priceOf(m[1], firstNonEmpty(m[2], m[4]))
+		b, okB := priceOf(m[3], m[4])
+		if okA && okB {
+			if a > b {
+				a, b = b, a
+			}
+			return a, b
+		}
+	}
+	if m := priceFloorTail.FindStringSubmatch(text); m != nil {
+		if a, ok := priceOf(m[1], m[2]); ok {
+			return a, 0
+		}
+	}
+	if m := priceFloorHead.FindStringSubmatch(text); m != nil {
+		if a, ok := priceOf(m[2], m[3]); ok {
+			return a, 0
+		}
+	}
+	return 0, 0
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// stripPriceRange 去掉价格区间短语。
+func stripPriceRange(text string) string {
+	text = priceRangePattern.ReplaceAllString(text, " ")
+	text = priceFloorTail.ReplaceAllString(text, " ")
+	return priceFloorHead.ReplaceAllString(text, " ")
+}
+
 // ParseExclusions 找出用户明确排除的品牌、属性或商品词。
 func ParseExclusions(text string) []string {
 	var out []string
@@ -197,7 +260,7 @@ func ParseProductIDs(text string) []string {
 // QueryTerms 把一句话变成商品检索词：去掉预算、排除短语和口头语，按“汉字串 / 字母数字串”切开，
 // 保留 ≥2 个字符的片段（型号等字母数字串允许 1 个字符以上的组合），去重，最多 8 个。
 func QueryTerms(text string) []string {
-	text = stripExclusions(stripBudget(text))
+	text = stripExclusions(stripBudget(stripPriceRange(text)))
 	lower := strings.ToLower(text)
 	for _, f := range fillers {
 		lower = strings.ReplaceAll(lower, strings.ToLower(f), " ")

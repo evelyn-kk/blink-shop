@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"errors"
-	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -100,9 +99,37 @@ type ProductSearchResult struct {
 	Products  []ProductCard `json:"products"`
 	Total     int           `json:"total"`
 	Relevance string        `json:"relevance"`
+	MinPrice  *domain.Money `json:"min_price,omitempty"`
 	MaxPrice  *domain.Money `json:"max_price,omitempty"`
+	Brands    []string      `json:"brands,omitempty"`
 	Excluded  []string      `json:"excluded,omitempty"`
-	Filtered  int           `json:"filtered"` // 因预算或排除词去掉的候选数
+	// Filtered 是因价格、品牌或排除词去掉的候选数；Conflicts 是用途与商品“不适合 / 注意事项”冲突、不作为推荐的商品名。
+	Filtered  int      `json:"filtered"`
+	Conflicts []string `json:"conflicts,omitempty"`
+	// Recall / Rerank 记录召回来源和排序方式，写进轨迹，不给模型看。
+	Recall SearchRecall `json:"-"`
+	Rerank SearchRerank `json:"-"`
+}
+
+// SearchRecall 是各路召回的候选数。
+type SearchRecall struct {
+	Keyword     int    `json:"keyword"`
+	Vector      int    `json:"vector"`
+	VectorError string `json:"vector_error,omitempty"`
+}
+
+// SearchRerank 是排序方式（rule / model）和前几名的得分与原因。
+type SearchRerank struct {
+	Mode   string        `json:"mode"`
+	Error  string        `json:"error,omitempty"`
+	Scores []ScoredEntry `json:"scores"`
+}
+
+// ScoredEntry 是一件候选的得分明细。
+type ScoredEntry struct {
+	ProductID string   `json:"product_id"`
+	Score     float64  `json:"score"`
+	Reasons   []string `json:"reasons,omitempty"`
 }
 
 const (
@@ -121,96 +148,6 @@ func (r *Registry) categoryNames(ctx context.Context) (map[string]string, error)
 		names[c.CategoryID] = c.Name
 	}
 	return names, nil
-}
-
-// searchProducts 关键词召回 → 预算/排除词过滤 → 按相关性重排 → 截断。
-func (r *Registry) searchProducts(ctx context.Context, args map[string]any) (ProductSearchResult, error) {
-	query := argString(args, "query")
-	limit := argInt(args, "limit", defaultSearchLimit)
-	out := ProductSearchResult{Query: query, Terms: QueryTerms(query), Products: []ProductCard{}, Relevance: RelevanceNone}
-	if f, ok := argFloat(args, "max_price"); ok {
-		m := domain.Money(f*100 + 0.5)
-		out.MaxPrice = &m
-	}
-	for _, ex := range argStrings(args, "exclude") {
-		if ex = strings.ToLower(ex); ex != "" {
-			out.Excluded = append(out.Excluded, ex)
-		}
-	}
-	names, err := r.categoryNames(ctx)
-	if err != nil {
-		return out, err
-	}
-	// 显式商品 ID：直接取这件商品（不存在或不可见就是没有结果）。
-	if pid := argString(args, "product_id"); pid != "" {
-		p, err := r.deps.Store.GetVisibleProduct(ctx, pid)
-		if errors.Is(err, store.ErrNotFound) {
-			return out, nil
-		}
-		if err != nil {
-			return out, err
-		}
-		out.Products, out.Total, out.Relevance = []ProductCard{toProductCard(p, names[p.CategoryID])}, 1, RelevanceOK
-		return out, nil
-	}
-	keyword := strings.Join(out.Terms, " ")
-	if keyword == "" {
-		keyword = query
-	}
-	items, _, err := r.deps.Store.SearchVisibleProducts(ctx, store.ProductSearch{Keyword: keyword, CategoryID: argString(args, "category_id"),
-		Page: store.Page{Page: 1, PageSize: searchRecall}})
-	if err != nil {
-		return out, err
-	}
-	type scored struct {
-		card   ProductCard
-		score  float64
-		strong bool
-		index  int
-	}
-	var cands []scored
-	for i, p := range items {
-		card := toProductCard(p, names[p.CategoryID])
-		text := card.text()
-		if out.MaxPrice != nil && card.Price > *out.MaxPrice {
-			out.Filtered++
-			continue
-		}
-		if excludedBy(text, out.Excluded) {
-			out.Filtered++
-			continue
-		}
-		score, strong := relevance(out.Terms, strings.ToLower(card.Name), text)
-		if score <= 0 {
-			continue
-		}
-		cands = append(cands, scored{card: card, score: score, strong: strong, index: i})
-	}
-	sort.SliceStable(cands, func(i, j int) bool {
-		if cands[i].strong != cands[j].strong {
-			return cands[i].strong
-		}
-		if cands[i].score != cands[j].score {
-			return cands[i].score > cands[j].score
-		}
-		if cands[i].card.Price != cands[j].card.Price {
-			return cands[i].card.Price < cands[j].card.Price
-		}
-		return cands[i].index < cands[j].index
-	})
-	out.Total = len(cands)
-	for i, c := range cands {
-		if i == 0 {
-			out.Relevance = RelevanceWeak
-			if c.strong {
-				out.Relevance = RelevanceOK
-			}
-		}
-		if i < limit {
-			out.Products = append(out.Products, c.card)
-		}
-	}
-	return out, nil
 }
 
 func excludedBy(text string, excluded []string) bool {
@@ -274,9 +211,10 @@ func bigrams(term string) []string {
 
 // KnowledgeResult 是 search_knowledge 的结果。
 type KnowledgeResult struct {
-	Query     string         `json:"query"`
-	Mode      string         `json:"mode"`
-	Citations []rag.Citation `json:"citations"`
+	Query       string         `json:"query"`
+	Mode        string         `json:"mode"`
+	VectorError string         `json:"-"`
+	Citations   []rag.Citation `json:"citations"`
 }
 
 func (r *Registry) searchKnowledge(ctx context.Context, args map[string]any) (KnowledgeResult, error) {
@@ -294,7 +232,7 @@ func (r *Registry) searchKnowledge(ctx context.Context, args map[string]any) (Kn
 	if res.Citations == nil {
 		res.Citations = []rag.Citation{}
 	}
-	return KnowledgeResult{Query: q.Text, Mode: res.Mode, Citations: res.Citations}, nil
+	return KnowledgeResult{Query: q.Text, Mode: res.Mode, VectorError: res.VectorError, Citations: res.Citations}, nil
 }
 
 // ---------- 促销与评价 ----------
@@ -413,13 +351,15 @@ func (r *Registry) shopTools() []*Tool {
 		return sh.Cart(ctx, tc.AccountID)
 	}
 	return []*Tool{
-		{Name: ToolSearchProducts, Description: "搜索当前商品库：按关键词召回，按预算和排除词过滤，再按相关性排序。只有 relevance=ok 的结果能当作推荐。",
+		{Name: ToolSearchProducts, Description: "搜索当前商品库：关键词（和向量，如果配置了）召回，按价格区间、品牌和排除词过滤，按相关性、用途匹配重排；与商品“不适合 / 注意事项”冲突的不作为推荐。只有 relevance=ok 的结果能当作推荐。",
 			Schema: object([]string{"query"}, map[string]*Schema{
 				"query":       strLen("商品关键词（品类、品牌、型号、用途）", 1, 100),
 				"product_id":  str("直接按商品 ID 取一件商品（用户明确指定时）"),
 				"category_id": str("限定分类 ID（含子分类）"),
 				"limit":       integer("返回数量", 1, maxSearchLimit, defaultSearchLimit),
 				"max_price":   number("价格上限（元）", 0),
+				"min_price":   number("价格下限（元）", 0),
+				"brands":      strList("只要这些品牌", 5, 30),
 				"exclude":     strList("排除词：名称、品牌、标签或卖点包含任一词的商品不返回", 10, 30),
 			}),
 			Run: func(ctx context.Context, _ *ToolContext, args map[string]any) (any, error) {

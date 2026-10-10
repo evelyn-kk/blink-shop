@@ -172,10 +172,27 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 - 检索词（`rag.QueryTerms`）：汉字按相邻两字切分，含语气词的二元组丢弃，“多少”“可以”等提问用语权重 0.2；字母数字片段（型号、品牌、单位）整体作为一个词，权重 2；最多 24 个。
 - 关键词召回：任一词出现在分块标题、正文或文档标题中；只召回已索引、商家营业中（或平台资料）、关联商品（如有）公开可见的分块；命中词多的优先，最多 200 个。
 - 打分：每个词的权重乘以候选集内的区分度 `ln(1 + N/df)`（所有候选都有的词权重最低；候选中都没出现的词多为跨词边界的无意义片段，按 0.3 折扣计入）。关键词分 = 0.7 × 命中权重占比 + 0.15 × 标题命中占比 + 0.15 × 是否包含完整问题。
-- 向量（`rag.VectorIndex`，Milvus 在 8.2 接入）：配置后取前 50 个相似分块，经 Store 按同样的可见性和过滤条件取回（已删除、下架、被过滤的向量结果丢弃），最终分 = 0.65 × 关键词分 + 0.35 × 相似度；向量检索失败时记日志并回退关键词（`Result.VectorError`）。
+- 向量（`rag.VectorIndex`，Milvus 实现见“向量检索”）：配置后取前 50 个相似分块，经 Store 按同样的可见性和过滤条件取回（已删除、下架、被过滤的向量结果丢弃），最终分 = max(关键词分, 0.65 × 关键词分 + 0.35 × 相似度)——向量只能加分，相似度低时不会把关键词已经够格的结果拉到阈值以下（8.2 评测发现原来的线性融合会这样丢结果）；向量检索失败时记日志并回退关键词（`Result.VectorError`）。
 - 低于 0.2 分的不返回；按分数降序、chunk_id 升序取前 5（最多 20）；摘要截取第一个命中词附近的 160 字。
 - 引用字段：chunk_id、document_id、merchant_id、product_id、title（分块标题）、document_title、snippet、source、source_url、score、matched_by。
-- 评测：`TestRecallOnFixedCorpus` 用 `fixtures/rag/` 的 13 篇语料 + 种子资料、34 个问题（其中 12 个是调参之后才加入的 held-out），在内存和 MySQL 两种 Store 上要求 recall@3 = 1.0，并核对首条引用的文档、商品、来源和摘要。
+- 评测：`TestRecallOnFixedCorpus` 用 `fixtures/rag/` 的 13 篇语料 + 种子资料、34 个问题（其中 12 个是调参之后才加入的 held-out），在内存和 MySQL 两种 Store 上要求 recall@3 = 1.0，并核对首条引用的文档、商品、来源和摘要。同一批用例的 JSONL 版本在 `quality/data/eval/rag.jsonl`，由评测程序跑（见“离线评测”）。
+
+### 向量检索
+
+可选：`MILVUS_ADDR` 和 `EMBEDDING_API_KEY` 都配置了才启用，否则知识和商品都只用关键词。实现在 `src/vector`：
+
+- **Embedding**：OpenAI 兼容 `POST {EMBEDDING_BASE_URL}/embeddings`（`model`、`input`、`dimensions`），每批最多 10 条，校验返回维度；
+  默认 DashScope `text-embedding-v3`、1024 维（DeepSeek 没有 Embedding 接口）。`vector.HashEmbedder` 是只反映字面重合的散列向量，
+  只用于测试和本地演示链路，不要用于生产。
+- **Milvus**：走 RESTful API v2（`/v2/vectordb/...`，与 gRPC 同一个 19530 端口，不引入 SDK）。两个集合：知识分块
+  `MILVUS_TEXT_COLLECTION`（id=chunk_id，带 document_id / merchant_id / product_id / doc_type 过滤字段）和商品
+  `MILVUS_PRODUCT_COLLECTION`（id=product_id）。首次使用时自动建集合（COSINE、AUTOINDEX）；已有集合维度和当前 Embedding
+  不一致时报 `ErrDimMismatch`，换模型后用 `go run ./cmd/vectorindex -recreate` 重建。检索用强一致性，刚写入的数据就能查到。
+- **写入时机**：知识文档入库后按文档整篇覆盖（先删后写）；商品在新建、修改、删除、管理员上下架后异步同步（可见的写入，
+  不可见的删除）。非生产环境启动时（`BOOTSTRAP_VECTOR_INDEX`）在迁移完成后全量写一次；生产用 `cmd/vectorindex` 显式执行。
+- **安全**：向量结果只是候选，一律回到 Store 按可见性和过滤条件取回——索引过期（例如店铺停业后商品没逐个同步）只影响召回，
+  不会把下架、删除、风控的商品或分块返回出去。Milvus 或 Embedding 出错时降级关键词并记 `vector_error`。
+- 本地 Milvus 集成测试：`BLINK_TEST_MILVUS_ADDR=127.0.0.1:19530 go test ./src/vector`（用带随机后缀的临时集合，结束删除；CI 没有 Milvus，自动跳过）。
 
 ## 购物车与优惠券
 
@@ -409,7 +426,8 @@ curl -s -X POST $API/agent/runs/<run_id>:cancel -H "Authorization: Bearer $TOKEN
 | `image_search` | 带图片 / 拍照找同款 | （无，如实说明图搜还在接入） |
 | `non_guide` | 天气 / 写代码 / 笑话 | （无） |
 
-预算：`3000 以内`、`预算三千`、`两千五左右`（左右放宽 15%）、`1k`；排除：`不要 X`、`不买 X`、`除了 X`；序号：`第 N 个`、`最后一个`；
+预算：`3000 以内`、`预算三千`、`两千五左右`（左右放宽 15%）、`1k`；区间：`1000 到 3000`、`1000-3000`、`3000 以上`、`不低于 1000`；
+品牌：按在售商品的品牌词表识别（较长的品牌名优先，“Blink Home”不会再命中“Blink”）；排除：`不要 X`、`不买 X`、`除了 X`；序号：`第 N 个`、`最后一个`；
 指代：`这个 / 那个 / 刚才的`；数量：`两件`、`3 个`；评分：`五星`、`4 分`；订单号：`BS…` 或 `o_…`。
 
 ### 工具层
@@ -433,6 +451,44 @@ boolean / array，required、additionalProperties=false、enum、minimum/maximum
   取消原因只记长度，不记内容；再做通用处理：长字符串截断、数组只记长度；成功记结果摘要如数量 / ID，失败记错误码）；
   写操作另写一条审计日志 `action=agent.tool`，用同一套剔除规则。`fixtures/agent/tools.json` 的 `private` 字段列出每个工具不留存的参数。规划写 `planner.rule`（意图、动作、槽位），回答写 `answer.rule`
   （字数、块数、工具次数、是否在向用户提问）。
+
+### 商品搜索与重排
+
+`search_products` 的流程：关键词召回（最多 50）+ 向量召回（配置了时取前 20，按可见性重新取回）→ 结构化过滤（价格区间
+`min_price` / `max_price`、品牌 `brands` 精确匹配、排除词）→ 规则打分 → 冲突降级 → 可选模型重排 → 截断。
+
+- **规则打分**：检索词二元组覆盖率（整词命中名称加分）+ 3 × 向量相似度 + 每个命中“适合人群 / 标签 / 卖点”的用途词 1.5 +
+  命中分类名 1 − 缺货 1。指定品牌时品牌词只用于过滤，不计入相关度。每件候选的得分和原因（keyword / vector / use / category /
+  conflict / out_of_stock）写进轨迹 `rerank.products`。
+- **冲突**：检索词出现在商品的“不适合 / 注意事项”里（如“游泳用的耳机”对“不支持游泳佩戴”）时减 4 分并标为冲突：冲突的商品
+  永远排在后面、不能算作可靠命中；只剩冲突商品时整体为 weak，回答说明“不太合适”并以参考卡展示，不推荐。
+- **可靠度**：有整词命中（或向量相似度 ≥ 0.78）且不冲突为 `ok`，可以推荐；否则 `weak`，只作“相近商品”参考。
+- **模型重排**（`ai.rerank_enabled`，默认关）：小模型只能在规则前 10 名里调整顺序，输出必须全是候选 ID，否则（含坏 JSON、超时）
+  按规则顺序并在轨迹记 `error` + `fallback=rule`；冲突商品无论怎么排都在不冲突的后面。
+
+### 会话记忆
+
+只在同一账户的同一会话里（存储层所有读取都带 account_id，别人的会话按不存在处理，读不到任何记忆）：
+
+- **历史**：最近 `agent.memory_turns`（默认 10）轮的用户消息、回答和展示过的商品；所有展示过的商品都进入加购可信集，
+  “第一个 / 刚才那个”按最近一次展示的商品卡解析（中间隔了不展示商品的问答也可以）。
+- **相关轮次**：按检索词重合度取最相关的 3 轮，作为“相关的历史对话”交给小模型规划和工具循环（原话截断到 120 字）。
+- **追问继承**：本轮是商品需求但没有自己的品类锚点（排除项里的型号不算），且补了预算 / 区间 / 品牌 / 排除，或说了“还有别的 /
+  换一个 / 再推荐”（“那…呢”只在本轮已判为商品需求时算）时，沿用最近一次商品需求的检索词：“推荐拍照好的手机”→“那 3000 以内的呢”
+  搜的是“拍照 手机 + 3000 以内”。有自己的品类（“那耳机呢”）或只是闲聊时不继承。
+- **滚动摘要**：每次回答后按规则更新会话摘要——“用户咨询：”+ 最近各轮的主题（意图 + 检索词）去重连接，最多 500 字（超长从最早的
+  主题开始丢）；`ai.summary_enabled` 时改用小模型一句话概括（失败用规则）。只覆盖空摘要或自动生成的摘要（以“用户咨询：”开头），
+  用户手动改过的不动。写入前脱敏。
+- **轨迹**：`memory.retrieval`（轮数、相关轮次的消息 ID、可见商品数、是否继承及继承后的检索词）和 `memory.summary`（方式、字数），
+  不记历史原文。
+
+### 轨迹与脱敏
+
+一次运行的轨迹依次是：`run.start` → `risk.check` → `planner.model`（如有）→ `memory.retrieval`（新会话为 skipped）→ `planner.rule` →
+`react.step.N` / `tool.<name>` → `retrieval.products|knowledge`（召回来源与数量、向量降级、chunk_ids）→ `rerank.products` →
+`followup.rule|model` → `answer.model|rule` → `memory.summary` → `run.end`；风险词拦截时只有 `run.start` → `risk.check` →
+`followup.rule` → `answer.rule` → `run.end`。写入轨迹和日志的字符串先经 `agent.RedactPII`
+把手机号、邮箱、身份证号、银行卡号换成占位符；会话摘要同样脱敏；业务数据（评价、地址）本身不改。
 
 ### 结构化块
 
@@ -479,6 +535,23 @@ boolean / array，required、additionalProperties=false、enum、minimum/maximum
 `TestAgentShoppingLoopHTTP / MySQL`（`src/httpapi/agent_rule_test.go`）和 `quality/e2e/agent-api.spec.mjs` 用真实 HTTP + SSE 走通
 “推荐一款静音无线鼠标 → 把第一个加入购物车 → 结算 → 我的订单 → 支付订单”，并核对 REST 接口看到的购物车和订单状态；
 `fixtures/http/agent_message_stream_{ok,cart_add_ok,cart_add_unclear,checkout_ok,risk_blocked}.json` 是对应的录制样例。
+
+## 离线评测
+
+`src/eval` + `cmd/eval`：在内存 Store（开发种子 + `fixtures/rag/corpus.json`）上跑 `quality/data/eval/` 下的 JSONL 用例，
+报告（JSON + Markdown）含版本、配置和配置指纹、通过率、各项指标和失败样本：
+
+- `rag.jsonl`（38 条）：recall@3、MRR、held-out recall、无结果正确率；每条 citation 的 chunk_id 都要能回查。
+- `product_search.jsonl`（28 条）：经导购运行器端到端执行（每条一个新会话，可带 `history` 做多轮）：top1、推荐卡包含 / 不包含、
+  不推荐（无结果、相近、冲突）、负向约束（预算、区间、品牌、排除、冲突、下架 / 风控商品）和追问继承。
+
+```bash
+go run ./cmd/eval                                         # 关键词 / 规则；报告写到 ../quality/reports/eval-<时间>/
+MILVUS_ADDR=127.0.0.1:19530 go run ./cmd/eval -vector=hash  # 本地演示向量链路（散列向量 + 临时集合，跑完删除）
+go run ./cmd/eval -vector=env                             # 用 MILVUS_ADDR + EMBEDDING_* 的真实向量
+```
+
+`TestRAGSuite` / `TestProductSuite`（`go test ./src/eval`）在 CI 里要求两套全部通过。
 
 ## 认证与权限
 
@@ -577,6 +650,13 @@ boolean / array，required、additionalProperties=false、enum、minimum/maximum
 | `AI_MAX_RETRIES` | `ai.max_retries` | `2` | 429 / 5xx / 网络错误的重试次数（0–5；客户端在启动时读取） |
 | `AI_MAX_TOOL_ROUNDS` | `ai.max_tool_rounds` | `6` | 一次回答最多的工具循环轮数（1–12） |
 | `AGENT_TOOL_POLICY` | `agent.tool_policy` | 空 | 意图 → 工具白名单 JSON（如 `{"cart":["get_cart"]}`）；空用内置默认，见“导购规划与工具 → 模型” |
+| `AI_RERANK_ENABLED` | `ai.rerank_enabled` | `false` | 商品搜索结果用小模型重排 |
+| `AI_SUMMARY_ENABLED` | `ai.summary_enabled` | `false` | 会话摘要用小模型生成 |
+| `AGENT_MEMORY_TURNS` | `agent.memory_turns` | `10` | 导购记忆参与检索的最近轮数（1–50） |
+| `MILVUS_ADDR` | — | 空 | Milvus 地址（REST v2，如 `127.0.0.1:19530`）；为空不用向量检索 |
+| `MILVUS_TEXT_COLLECTION` / `MILVUS_PRODUCT_COLLECTION` | — | `blink_shop_text_chunks` / `blink_shop_products` | 向量集合名 |
+| `EMBEDDING_API_KEY` | — | 空 | 密钥类；和 `MILVUS_ADDR` 都配置了才启用向量检索 |
+| `EMBEDDING_BASE_URL` / `EMBEDDING_MODEL` / `EMBEDDING_DIM` | — | DashScope 兼容地址 / `text-embedding-v3` / `1024` | OpenAI 兼容 Embedding 服务；换模型或维度要重建集合 |
 | `RISK_BLOCKED_WORDS` | `risk.blocked_words` | `违法,违禁,假货,绕过风控` | 导购对话的风险词，逗号分隔（最多 200 个、每个 20 字内） |
 
 ### 生产危险配置
@@ -586,7 +666,8 @@ boolean / array，required、additionalProperties=false、enum、minimum/maximum
 - `MYSQL_DSN` 无法解析，或密码为空 / `root` / `password` / `123456` / `blink_dev_password` / `blink_dev_root`；
 - `CORS_ALLOWED_ORIGINS` 为空或包含 `*`；
 - `MINIO_ACCESS_KEY` 或 `MINIO_SECRET_KEY` 为空或 `minioadmin`；
-- `MILVUS_TOKEN` 为空或 `root:Milvus`；
+- 配置了 `MILVUS_ADDR` 时 `MILVUS_TOKEN` 为空或 `root:Milvus`（不用 Milvus 时不检查）；
+- `EMBEDDING_API_KEY` 非空但是示例值；
 - `AI_API_KEY` 非空但是示例值（`changeme`、`your-api-key`、`sk-xxx`）；为空允许，表示不接模型，导购只走规则；
 - `TRUST_ALL_PROXIES` 开启。
 

@@ -585,7 +585,7 @@
       "write": false
     },
     {
-      "description": "搜索当前商品库：按关键词召回，按预算和排除词过滤，再按相关性排序。只有 relevance=ok 的结果能当作推荐。",
+      "description": "搜索当前商品库：关键词（和向量，如果配置了）召回，按价格区间、品牌和排除词过滤，按相关性、用途匹配重排；与商品“不适合 / 注意事项”冲突的不作为推荐。只有 relevance=ok 的结果能当作推荐。",
       "intents": [
         "cart",
         "guide",
@@ -598,6 +598,16 @@
       "parameters": {
         "additionalProperties": false,
         "properties": {
+          "brands": {
+            "description": "只要这些品牌",
+            "items": {
+              "maxLength": 30,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 5,
+            "type": "array"
+          },
           "category_id": {
             "description": "限定分类 ID（含子分类）",
             "type": "string"
@@ -621,6 +631,11 @@
           },
           "max_price": {
             "description": "价格上限（元）",
+            "minimum": 0,
+            "type": "number"
+          },
+          "min_price": {
+            "description": "价格下限（元）",
             "minimum": 0,
             "type": "number"
           },

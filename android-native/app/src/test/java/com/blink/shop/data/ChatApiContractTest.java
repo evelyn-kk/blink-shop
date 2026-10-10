@@ -56,7 +56,7 @@ public class ChatApiContractTest {
         assertEquals(1, page.items.size());
         ChatSession s = page.items.get(0);
         assertEquals("耳机咨询", s.title);
-        assertEquals("用户咨询：推荐一款通勤降噪耳机", s.summary);
+        assertEquals(f.body().getJSONArray("items").getJSONObject(0).getString("summary"), s.summary);
         assertEquals(1, s.messageCount);
         assertFalse(s.pinned);
         assertFalse(s.lastMessageAt.isEmpty());

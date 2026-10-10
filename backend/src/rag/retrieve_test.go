@@ -166,3 +166,34 @@ func TestSearchLimitsAndEmptyQuery(t *testing.T) {
 		t.Fatal("product filter returned nothing")
 	}
 }
+
+// 向量只能加分：相似度很低（或向量没命中）的分块，混合模式下的分数不低于纯关键词分，关键词能召回的结果不会因此丢失。
+func TestHybridNeverDropsKeywordResults(t *testing.T) {
+	st := memstore.New()
+	loadCorpus(t, st)
+	ctx := context.Background()
+	q := rag.Query{Text: "台灯坏了能换新吗", TopK: 5}
+	kw, err := rag.NewRetriever(st, nil, nil).Search(ctx, q)
+	if err != nil || len(kw.Citations) == 0 {
+		t.Fatalf("keyword: %+v %v", kw, err)
+	}
+	weak := make([]rag.VectorHit, 0, len(kw.Citations))
+	for _, c := range kw.Citations {
+		weak = append(weak, rag.VectorHit{ChunkID: c.ChunkID, Score: 0.01})
+	}
+	for _, vec := range []*fakeVector{{hits: weak}, {hits: nil}} {
+		hy, err := rag.NewRetriever(st, vec, nil).Search(ctx, q)
+		if err != nil || hy.Mode != "hybrid" {
+			t.Fatalf("hybrid: %+v %v", hy, err)
+		}
+		score := map[string]float64{}
+		for _, c := range hy.Citations {
+			score[c.ChunkID] = c.Score
+		}
+		for _, c := range kw.Citations {
+			if s, ok := score[c.ChunkID]; !ok || s < c.Score {
+				t.Fatalf("keyword result %s dropped or lowered: kw=%v hybrid=%v", c.ChunkID, c.Score, s)
+			}
+		}
+	}
+}

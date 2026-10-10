@@ -159,7 +159,7 @@ func TestAgentGuardsHTTP(t *testing.T) {
 	for _, it := range trace.Items {
 		stages = append(stages, it.Stage+"."+it.EventType+"."+it.Status)
 	}
-	if got := strings.Join(stages, ","); got != "run.start.ok,risk.check.blocked,answer.rule.ok,run.end.completed" {
+	if got := strings.Join(stages, ","); got != "run.start.ok,risk.check.blocked,followup.rule.ok,answer.rule.ok,run.end.completed" {
 		t.Fatalf("risk trace: %s", got)
 	}
 	if !strings.Contains(ts.logs.String(), `"action":"agent.risk_blocked"`) {

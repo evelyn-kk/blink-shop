@@ -663,6 +663,7 @@ func (s *Server) handleCreateMerchantProduct(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	s.audit(r, "product.created", acc.AccountID, "merchant_id", acc.MerchantID, "product_id", created.ProductID)
+	s.syncProductVectors(created.ProductID)
 	writeJSON(w, http.StatusCreated, toMerchantProductView(created))
 }
 
@@ -690,6 +691,7 @@ func (s *Server) handleUpdateMerchantProduct(w http.ResponseWriter, r *http.Requ
 		return applyProductInput(p, in, false, cats)
 	})
 	if s.writeProductMutation(w, r, err) {
+		s.syncProductVectors(updated.ProductID)
 		s.audit(r, "product.updated", acc.AccountID, "merchant_id", acc.MerchantID, "product_id", updated.ProductID,
 			"status", string(updated.Status))
 		writeJSON(w, http.StatusOK, toMerchantProductView(updated))
@@ -709,6 +711,7 @@ func (s *Server) handleDeleteMerchantProduct(w http.ResponseWriter, r *http.Requ
 	})
 	if s.writeProductMutation(w, r, err) {
 		s.audit(r, "product.deleted", acc.AccountID, "merchant_id", acc.MerchantID, "product_id", id)
+		s.syncProductVectors(id)
 		writeJSON(w, http.StatusOK, productDeletedResponse{ProductID: id, Status: domain.ProductDeleted})
 	}
 }

@@ -23,7 +23,9 @@ import (
 	"github.com/evelyn-kk/blink-shop/backend/src/llm"
 	"github.com/evelyn-kk/blink-shop/backend/src/logging"
 	"github.com/evelyn-kk/blink-shop/backend/src/objectstore"
+	"github.com/evelyn-kk/blink-shop/backend/src/rag"
 	"github.com/evelyn-kk/blink-shop/backend/src/store/mysqlstore"
+	"github.com/evelyn-kk/blink-shop/backend/src/vector"
 )
 
 const (
@@ -98,13 +100,18 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 		logger.Warn("AI_API_KEY not set, agent runs on rules only")
 	}
 
+	// 向量检索：Milvus 和 Embedding 都配置了才启用；否则知识和商品都只用关键词检索。
+	vec := openVectorIndexes(cfg, logger)
+
 	server := httpapi.NewServer(httpapi.Options{
-		Logger:      logger,
-		Settings:    configcenter.NewHTTPSettingsProvider(resolver, cfg.IsProduction()),
-		Store:       st,
-		ObjectStore: objects,
-		AvatarDir:   cfg.AvatarUploadDir,
-		Configs:     configcenter.NewAdmin(resolver, dynamic),
+		VectorIndex:  vec.knowledgeOpt(),
+		ProductIndex: vec.productOpt(),
+		Logger:       logger,
+		Settings:     configcenter.NewHTTPSettingsProvider(resolver, cfg.IsProduction()),
+		Store:        st,
+		ObjectStore:  objects,
+		AvatarDir:    cfg.AvatarUploadDir,
+		Configs:      configcenter.NewAdmin(resolver, dynamic),
 		// 导购风险词和模型设置跟随动态配置（管理后台可改，立即生效）。
 		RiskWords: func(ctx context.Context) []string { return configcenter.RiskBlockedWords(ctx, resolver) },
 		LLM:       provider,
@@ -120,6 +127,10 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 	go server.RunOrderCloser(ctx, orderCloseInterval)
 	// 上一个进程没跑完的导购运行标为失败（数据库就绪后执行一次；本进程启动后开始的运行不受影响）。
 	go recoverRunsWhenReady(ctx, server, st, startedAt, logger)
+	// 非生产默认在启动时把已有知识和商品写入向量索引（BOOTSTRAP_VECTOR_INDEX）；生产用 cmd/vectorindex 显式执行。
+	if cfg.BootstrapVectorIndex && vec.enabled() {
+		go bootstrapVectorsWhenReady(ctx, st, vec, logger)
+	}
 
 	httpServer := &http.Server{
 		Handler:           server.Handler(),
@@ -230,4 +241,60 @@ func schemaReady(ctx context.Context, st *mysqlstore.Store) error {
 		return fmt.Errorf("还有 %d 个数据库迁移未执行", pending)
 	}
 	return nil
+}
+
+// vectorIndexes 是启动时创建的向量索引；未配置时两个都是 nil。
+type vectorIndexes struct {
+	knowledge *vector.KnowledgeIndex
+	products  *vector.ProductIndex
+}
+
+func (v vectorIndexes) enabled() bool { return v.knowledge != nil && v.products != nil }
+
+// knowledgeOpt / productOpt 返回接口值：nil 指针不能直接赋给接口（会得到非 nil 接口）。
+func (v vectorIndexes) knowledgeOpt() rag.VectorIndex {
+	if v.knowledge == nil {
+		return nil
+	}
+	return v.knowledge
+}
+
+func (v vectorIndexes) productOpt() rag.ProductIndex {
+	if v.products == nil {
+		return nil
+	}
+	return v.products
+}
+
+func openVectorIndexes(cfg configcenter.Config, logger *slog.Logger) vectorIndexes {
+	if !cfg.VectorEnabled() {
+		logger.Warn("vector search not configured (MILVUS_ADDR / EMBEDDING_API_KEY), using keyword retrieval only")
+		return vectorIndexes{}
+	}
+	m := vector.NewMilvus(cfg.MilvusAddr, cfg.MilvusToken, 10*time.Second)
+	e := vector.NewOpenAIEmbedder(vector.EmbedOptions{BaseURL: cfg.EmbeddingBaseURL, APIKey: cfg.EmbeddingAPIKey, Model: cfg.EmbeddingModel, Dim: cfg.EmbeddingDim})
+	if m == nil || e == nil {
+		logger.Warn("vector search not configured, using keyword retrieval only")
+		return vectorIndexes{}
+	}
+	logger.Info("vector search configured", "milvus_addr", cfg.MilvusAddr, "embedding_model", cfg.EmbeddingModel, "embedding_dim", cfg.EmbeddingDim,
+		"text_collection", cfg.MilvusTextCollection, "product_collection", cfg.MilvusProductCollection)
+	return vectorIndexes{knowledge: vector.NewKnowledgeIndex(m, e, cfg.MilvusTextCollection), products: vector.NewProductIndex(m, e, cfg.MilvusProductCollection)}
+}
+
+// bootstrapVectorsWhenReady 等数据库迁移完成后建一次全量向量索引；失败只记日志（关键词检索照常可用）。
+func bootstrapVectorsWhenReady(ctx context.Context, st *mysqlstore.Store, vec vectorIndexes, logger *slog.Logger) {
+	for schemaReady(ctx, st) != nil {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(migrateRetryInterval):
+		}
+	}
+	stats, err := vector.Bootstrap(ctx, st, vec.knowledge, vec.products, logger)
+	if err != nil {
+		logger.Error("vector bootstrap failed", "error", err)
+		return
+	}
+	logger.Info("vector bootstrap done", "documents", stats.Documents, "chunks", stats.Chunks, "products", stats.Products, "failed", stats.Failed)
 }

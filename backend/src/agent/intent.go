@@ -17,8 +17,13 @@ type Plan struct {
 	Action string `json:"action,omitempty"`
 	// Query 是去掉口头语后的商品/知识检索词。
 	Query string `json:"query,omitempty"`
-	// Budget 是价格上限（0 表示没有）。
-	Budget domain.Money `json:"budget,omitempty"`
+	// Budget 是价格上限，MinPrice 是价格下限（0 表示没有）。
+	Budget   domain.Money `json:"budget,omitempty"`
+	MinPrice domain.Money `json:"min_price,omitempty"`
+	// Brands 是用户要求的品牌（由规则处理器按在售品牌词表识别）。
+	Brands []string `json:"brands,omitempty"`
+	// Inherited 表示检索词沿用了上文的商品需求（如“那 3000 以内的呢”）。
+	Inherited bool `json:"inherited,omitempty"`
 	// Exclude 是用户明确排除的词。
 	Exclude []string `json:"exclude,omitempty"`
 	// Ordinal 是“第 N 个”（-1 表示最后一个，0 表示没有）；Reference 表示用“这个/那个/刚才的”指代上文。
@@ -110,6 +115,12 @@ func Classify(content string, hasImage bool) Plan {
 
 	base := Plan{Ordinal: ParseOrdinal(text), Reference: referenceRe.MatchString(text), Quantity: ParseQuantity(text),
 		Budget: ParseBudget(text), Exclude: ParseExclusions(text), OrderRef: ParseOrderRef(text)}
+	if lo, hi := ParsePriceRange(text); lo > 0 {
+		base.MinPrice = lo
+		if hi > 0 {
+			base.Budget = hi
+		}
+	}
 
 	// 4. 购物车操作。
 	if containsAny(lower, cartAddWords...) {
@@ -239,7 +250,7 @@ func Classify(content string, hasImage bool) Plan {
 	}
 
 	// 11. 商品搜索：有购物动词或品类词。
-	if containsAny(lower, searchWords...) || containsAny(lower, catalogWords...) || base.Budget > 0 || len(base.Exclude) > 0 {
+	if containsAny(lower, searchWords...) || containsAny(lower, catalogWords...) || base.Budget > 0 || base.MinPrice > 0 || len(base.Exclude) > 0 {
 		p := base
 		p.Intent, p.Rule = IntentProductSearch, "product_search"
 		p.Query = productQuery(text)

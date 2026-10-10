@@ -62,8 +62,12 @@ func (r *RuleRunner) Run(ctx context.Context, in Input, out Output) error {
 	}
 
 	st := r.modelsFor(ctx)
-	hist := loadHistory(ctx, r.deps.Store, in.AccountID, in.SessionID, in.RunID)
+	memStart := r.deps.Now()
+	hist := loadMemory(ctx, r.deps.Store, in.AccountID, in.SessionID, in.RunID, st.MemoryTurns)
+	relevant := hist.recall(in.Content)
 	plan := r.plan(ctx, in, st, out, hist)
+	plan, inherited := hist.inherit(plan, in.Content)
+	out.Trace("memory", "retrieval", memoryStatus(hist), r.deps.Now().Sub(memStart), memoryMeta(hist, relevant, plan, inherited))
 	out.Thinking(Step{ID: "understand", Title: "理解你的问题", Status: StepDone})
 	out.Thinking(Step{ID: "plan", Title: "判断需求：" + IntentTitle(plan.Intent), Status: StepDone})
 	out.Trace("planner", "rule", "ok", r.deps.Now().Sub(start), planMeta(plan))
@@ -73,6 +77,13 @@ func (r *RuleRunner) Run(ctx context.Context, in Input, out Output) error {
 	for id := range s.history.Evidence {
 		s.tc.Evidence[id] = true
 	}
+	defer func() {
+		if ctx.Err() == nil {
+			if summary, mode := r.updateSummary(ctx, st, in, s.plan, hist, s.answer.String()); summary != "" {
+				out.Trace("memory", "summary", "ok", 0, map[string]any{"mode": mode, "runes": utf8.RuneCountInString(summary)})
+			}
+		}
+	}()
 	if st.AgentEnabled && usesModelAnswer(plan) && s.answerWithModel(ctx, st) {
 		s.finish(start)
 		return ctx.Err()
@@ -87,6 +98,26 @@ func (r *RuleRunner) Run(ctx context.Context, in Input, out Output) error {
 	return nil
 }
 
+func memoryStatus(h history) string {
+	if len(h.Turns) == 0 {
+		return "skipped"
+	}
+	return "ok"
+}
+
+// memoryMeta 只记轮数、相关轮次的消息 ID 和是否继承了上文需求，不记历史原文。
+func memoryMeta(h history, relevant []memTurn, p Plan, inherited bool) map[string]any {
+	ids := make([]string, 0, len(relevant))
+	for _, t := range relevant {
+		ids = append(ids, t.MessageID)
+	}
+	m := map[string]any{"turns": len(h.Turns), "relevant_message_ids": ids, "visible_products": len(h.Evidence), "inherited": inherited}
+	if inherited {
+		m["query"] = RedactPII(p.Query)
+	}
+	return m
+}
+
 func hasImage(atts []domain.Attachment) bool {
 	for _, a := range atts {
 		if strings.HasPrefix(a.MimeType, "image/") {
@@ -99,7 +130,7 @@ func hasImage(atts []domain.Attachment) bool {
 func planMeta(p Plan) map[string]any {
 	m := toJSONMap(p)
 	delete(m, "content") // 评价正文不进轨迹
-	return m
+	return redactValue(m).(map[string]any)
 }
 
 // session 是一次运行内的状态：输出、规划、工具上下文和统计。
@@ -110,15 +141,18 @@ type session struct {
 	plan    Plan
 	tc      *ToolContext
 	history history
+	answer  strings.Builder
 	runes   int
 	blocks  int
 	steps   int
 	asked   bool // 已经向用户提问（需要补充信息），追问按提问场景生成
 	done    bool // 已经生成过追问
+	// followupSource 是追问的来源（rule / model），写进轨迹。
+	followupSource string
 }
 
 func newSession(r *RuleRunner, in Input, out Output, plan Plan) *session {
-	return &session{r: r, in: in, out: out, plan: plan,
+	return &session{r: r, in: in, out: out, plan: plan, followupSource: "rule",
 		tc: &ToolContext{AccountID: in.AccountID, SessionID: in.SessionID, RunID: in.RunID, Intent: plan.Intent, Evidence: map[string]bool{}}}
 }
 
@@ -129,6 +163,7 @@ func (s *session) say(text string) {
 		return
 	}
 	s.runes += utf8.RuneCountInString(text)
+	s.answer.WriteString(text)
 	var buf strings.Builder
 	for _, r := range text {
 		buf.WriteRune(r)
@@ -162,6 +197,7 @@ func (s *session) followups(qs ...string) {
 		}
 	}
 	s.out.Followups(out)
+	s.out.Trace("followup", s.followupSource, "ok", 0, map[string]any{"count": len(out)})
 }
 
 // ask 向用户提问（需要补充信息才能继续），不做写操作。
@@ -197,6 +233,9 @@ func (s *session) call(ctx context.Context, title, tool string, args map[string]
 		meta["result"] = summarize(obs.Data)
 	}
 	s.out.Trace("tool", tool, status, obs.Duration, meta)
+	if obs.OK {
+		s.traceRetrieval(obs.Data)
+	}
 	return obs
 }
 
@@ -260,5 +299,26 @@ func defaultFollowups(intent Intent) []string {
 		return []string{"七天无理由怎么退", "保修多久", "推荐一款手机"}
 	default:
 		return []string{"推荐一款通勤降噪耳机", "3000 以内的手机", "看看我的购物车"}
+	}
+}
+
+// traceRetrieval 为检索类工具补充召回和重排的轨迹：召回来源与数量、向量是否降级、重排方式和前几名的得分（只记 ID 和分数）。
+func (s *session) traceRetrieval(data any) {
+	switch d := data.(type) {
+	case ProductSearchResult:
+		s.out.Trace("retrieval", "products", "ok", 0, map[string]any{"keyword": d.Recall.Keyword, "vector": d.Recall.Vector,
+			"vector_error": d.Recall.VectorError, "filtered": d.Filtered, "relevance": d.Relevance, "conflicts": len(d.Conflicts)})
+		meta := map[string]any{"mode": d.Rerank.Mode, "scores": d.Rerank.Scores}
+		status := "ok"
+		if d.Rerank.Error != "" {
+			meta["error"], meta["fallback"], status = d.Rerank.Error, "rule", "error"
+		}
+		s.out.Trace("rerank", "products", status, 0, meta)
+	case KnowledgeResult:
+		ids := make([]string, 0, len(d.Citations))
+		for _, c := range d.Citations {
+			ids = append(ids, c.ChunkID)
+		}
+		s.out.Trace("retrieval", "knowledge", "ok", 0, map[string]any{"mode": d.Mode, "chunk_ids": ids, "vector_error": d.VectorError})
 	}
 }

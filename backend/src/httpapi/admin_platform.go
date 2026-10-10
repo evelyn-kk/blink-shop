@@ -310,6 +310,7 @@ func (s *Server) handleUpdateAdminProduct(w http.ResponseWriter, r *http.Request
 		s.writeChangeError(w, r, err, ErrProductNotFound, from, in.Status)
 		return
 	}
+	s.syncProductVectors(id)
 	merchant, _ := s.store.GetMerchant(r.Context(), updated.MerchantID)
 	writeJSON(w, http.StatusOK, toAdminProductView(store.CatalogProduct{Product: updated, MerchantName: merchant.Name}))
 }

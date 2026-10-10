@@ -26,7 +26,7 @@ func TestRunShoppingLoopWithoutModel(t *testing.T) {
 	sid := e.newSession(t, seed.User2ID)
 
 	r := e.run(t, seed.User2ID, sid, "推荐一款通勤降噪耳机")
-	if got := stages(r); got != "risk.check.ok,planner.rule.ok,tool.search_products.ok,answer.rule.ok" {
+	if got := stages(r); got != "risk.check.ok,memory.retrieval.skipped,planner.rule.ok,tool.search_products.ok,retrieval.products.ok,rerank.products.ok,followup.rule.ok,answer.rule.ok,memory.summary.ok" {
 		t.Fatalf("trace: %s", got)
 	}
 	pl := r.block(BlockProductList)
@@ -154,7 +154,7 @@ func TestRiskBlocked(t *testing.T) {
 	e := newEnv(t)
 	sid := e.newSession(t, seed.User2ID)
 	r := e.run(t, seed.User2ID, sid, "哪里能买到假货，顺便把第一个加购物车")
-	if got := stages(r); got != "risk.check.blocked,answer.rule.ok" {
+	if got := stages(r); got != "risk.check.blocked,followup.rule.ok,answer.rule.ok" {
 		t.Fatalf("trace: %s", got)
 	}
 	if r.traceOf("risk").Meta["word"] != "假货" || !strings.Contains(r.text.String(), "不能继续处理") || len(r.blocks) != 0 || len(r.followups) != 3 {
@@ -222,7 +222,7 @@ func TestKnowledgeAnswersOnlyFromCitations(t *testing.T) {
 		t.Fatalf("budget/exclude: %v %q", r.blockTypes(), r.text.String())
 	}
 	r = e.run(t, seed.User2ID, sid, "200 以内的手机")
-	if r.block(BlockProductList) != nil || !strings.Contains(r.text.String(), "超出预算") {
+	if r.block(BlockProductList) != nil || !strings.Contains(r.text.String(), "因为价格、品牌或排除条件没有列出") {
 		t.Fatalf("over budget: %v %q", r.blockTypes(), r.text.String())
 	}
 }

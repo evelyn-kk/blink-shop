@@ -1,14 +1,12 @@
 package agent
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/domain"
 	"github.com/evelyn-kk/blink-shop/backend/src/rag"
 	"github.com/evelyn-kk/blink-shop/backend/src/shop"
-	"github.com/evelyn-kk/blink-shop/backend/src/store"
 )
 
 // 结构化块（docs/03、openapi AgentBlock）。所有商品、订单、券、引用都来自工具返回，客户端只渲染不推断。
@@ -195,43 +193,3 @@ func itoa(n int) string {
 }
 
 // ---------- 会话上下文 ----------
-
-// history 是会话里之前几轮给用户看过的商品：Cards 是最近一张商品卡/对比表里的商品（按展示顺序），
-// Evidence 是全部出现过的商品 ID。“把第一个加购物车”按 Cards 解析；加购只接受 Evidence 里的商品。
-type history struct {
-	Cards    []ProductCard
-	Evidence map[string]bool
-}
-
-// loadHistory 读取会话历史里的商品块；当前运行（RunID）排除。读取失败按没有历史处理（不影响回答）。
-func loadHistory(ctx context.Context, st store.Store, accountID, sessionID, currentRunID string) history {
-	h := history{Evidence: map[string]bool{}}
-	turns, err := st.ListChatMessages(ctx, accountID, sessionID)
-	if err != nil {
-		return h
-	}
-	for _, t := range turns {
-		if t.Run == nil || t.Run.RunID == currentRunID {
-			continue
-		}
-		var cards []ProductCard
-		for _, b := range t.Run.Blocks {
-			kind, _ := b["type"].(string)
-			if kind != BlockProductList && kind != BlockComparison {
-				continue
-			}
-			raw, _ := json.Marshal(b["products"])
-			var list []ProductCard
-			if json.Unmarshal(raw, &list) == nil && len(list) > 0 {
-				cards = list
-			}
-		}
-		if len(cards) > 0 {
-			h.Cards = cards
-			for _, c := range cards {
-				h.Evidence[c.ProductID] = true
-			}
-		}
-	}
-	return h
-}

@@ -59,7 +59,7 @@ func TestModelDisabledBehavesLikeRules(t *testing.T) {
 	if mock.Count() != 0 {
 		t.Fatalf("model called %d times while disabled", mock.Count())
 	}
-	if got := stages(r); got != "risk.check.ok,planner.rule.ok,tool.search_products.ok,answer.rule.ok" {
+	if got := stages(r); got != "risk.check.ok,memory.retrieval.skipped,planner.rule.ok,tool.search_products.ok,retrieval.products.ok,rerank.products.ok,followup.rule.ok,answer.rule.ok,memory.summary.ok" {
 		t.Fatalf("trace: %s", got)
 	}
 	if productIDs(r.block(BlockProductList))[0] != "p_seed_earbuds" {
@@ -71,7 +71,8 @@ func TestModelDisabledBehavesLikeRules(t *testing.T) {
 	deps.Settings = func(context.Context) ModelSettings { return settings(true, true) }
 	e.runner = NewRuleRunner(deps)
 	r = e.run(t, seed.User2ID, sid, "推荐一款通勤降噪耳机")
-	if got := stages(r); got != "risk.check.ok,planner.rule.ok,tool.search_products.ok,answer.rule.ok" {
+	// 同一会话第二轮：有历史（memory ok），同一主题摘要不变（不再写 summary）
+	if got := stages(r); got != "risk.check.ok,memory.retrieval.ok,planner.rule.ok,tool.search_products.ok,retrieval.products.ok,rerank.products.ok,followup.rule.ok,answer.rule.ok" {
 		t.Fatalf("trace without llm: %s", got)
 	}
 }
@@ -132,7 +133,7 @@ func TestModelReactHappyPath(t *testing.T) {
 		llm.Reply{Content: `{"type":"final","text":"推荐 **Blink Air 降噪耳机**（p_seed_earbuds），主动降噪。还有 p_fake_123 也不错。\n<final>完</final>","followups":["把第一个加入购物车","有什么优惠券","","太长的追问太长的追问太长的追问太长的追问太长的追问太长的追问太长的追问太长的追问太长的追问","第四个"]}`,
 			Usage: llm.Usage{PromptTokens: 800, CompletionTokens: 60}})
 	r := e.run(t, seed.User2ID, sid, "推荐一款通勤降噪耳机")
-	if got := stages(r); got != "risk.check.ok,planner.rule.ok,react.step.1.ok,tool.search_products.ok,react.step.2.ok,answer.model.ok,answer.rule.ok" {
+	if got := stages(r); got != "risk.check.ok,memory.retrieval.skipped,planner.rule.ok,react.step.1.ok,tool.search_products.ok,retrieval.products.ok,rerank.products.ok,react.step.2.ok,followup.model.ok,answer.model.ok,answer.rule.ok,memory.summary.ok" {
 		t.Fatalf("trace: %s", got)
 	}
 	if text := r.text.String(); strings.Contains(text, "p_seed") || strings.Contains(text, "p_fake") || strings.Contains(text, "<final>") || !strings.Contains(text, "推荐 **Blink Air 降噪耳机**") {

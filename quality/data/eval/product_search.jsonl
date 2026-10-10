@@ -1,0 +1,29 @@
+# 商品搜索评测集：经导购运行器（规则模式）端到端执行，每条一个新会话；history 是先发的几句话。expect_top / expect_ids / absent 都针对推荐卡（“为你找到的商品”），expect_none 表示不能给出推荐卡。
+{"id": "ps_001", "query": "推荐一款通勤降噪耳机", "expect_top": "p_seed_earbuds", "tags": ["basic"]}
+{"id": "ps_002", "query": "推荐一款静音无线鼠标", "expect_top": "p_seed_mouse", "tags": ["basic"]}
+{"id": "ps_003", "query": "想买个台灯给孩子学习用", "expect_top": "p_seed_lamp", "tags": ["basic", "use"]}
+{"id": "ps_004", "query": "推荐一款手机", "expect_ids": ["p_seed_nova", "p_seed_vista"], "tags": ["basic"]}
+{"id": "ps_005", "query": "有没有机械键盘", "expect_top": "p_seed_keyboard", "tags": ["basic", "out_of_stock"]}
+{"id": "ps_010", "query": "3000 以内拍照好的手机", "expect_top": "p_seed_nova", "absent": ["p_seed_vista"], "tags": ["budget", "negative"]}
+{"id": "ps_011", "query": "预算三千左右的手机", "expect_top": "p_seed_nova", "absent": ["p_seed_vista"], "tags": ["budget", "negative"]}
+{"id": "ps_012", "query": "1000 到 3500 的手机", "expect_top": "p_seed_nova", "absent": ["p_seed_vista"], "tags": ["range", "negative"]}
+{"id": "ps_013", "query": "4000 以上的手机", "expect_top": "p_seed_vista", "absent": ["p_seed_nova"], "tags": ["range", "negative"]}
+{"id": "ps_014", "query": "200 以内的手机", "expect_none": true, "expect_text": ["没有找到符合条件"], "tags": ["budget", "negative", "no_result"]}
+{"id": "ps_015", "query": "100 块以内的鼠标", "expect_none": true, "tags": ["budget", "negative", "no_result"]}
+{"id": "ps_020", "query": "拍照好的手机，不要 Vista", "expect_top": "p_seed_nova", "absent": ["p_seed_vista"], "tags": ["exclude", "negative"]}
+{"id": "ps_021", "query": "推荐手机，不要 Nova", "expect_top": "p_seed_vista", "absent": ["p_seed_nova"], "tags": ["exclude", "negative"]}
+{"id": "ps_022", "query": "推荐一款 Blink Home 的台灯", "expect_top": "p_seed_lamp", "tags": ["brand"]}
+{"id": "ps_023", "query": "推荐一款 Blink Home 的耳机", "expect_none": true, "tags": ["brand", "negative", "no_result"]}
+{"id": "ps_030", "query": "旅行拍照用的手机", "expect_top": "p_seed_vista", "tags": ["use"]}
+{"id": "ps_031", "query": "学生用的手机", "expect_top": "p_seed_nova", "tags": ["use"]}
+{"id": "ps_032", "query": "宿舍里用的安静鼠标", "expect_top": "p_seed_mouse", "tags": ["use"]}
+{"id": "ps_040", "query": "推荐游泳用的耳机", "expect_none": true, "expect_text": ["不太合适"], "tags": ["conflict", "negative"]}
+{"id": "ps_041", "query": "高强度电竞用的鼠标", "expect_none": true, "tags": ["conflict", "negative"]}
+{"id": "ps_050", "query": "推荐一台洗衣机", "expect_none": true, "tags": ["no_result", "negative"]}
+{"id": "ps_051", "query": "便携音箱推荐", "expect_none": true, "absent": ["p_seed_speaker"], "tags": ["inactive", "negative"]}
+{"id": "ps_052", "query": "推荐快充移动电源", "expect_none": true, "absent": ["p_seed_powerbank"], "tags": ["risk_status", "negative"]}
+{"id": "ps_053", "query": "今天天气怎么样", "expect_none": true, "tags": ["non_guide", "negative"]}
+{"id": "ps_060", "history": ["推荐一款拍照好的手机"], "query": "那 3000 以内的呢", "expect_top": "p_seed_nova", "absent": ["p_seed_vista"], "tags": ["memory", "budget", "negative"]}
+{"id": "ps_061", "history": ["推荐一款手机"], "query": "还有别的吗，不要 Nova", "expect_top": "p_seed_vista", "absent": ["p_seed_nova"], "tags": ["memory", "exclude", "negative"]}
+{"id": "ps_062", "history": ["推荐一款拍照好的手机"], "query": "那耳机呢", "expect_top": "p_seed_earbuds", "tags": ["memory"]}
+{"id": "ps_063", "history": ["推荐一款手机", "有什么优惠券"], "query": "那 4000 以上的呢", "expect_top": "p_seed_vista", "absent": ["p_seed_nova"], "tags": ["memory", "range", "negative"]}

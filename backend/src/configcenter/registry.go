@@ -68,5 +68,19 @@ var (
 	KeyAIMaxRetries     = Key{Name: "ai.max_retries", Env: "AI_MAX_RETRIES", Default: "2"}
 	KeyAIMaxToolRounds  = Key{Name: "ai.max_tool_rounds", Env: "AI_MAX_TOOL_ROUNDS", Default: "6"}
 	// KeyAgentToolPolicy 是意图 → 可用工具的白名单（JSON 对象，值为工具名数组）；空表示用内置默认。模型只能在白名单内选工具。
-	KeyAgentToolPolicy = Key{Name: "agent.tool_policy", Env: "AGENT_TOOL_POLICY"}
+	KeyAgentToolPolicy  = Key{Name: "agent.tool_policy", Env: "AGENT_TOOL_POLICY"}
+	KeyAIRerankEnabled  = Key{Name: "ai.rerank_enabled", Env: "AI_RERANK_ENABLED", Default: "false"}
+	KeyAISummaryEnabled = Key{Name: "ai.summary_enabled", Env: "AI_SUMMARY_ENABLED", Default: "false"}
+	KeyMemoryTurns      = Key{Name: "agent.memory_turns", Env: "AGENT_MEMORY_TURNS", Default: "10"}
+)
+
+// 向量检索：Milvus（REST v2）+ OpenAI 兼容 Embedding。两者都配置了才启用，否则只用关键词检索。仅启动时读取。
+var (
+	KeyMilvusAddr              = Key{Name: "milvus.addr", Env: "MILVUS_ADDR"}
+	KeyMilvusTextCollection    = Key{Name: "milvus.text_collection", Env: "MILVUS_TEXT_COLLECTION", Default: "blink_shop_text_chunks"}
+	KeyMilvusProductCollection = Key{Name: "milvus.product_collection", Env: "MILVUS_PRODUCT_COLLECTION", Default: "blink_shop_products"}
+	KeyEmbeddingBaseURL        = Key{Name: "embedding.base_url", Env: "EMBEDDING_BASE_URL", Default: "https://dashscope.aliyuncs.com/compatible-mode/v1"}
+	KeyEmbeddingAPIKey         = Key{Name: "embedding.api_key", Env: "EMBEDDING_API_KEY", Secret: true}
+	KeyEmbeddingModel          = Key{Name: "embedding.model", Env: "EMBEDDING_MODEL", Default: "text-embedding-v3"}
+	KeyEmbeddingDim            = Key{Name: "embedding.dim", Env: "EMBEDDING_DIM", Default: "1024"}
 )

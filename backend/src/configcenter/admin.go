@@ -95,6 +95,14 @@ func retries(v string) error {
 	return nil
 }
 
+func memoryTurns(v string) error {
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 1 || n > 50 {
+		return errors.New("必须是 1 到 50 的整数")
+	}
+	return nil
+}
+
 func toolRounds(v string) error {
 	n, err := strconv.Atoi(strings.TrimSpace(v))
 	if err != nil || n < 1 || n > 12 {
@@ -141,7 +149,16 @@ var settings = []Setting{
 	{Key: KeyAIMaxRetries, Description: "模型调用失败（限流、5xx、网络）的重试次数，0–5", Runtime: true, validate: retries},
 	{Key: KeyAIMaxToolRounds, Description: "一次回答最多的工具循环轮数，1–12", Runtime: true, validate: toolRounds},
 	{Key: KeyAgentToolPolicy, Description: "意图 → 可用工具白名单（JSON，如 {\"cart\":[\"get_cart\"]}），空表示内置默认；未知工具会被忽略，模型不能绕过", Runtime: true, validate: toolPolicy},
+	{Key: KeyAIRerankEnabled, Description: "商品搜索结果用小模型重排（失败按规则顺序）", Runtime: true, validate: boolValue},
+	{Key: KeyAISummaryEnabled, Description: "会话摘要用小模型生成（失败用规则）", Runtime: true, validate: boolValue},
+	{Key: KeyMemoryTurns, Description: "导购记忆参与检索的最近轮数，1–50", Runtime: true, validate: memoryTurns},
 	{Key: KeyAIBaseURL, Description: "模型服务地址（OpenAI 兼容）"},
+	{Key: KeyMilvusAddr, Description: "Milvus 地址（REST，如 127.0.0.1:19530）；为空表示不用向量检索"},
+	{Key: KeyMilvusTextCollection, Description: "知识分块向量集合名"},
+	{Key: KeyMilvusProductCollection, Description: "商品向量集合名"},
+	{Key: KeyEmbeddingBaseURL, Description: "Embedding 服务地址（OpenAI 兼容 /embeddings）"},
+	{Key: KeyEmbeddingModel, Description: "Embedding 模型名"},
+	{Key: KeyEmbeddingDim, Description: "Embedding 向量维度（换模型或维度要重建集合）"},
 	{Key: KeyAvatarUploadDir, Description: "头像文件目录"},
 	{Key: KeyMinIOEndpoint, Description: "对象存储地址"},
 	{Key: KeyMinIOBucket, Description: "对象存储桶名"},
@@ -151,6 +168,7 @@ var settings = []Setting{
 	{Key: KeyMinIOSecretKey, Description: "对象存储 Secret Key"},
 	{Key: KeyMilvusToken, Description: "Milvus 访问令牌"},
 	{Key: KeyAIAPIKey, Description: "模型服务 API Key"},
+	{Key: KeyEmbeddingAPIKey, Description: "Embedding 服务 API Key"},
 }
 
 // Settings 返回全部配置项（副本）。

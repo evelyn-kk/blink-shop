@@ -28,6 +28,19 @@ type Config struct {
 	AIAPIKey             string
 	AIBaseURL            string
 	AvatarUploadDir      string
+	// 向量检索（都配置了才启用）
+	MilvusAddr              string
+	MilvusTextCollection    string
+	MilvusProductCollection string
+	EmbeddingBaseURL        string
+	EmbeddingAPIKey         string
+	EmbeddingModel          string
+	EmbeddingDim            int
+}
+
+// VectorEnabled 表示 Milvus 和 Embedding 都配置了。
+func (c Config) VectorEnabled() bool {
+	return c.MilvusAddr != "" && strings.TrimSpace(c.EmbeddingAPIKey) != ""
 }
 
 // IsProduction 判断是否生产环境（production / prod）。
@@ -54,6 +67,13 @@ func Load(ctx context.Context, r *Resolver) (Config, error) {
 		AIAPIKey:        r.Get(ctx, KeyAIAPIKey),
 		AIBaseURL:       strings.TrimSpace(r.Get(ctx, KeyAIBaseURL)),
 		AvatarUploadDir: r.Get(ctx, KeyAvatarUploadDir),
+
+		MilvusAddr:              strings.TrimSpace(r.Get(ctx, KeyMilvusAddr)),
+		MilvusTextCollection:    strings.TrimSpace(r.Get(ctx, KeyMilvusTextCollection)),
+		MilvusProductCollection: strings.TrimSpace(r.Get(ctx, KeyMilvusProductCollection)),
+		EmbeddingBaseURL:        strings.TrimSpace(r.Get(ctx, KeyEmbeddingBaseURL)),
+		EmbeddingAPIKey:         r.Get(ctx, KeyEmbeddingAPIKey),
+		EmbeddingModel:          strings.TrimSpace(r.Get(ctx, KeyEmbeddingModel)),
 	}
 	switch cfg.AppEnv {
 	case "development", "test", "production", "prod":
@@ -78,6 +98,24 @@ func Load(ctx context.Context, r *Resolver) (Config, error) {
 	if _, err := parseHTTPSettings(ctx, r); err != nil {
 		errs = append(errs, err)
 	}
+	cfg.EmbeddingDim = int(collect(&errs, KeyEmbeddingDim, func() (int64, error) {
+		n, err := strconv.ParseInt(strings.TrimSpace(r.Get(ctx, KeyEmbeddingDim)), 10, 64)
+		if err != nil || n < 8 || n > 8192 {
+			return 0, errors.New("必须是 8 到 8192 的整数")
+		}
+		return n, nil
+	}))
+	for _, name := range []struct {
+		key Key
+		v   string
+	}{{KeyMilvusTextCollection, cfg.MilvusTextCollection}, {KeyMilvusProductCollection, cfg.MilvusProductCollection}} {
+		if !validCollectionName(name.v) {
+			errs = append(errs, fmt.Errorf("%s: %q 不是合法的集合名（字母开头，字母、数字、下划线，最多 255 位）", name.key.Env, name.v))
+		}
+	}
+	if !strings.HasPrefix(cfg.EmbeddingBaseURL, "http://") && !strings.HasPrefix(cfg.EmbeddingBaseURL, "https://") {
+		errs = append(errs, fmt.Errorf("%s: %q 必须是 http(s) 地址", KeyEmbeddingBaseURL.Env, cfg.EmbeddingBaseURL))
+	}
 	if !strings.HasPrefix(cfg.AIBaseURL, "http://") && !strings.HasPrefix(cfg.AIBaseURL, "https://") {
 		errs = append(errs, fmt.Errorf("%s: %q 必须是 http(s) 地址", KeyAIBaseURL.Env, cfg.AIBaseURL))
 	}
@@ -100,7 +138,10 @@ type AgentSettings struct {
 	MaxRetries     int
 	MaxToolRounds  int
 	// ToolPolicy 是意图 → 工具白名单的 JSON；空表示内置默认。
-	ToolPolicy string
+	ToolPolicy     string
+	RerankEnabled  bool
+	SummaryEnabled bool
+	MemoryTurns    int
 }
 
 // AgentSettingsOf 读取并解析 Agent 配置；任一项不合法时返回错误（启动时校验用）。
@@ -110,6 +151,15 @@ func AgentSettingsOf(ctx context.Context, r *Resolver) (AgentSettings, error) {
 		ToolPolicy: strings.TrimSpace(r.Get(ctx, KeyAgentToolPolicy))}
 	s.PlannerEnabled = collect(&errs, KeyAIPlannerEnabled, func() (bool, error) { return parseBool(r.Get(ctx, KeyAIPlannerEnabled), true) })
 	s.AgentEnabled = collect(&errs, KeyAIAgentEnabled, func() (bool, error) { return parseBool(r.Get(ctx, KeyAIAgentEnabled), true) })
+	s.RerankEnabled = collect(&errs, KeyAIRerankEnabled, func() (bool, error) { return parseBool(r.Get(ctx, KeyAIRerankEnabled), false) })
+	s.SummaryEnabled = collect(&errs, KeyAISummaryEnabled, func() (bool, error) { return parseBool(r.Get(ctx, KeyAISummaryEnabled), false) })
+	s.MemoryTurns = int(collect(&errs, KeyMemoryTurns, func() (int64, error) {
+		n, err := strconv.ParseInt(strings.TrimSpace(r.Get(ctx, KeyMemoryTurns)), 10, 64)
+		if err != nil || n < 1 || n > 50 {
+			return 0, errors.New("必须是 1 到 50 的整数")
+		}
+		return n, nil
+	}))
 	s.Timeout = collect(&errs, KeyAITimeout, func() (time.Duration, error) { return parsePositiveDuration(r.Get(ctx, KeyAITimeout)) })
 	s.MaxRetries = int(collect(&errs, KeyAIMaxRetries, func() (int64, error) {
 		n, err := strconv.ParseInt(strings.TrimSpace(r.Get(ctx, KeyAIMaxRetries)), 10, 64)
@@ -194,8 +244,12 @@ func ValidateProduction(ctx context.Context, cfg Config, r *Resolver) error {
 	if contains(devMinIOValues, cfg.MinIOAccessKey) || contains(devMinIOValues, cfg.MinIOSecretKey) {
 		errs = append(errs, errors.New("MINIO_ACCESS_KEY / MINIO_SECRET_KEY 不能为空或使用默认凭证"))
 	}
-	if contains(devMilvusTokens, cfg.MilvusToken) {
-		errs = append(errs, errors.New("MILVUS_TOKEN 不能为空或使用默认凭证"))
+	// 向量检索是可选的：没配 MILVUS_ADDR 时不检查令牌
+	if cfg.MilvusAddr != "" && contains(devMilvusTokens, cfg.MilvusToken) {
+		errs = append(errs, errors.New("MILVUS_TOKEN 不能为空或使用默认凭证（使用 Milvus 时）"))
+	}
+	if key := strings.ToLower(strings.TrimSpace(cfg.EmbeddingAPIKey)); key != "" && contains(devAIKeys, key) {
+		errs = append(errs, errors.New("EMBEDDING_API_KEY 不能使用示例值"))
 	}
 	if key := strings.ToLower(strings.TrimSpace(cfg.AIAPIKey)); key != "" && contains(devAIKeys, key) {
 		errs = append(errs, errors.New("AI_API_KEY 不能使用示例值（为空表示不接模型，导购走规则）"))
@@ -391,4 +445,20 @@ func without(list []string, v string) []string {
 // RiskBlockedWords 返回当前生效的风险词表（环境变量 > 动态配置 > 默认值）。
 func RiskBlockedWords(ctx context.Context, r *Resolver) []string {
 	return splitList(r.Get(ctx, KeyRiskBlockedWords))
+}
+
+// validCollectionName 是 Milvus 集合名规则：字母或下划线开头，只含字母、数字、下划线，最多 255 位。
+func validCollectionName(name string) bool {
+	if name == "" || len(name) > 255 {
+		return false
+	}
+	for i, r := range name {
+		switch {
+		case r == '_', r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
 }

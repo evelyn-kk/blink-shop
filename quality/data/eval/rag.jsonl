@@ -1,0 +1,39 @@
+# 知识检索评测集：语料为 backend/fixtures/rag/corpus.json + 开发种子的 3 篇资料。expect 为必须出现在前 k 条的文档（语料 key 或种子文档 ID），absent 不能出现，expect_none 表示不应返回结果；held_out 是调参之后才加入的用例。由 backend/fixtures/rag/queries.json 生成，两者保持一致。
+{"id": "rag_001", "query": "Vista Pro 长焦能拍演唱会吗", "expect": ["vista_camera"]}
+{"id": "rag_002", "query": "Vista Pro 无线充电功率", "expect": ["vista_battery"]}
+{"id": "rag_003", "query": "多久能充满电 快充", "expect": ["vista_battery"]}
+{"id": "rag_004", "query": "耳机降噪多少分贝", "expect": ["earbuds_faq"]}
+{"id": "rag_005", "query": "耳机可以游泳的时候戴吗", "expect": ["earbuds_faq"]}
+{"id": "rag_006", "query": "LDAC 高清", "expect": ["earbuds_faq"]}
+{"id": "rag_007", "query": "键盘怎么换轴", "expect": ["keyboard_guide"]}
+{"id": "rag_008", "query": "键盘在 Mac 上怎么用", "expect": ["keyboard_guide"]}
+{"id": "rag_009", "query": "新疆多久能收到货", "expect": ["digital_shipping"]}
+{"id": "rag_010", "query": "怎么开增值税专用发票", "expect": ["digital_invoice"]}
+{"id": "rag_011", "query": "台灯有没有频闪", "expect": ["lamp_guide"]}
+{"id": "rag_012", "query": "台灯夜灯模式怎么开", "expect": ["lamp_guide"]}
+{"id": "rag_013", "query": "台灯坏了能换新吗", "expect": ["home_returns"]}
+{"id": "rag_014", "query": "退款几天到账", "expect": ["platform_payment"]}
+{"id": "rag_015", "query": "订单多久不付款会取消", "expect": ["platform_payment"]}
+{"id": "rag_016", "query": "优惠券能叠加吗", "expect": ["platform_coupon"]}
+{"id": "rag_017", "query": "屏幕刷新率", "expect": ["web_review"]}
+{"id": "rag_018", "query": "玩游戏发热吗 散热", "expect": ["web_review"]}
+{"id": "rag_019", "query": "鼠标 DPI", "expect": ["json_specs"]}
+{"id": "rag_020", "query": "鼠标电池能用多久", "expect": ["json_specs"]}
+{"id": "rag_021", "query": "Nova 12 拍照", "expect": ["doc_seed_nova"]}
+{"id": "rag_022", "query": "七天无理由退货运费谁出", "expect": ["doc_seed_after_sales"]}
+{"id": "rag_023", "query": "音箱防水", "absent": ["speaker_hidden"]}
+{"id": "rag_024", "query": "量子纠缠超导材料", "expect_none": true}
+{"id": "rag_025", "query": "台灯 显色指数", "absent": ["lamp_guide"], "merchant_ids": ["m_seed_digital"]}
+{"id": "rag_026", "query": "保修", "absent": ["doc_seed_after_sales", "home_returns"], "doc_types": ["faq"]}
+{"id": "rag_027", "query": "Vista 视频能录 4K 吗", "expect": ["vista_camera"], "held_out": true}
+{"id": "rag_028", "query": "第三方充电器能用吗", "expect": ["vista_battery"], "held_out": true}
+{"id": "rag_029", "query": "耳机总共能用多少小时", "expect": ["earbuds_faq"], "held_out": true}
+{"id": "rag_030", "query": "K8 怎么切换蓝牙设备", "expect": ["keyboard_guide"], "held_out": true}
+{"id": "rag_031", "query": "用的什么快递", "expect": ["digital_shipping"], "held_out": true}
+{"id": "rag_032", "query": "电子发票什么时候发", "expect": ["digital_invoice"], "held_out": true}
+{"id": "rag_033", "query": "台灯离桌面多高合适", "expect": ["lamp_guide"], "held_out": true}
+{"id": "rag_034", "query": "定制的家具能退吗", "expect": ["home_returns"], "held_out": true}
+{"id": "rag_035", "query": "支持哪些支付方式", "expect": ["platform_payment"], "held_out": true}
+{"id": "rag_036", "query": "部分退款优惠券退不退", "expect": ["platform_coupon"], "held_out": true}
+{"id": "rag_037", "query": "手机屏幕多大", "expect": ["web_review"], "held_out": true}
+{"id": "rag_038", "query": "M2 重量", "expect": ["json_specs"], "held_out": true}

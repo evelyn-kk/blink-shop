@@ -33,7 +33,7 @@ const plannerSystemPrompt = `你是 Blink 商城导购的意图规划器。根�
 action（可选）：cart 用 view/add/update/remove/clear/select/unselect；order 用 list/detail/pay/cancel/confirm；
 coupon 用 list/mine/claim/promotions；review 用 list/create；guide 用 greeting/help。
 
-槽位（没有就省略）：query（去掉口头语的商品或问题关键词，用空格分隔）、budget（价格上限，数字，元）、exclude（排除的品牌/属性数组）、
+槽位（没有就省略）：query（去掉口头语的商品或问题关键词，用空格分隔）、budget（价格上限，数字，元）、min_price（价格下限）、brands（指定的品牌数组）、exclude（排除的品牌/属性数组）、
 names（对比的商品名数组）、ordinal（“第 N 个”的 N，最后一个为 -1）、quantity（件数）、order_status（pending_payment/paid/shipped/completed/cancelled）、
 order_ref（订单号或订单 ID）、rating（1–5）、content（评价正文）、target（导航目标：products/product_detail/cart/orders/order_detail/coupons/sessions/settings）。
 

@@ -18,6 +18,11 @@ type ModelSettings struct {
 	MaxToolRounds int
 	// ToolPolicy 是意图 → 工具白名单的 JSON；空表示内置默认。
 	ToolPolicy string
+	// RerankEnabled 用小模型对商品候选重排（失败按规则顺序）；SummaryEnabled 用小模型生成会话摘要（失败用规则）。
+	RerankEnabled  bool
+	SummaryEnabled bool
+	// MemoryTurns 是参与历史检索的最近轮数；0 表示默认。
+	MemoryTurns int
 }
 
 // SettingsSource 返回当前设置。
@@ -39,6 +44,9 @@ func (s ModelSettings) normalized() ModelSettings {
 	}
 	if s.MaxToolRounds > 12 {
 		s.MaxToolRounds = 12
+	}
+	if s.MemoryTurns <= 0 {
+		s.MemoryTurns = 10
 	}
 	if s.PlannerModel == "" {
 		s.PlannerModel = def.PlannerModel

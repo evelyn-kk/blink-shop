@@ -47,6 +47,8 @@ var plannerSchema = object([]string{"intent"}, map[string]*Schema{
 	"action":       strLen("动作", 0, 32),
 	"query":        strLen("检索词", 0, 200),
 	"budget":       number("预算", 0),
+	"min_price":    number("价格下限", 0),
+	"brands":       strList("品牌", 5, 30),
 	"exclude":      strList("排除词", 10, 30),
 	"names":        strList("对比商品名", 6, 60),
 	"ordinal":      integer("序号", -1, 50, nil),
@@ -86,6 +88,9 @@ func (r *RuleRunner) modelPlan(ctx context.Context, in Input, st ModelSettings, 
 	ctx, cancel := context.WithTimeout(ctx, st.Timeout)
 	defer cancel()
 	user := in.Content
+	if mc := history.promptContext(); mc != "" {
+		user += "\n\n（相关的历史对话，供理解指代和追问：\n" + mc + "）"
+	}
 	if n := len(history.Cards); n > 0 {
 		user += fmt.Sprintf("\n\n（上下文：上一轮给用户看过 %d 件商品：%s）", n, cardNames(history.Cards))
 	}
@@ -110,6 +115,10 @@ func (r *RuleRunner) modelPlan(ctx context.Context, in Input, st ModelSettings, 
 	if f, ok := argFloat(obj, "budget"); ok && f > 0 {
 		p.Budget = domain.Money(f*100 + 0.5)
 	}
+	if f, ok := argFloat(obj, "min_price"); ok && f > 0 {
+		p.MinPrice = domain.Money(f*100 + 0.5)
+	}
+	p.Brands = argStrings(obj, "brands")
 	p.Ordinal = argInt(obj, "ordinal", 0)
 	p.Quantity = argInt(obj, "quantity", 0)
 	p.Rating = argInt(obj, "rating", 0)
@@ -129,6 +138,9 @@ func mergePlans(rule, model Plan) Plan {
 	}
 	if out.Budget == 0 {
 		out.Budget = rule.Budget
+	}
+	if out.MinPrice == 0 {
+		out.MinPrice = rule.MinPrice
 	}
 	if len(out.Exclude) == 0 {
 		out.Exclude = rule.Exclude
@@ -306,6 +318,7 @@ func (s *session) answerWithModel(ctx context.Context, st ModelSettings) bool {
 		s.say(text)
 		pending.emit(s)
 		if len(action.Followups) > 0 {
+			s.followupSource = "model"
 			s.followups(action.Followups...)
 		}
 		s.out.Trace("answer", "model", "ok", 0, map[string]any{"model": st.AgentModel, "rounds": round, "removed_product_ids": removed,
@@ -323,6 +336,10 @@ func (s *session) reactUserPrompt() string {
 	planJSON, _ := json.Marshal(planMeta(s.plan))
 	b.WriteString("\n\n规划结果（供参考）：")
 	b.Write(planJSON)
+	if mc := s.history.promptContext(); mc != "" {
+		b.WriteString("\n\n相关的历史对话：\n")
+		b.WriteString(mc)
+	}
 	if len(s.history.Cards) > 0 {
 		b.WriteString("\n\n上一轮给用户看过的商品（按顺序，可直接加购）：")
 		for i, c := range s.history.Cards {

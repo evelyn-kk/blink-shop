@@ -123,12 +123,38 @@ func (s *session) handleKnowledge(ctx context.Context) {
 
 // search 调用 search_products，失败时已向用户说明；ok 为 false 表示调用失败。
 func (s *session) search(ctx context.Context, query string, budget domain.Money, exclude []string, limit int) (ProductSearchResult, bool) {
-	args := map[string]any{"query": query, "limit": limit}
-	if budget > 0 {
-		args["max_price"] = float64(budget) / 100
+	return s.searchWith(ctx, query, searchSpec{max: budget, exclude: exclude}, limit)
+}
+
+// searchSpec 是搜索的结构化约束。
+type searchSpec struct {
+	min, max domain.Money
+	brands   []string
+	exclude  []string
+}
+
+// planSpec 取规划里的全部约束（品牌按在售品牌词表识别）。
+func (s *session) planSpec(ctx context.Context) searchSpec {
+	brands := s.plan.Brands
+	if len(brands) == 0 {
+		brands = s.r.reg.MentionedBrands(ctx, s.in.Content, s.plan.Exclude)
 	}
-	if len(exclude) > 0 {
-		args["exclude"] = exclude
+	return searchSpec{min: s.plan.MinPrice, max: s.plan.Budget, brands: brands, exclude: s.plan.Exclude}
+}
+
+func (s *session) searchWith(ctx context.Context, query string, spec searchSpec, limit int) (ProductSearchResult, bool) {
+	args := map[string]any{"query": query, "limit": limit}
+	if spec.max > 0 {
+		args["max_price"] = float64(spec.max) / 100
+	}
+	if spec.min > 0 {
+		args["min_price"] = float64(spec.min) / 100
+	}
+	if len(spec.brands) > 0 {
+		args["brands"] = spec.brands
+	}
+	if len(spec.exclude) > 0 {
+		args["exclude"] = spec.exclude
 	}
 	obs := s.call(ctx, "搜索商品："+query, ToolSearchProducts, args)
 	if !obs.OK {
@@ -148,7 +174,7 @@ func (s *session) handleProductSearch(ctx context.Context) {
 		s.followups("推荐一款通勤降噪耳机", "3000 以内拍照好的手机", "500 以内的无线鼠标")
 		return
 	}
-	res, ok := s.search(ctx, s.plan.Query, s.plan.Budget, s.plan.Exclude, defaultSearchLimit)
+	res, ok := s.searchWith(ctx, s.plan.Query, s.planSpec(ctx), defaultSearchLimit)
 	if !ok {
 		return
 	}
@@ -158,20 +184,34 @@ func (s *session) handleProductSearch(ctx context.Context) {
 // presentProducts 按相关性给出推荐文案和商品卡；弱命中只作为“相近商品”展示，不当作推荐。
 func (s *session) presentProducts(res ProductSearchResult) {
 	constraint := ""
-	if res.MaxPrice != nil {
+	switch {
+	case res.MinPrice != nil && res.MaxPrice != nil:
+		constraint += "、" + yuan(*res.MinPrice) + "–" + yuan(*res.MaxPrice)
+	case res.MinPrice != nil:
+		constraint += "、" + yuan(*res.MinPrice) + " 以上"
+	case res.MaxPrice != nil:
 		constraint += "、" + yuan(*res.MaxPrice) + " 以内"
+	}
+	if len(res.Brands) > 0 {
+		constraint += "、品牌“" + strings.Join(res.Brands, "”“") + "”"
 	}
 	if len(res.Excluded) > 0 {
 		constraint += "、排除“" + strings.Join(res.Excluded, "”“") + "”"
 	}
 	switch {
 	case len(res.Products) == 0 && res.Filtered > 0:
-		s.sayf("按“%s”%s没有找到符合条件的在售商品：有 %d 件因为超出预算或被排除没有列出。可以放宽预算或换个条件再试。", res.Query, constraint, res.Filtered)
+		s.sayf("按“%s”%s没有找到符合条件的在售商品：有 %d 件因为价格、品牌或排除条件没有列出。可以放宽条件再试。", res.Query, constraint, res.Filtered)
 		s.followups("放宽预算再推荐", "推荐一款通勤降噪耳机", "有什么优惠活动")
 		return
 	case len(res.Products) == 0:
 		s.sayf("商品库里暂时没有找到和“%s”匹配的在售商品。可以换个品类或品牌说法再试，或者告诉我用途和预算。", res.Query)
 		s.followups("推荐一款通勤降噪耳机", "3000 以内拍照好的手机", "有什么优惠活动")
+		return
+	case res.Relevance == RelevanceWeak && len(res.Conflicts) > 0:
+		s.sayf("按“%s”找到的商品和你的用途不太合适：%s 的说明里写了不适合这种用途，所以不推荐。下面列出来仅供了解，建议换个需求再找：",
+			res.Query, strings.Join(res.Conflicts, "、"))
+		s.block(blockProducts("不太合适的商品", res.Products))
+		s.followups("换个说法再找", "推荐一款通勤降噪耳机", "看看我的购物车")
 		return
 	case res.Relevance == RelevanceWeak:
 		s.sayf("没有找到和“%s”完全匹配的商品，下面是一些相近的在售商品，仅供参考：", res.Query)

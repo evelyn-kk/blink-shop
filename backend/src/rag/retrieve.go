@@ -104,7 +104,7 @@ type candidate struct {
 // Search 检索知识分块：
 //  1. 关键词召回：QueryTerms 拆出的检索词任一出现在分块标题、正文或文档标题中（Store 按命中词数优先返回前 200 个）；
 //  2. 向量召回（配置了 VectorIndex 时）：取前 50 个相似分块，经 Store 按同样的可见性和过滤条件取回；
-//  3. 打分：关键词分见 keywordScore；混合模式下 = 0.65×关键词分 + 0.35×向量相似度；
+//  3. 打分：关键词分见 keywordScore；混合模式下 = max(关键词分, 0.65×关键词分 + 0.35×向量相似度)，向量只能加分；
 //  4. 过滤低于 MinScore 的候选，按分数降序、chunk_id 升序取前 TopK，摘要截取命中位置附近 160 字。
 //
 // 向量检索失败只记日志并回退关键词（Result.VectorError 说明原因），不影响结果返回；Store 出错才返回错误。
@@ -151,7 +151,8 @@ func (r *Retriever) Search(ctx context.Context, q Query) (Result, error) {
 	for _, c := range cands {
 		score := c.keyword
 		if res.Mode == "hybrid" {
-			score = keywordWeight*c.keyword + vectorWeight*c.vector
+			// 向量只能加分：相似度低时不能把本来够格的关键词结果拉到阈值以下
+			score = math.Max(c.keyword, keywordWeight*c.keyword+vectorWeight*c.vector)
 		}
 		if score < MinScore {
 			continue
@@ -333,4 +334,38 @@ func indexRunes(s, sub []rune) int {
 		}
 	}
 	return -1
+}
+
+// IndexedProduct 是写入商品向量索引的商品（只放检索要用的文字）。
+type IndexedProduct struct {
+	ProductID, MerchantID, CategoryID, Text string
+}
+
+// ProductHit 是商品向量检索的命中：商品 ID 和相似度（0–1）。
+type ProductHit struct {
+	ProductID string
+	Score     float64
+}
+
+// ProductIndex 是商品的向量索引（Milvus 实现在 src/vector）。检索结果只是候选：调用方必须再按可见性取回商品。
+type ProductIndex interface {
+	UpsertProducts(ctx context.Context, items []IndexedProduct) error
+	DeleteProducts(ctx context.Context, productIDs []string) error
+	SearchProducts(ctx context.Context, text string, topN int) ([]ProductHit, error)
+}
+
+// ProductText 是写进商品向量索引的文字：名称、品牌、分类、标签、卖点、适合人群、推荐理由和介绍。
+func ProductText(p store.CatalogProduct, categoryName string) string {
+	parts := []string{p.Name, p.Brand, categoryName}
+	parts = append(parts, p.Tags...)
+	parts = append(parts, p.SellingPoints...)
+	parts = append(parts, p.SuitableFor...)
+	parts = append(parts, p.RecommendReason, p.Description)
+	var out []string
+	for _, s := range parts {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return strings.Join(out, "；")
 }

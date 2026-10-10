@@ -14,6 +14,6 @@
   ```
 
   已有本地库若是旧版种子（图片指向外网占位图），用新库：`MYSQL_DSN=.../blink_shop_e2e?parseTime=true`。
-- `data/eval/`：评测 JSONL 数据集（后续节点补充）。
-- `evals/`：评测 runner（后续节点补充）。
+- `data/eval/`：评测 JSONL 数据集：`rag.jsonl`（知识检索 38 条）、`product_search.jsonl`（商品搜索 28 条，含预算、品牌、排除、冲突、无结果和多轮追问）。
+- 评测 runner 在后端：`cd backend && go run ./cmd/eval`（`-suite rag|products|all`，`-vector off|hash|env`），报告写到 `reports/eval-<时间>/`（JSON + Markdown），用法和指标见 `backend/README.md`“离线评测”。
 - `tools/`：数据整理脚本（后续节点补充）。

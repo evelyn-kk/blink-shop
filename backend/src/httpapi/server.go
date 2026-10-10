@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/agent"
@@ -37,8 +38,10 @@ type Options struct {
 	Store     store.Store
 	// ObjectStore 保存私有上传文件；nil 表示未配置，文件接口返回 object_storage_unavailable。
 	ObjectStore objectstore.Store
-	// VectorIndex 是知识分块的向量索引；nil 表示只用关键词检索（Milvus 在 8.2 接入）。
+	// VectorIndex 是知识分块的向量索引；nil 表示只用关键词检索。
 	VectorIndex rag.VectorIndex
+	// ProductIndex 是商品向量索引；nil 表示商品只用关键词召回。商品增改删和上下架后异步同步。
+	ProductIndex rag.ProductIndex
 	// Fetcher 抓取知识采集的 URL；nil 时使用带 SSRF 防护的默认实现。测试可替换。
 	Fetcher ingest.URLFetcher
 	// AvatarDir 是头像文件目录，不存在时在首次上传时创建。
@@ -77,6 +80,8 @@ type Server struct {
 	now            func() time.Time
 	paymentTimeout time.Duration
 	runner         agent.Runner
+	productIndex   rag.ProductIndex
+	vectorSync     sync.WaitGroup
 	runTimeout     time.Duration
 	heartbeat      time.Duration
 	runs           *runRegistry
@@ -102,6 +107,7 @@ func NewServer(opts Options) *Server {
 		now:            opts.Now,
 		paymentTimeout: opts.PaymentTimeout,
 		runner:         opts.AgentRunner,
+		productIndex:   opts.ProductIndex,
 		runTimeout:     opts.AgentRunTimeout,
 		heartbeat:      opts.SSEHeartbeat,
 		runs:           newRunRegistry(),
@@ -126,7 +132,7 @@ func NewServer(opts Options) *Server {
 		if words == nil {
 			words = func(context.Context) []string { return risk.Split(configcenter.KeyRiskBlockedWords.Default) }
 		}
-		s.runner = agent.NewRuleRunner(agent.Deps{LLM: opts.LLM, Settings: opts.AgentSettings, Store: s.store, Shop: s.shop(),
+		s.runner = agent.NewRuleRunner(agent.Deps{LLM: opts.LLM, Settings: opts.AgentSettings, Store: s.store, Shop: s.shop(), ProductIndex: opts.ProductIndex,
 			Retriever: rag.NewRetriever(s.store, opts.VectorIndex, s.logger), Risk: risk.WordList{Words: words}, Logger: s.logger,
 			Now: func() time.Time { return s.now() }})
 	}
@@ -151,7 +157,8 @@ func NewServer(opts Options) *Server {
 // ModelSettingsFrom 把配置中心的 Agent 设置转成 agent 包的类型（cmd/api 和测试共用）。
 func ModelSettingsFrom(s configcenter.AgentSettings) agent.ModelSettings {
 	return agent.ModelSettings{PlannerEnabled: s.PlannerEnabled, AgentEnabled: s.AgentEnabled, PlannerModel: s.PlannerModel, AgentModel: s.AgentModel,
-		Timeout: s.Timeout, MaxToolRounds: s.MaxToolRounds, ToolPolicy: s.ToolPolicy}
+		Timeout: s.Timeout, MaxToolRounds: s.MaxToolRounds, ToolPolicy: s.ToolPolicy, RerankEnabled: s.RerankEnabled, SummaryEnabled: s.SummaryEnabled,
+		MemoryTurns: s.MemoryTurns}
 }
 
 // shop 返回购物车、结算、订单的业务层（与导购 Agent 的工具共用同一套规则）。每次按当前的 Store 和时钟构造，

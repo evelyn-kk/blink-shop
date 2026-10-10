@@ -30,6 +30,8 @@ type Deps struct {
 	Shop *shop.Service
 	// Retriever 是知识检索；nil 表示未配置，search_knowledge 返回 knowledge_unavailable。
 	Retriever *rag.Retriever
+	// ProductIndex 是商品向量索引；nil 表示商品只用关键词召回。
+	ProductIndex rag.ProductIndex
 	// Risk 在规划前检查用户输入；nil 表示不检查。
 	Risk risk.Checker
 	// Logger 记录工具审计（写操作）和内部错误；nil 表示丢弃。
@@ -124,6 +126,8 @@ type Registry struct {
 	policyMu     sync.Mutex
 	policyRaw    string
 	policyParsed map[Intent][]string
+
+	vocab catalogVocab
 }
 
 // NewRegistry 注册全部工具和默认的意图白名单。
@@ -352,6 +356,7 @@ func SanitizeArgs(args map[string]any) map[string]any {
 	for k, v := range args {
 		switch x := v.(type) {
 		case string:
+			x = RedactPII(x)
 			if utf8.RuneCountInString(x) > 80 {
 				x = string([]rune(x)[:80]) + "…"
 			}
