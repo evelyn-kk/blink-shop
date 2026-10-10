@@ -9,7 +9,7 @@
 → 追问生成 → 持久化 run、segments、trace
 ```
 
-规划意图至少覆盖：`guide`、`product_search`、`product_compare`、`image_search`、`cart`、`checkout`、`order`、`coupon`、`review`、`navigation`、`non_guide`。导航意图不得调用交易工具。没有模型时规划和最终回答均应回退到规则，而不是伪造模型成功。
+规划意图至少覆盖：`guide`、`product_search`、`product_compare`、`image_search`、`cart`、`checkout`、`order`、`coupon`、`review`、`navigation`、`non_guide`。导航意图不得调用交易工具。没有模型时规划和最终回答均应回退到规则，而不是伪造模型成功。模型接入（OpenAI 兼容 provider、规划 JSON 校验、ReAct 动作协议、最终输出过滤、可配置白名单、轨迹字段）见 `backend/README.md`“导购规划与工具 → 模型”。
 
 ## 工具安全边界
 

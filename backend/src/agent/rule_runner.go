@@ -12,8 +12,9 @@ import (
 	"github.com/evelyn-kk/blink-shop/backend/src/domain"
 )
 
-// RuleRunner 是不依赖模型的导购运行器：风险词检查 → 规则规划意图 → 按意图白名单调用工具 → 只用工具返回的数据组织回答。
-// 8.1 接入模型后，规划和最终生成可以替换成模型，工具层和安全边界不变。
+// RuleRunner 是导购运行器：风险词检查 → 规划意图 → 按意图白名单调用工具 → 只用工具返回的数据组织回答。
+// 没有模型时规划和回答全部是规则；配置了模型（Deps.LLM）且开关打开时，用小模型规划、大模型做工具循环和最终回答，
+// 任何一步失败都回到规则。工具层和安全边界（白名单、参数校验、商品来源）与模型无关。
 type RuleRunner struct {
 	deps Deps
 	reg  *Registry
@@ -60,15 +61,24 @@ func (r *RuleRunner) Run(ctx context.Context, in Input, out Output) error {
 		return err
 	}
 
-	plan := Classify(in.Content, hasImage(in.Attachments))
+	st := r.modelsFor(ctx)
+	hist := loadHistory(ctx, r.deps.Store, in.AccountID, in.SessionID, in.RunID)
+	plan := r.plan(ctx, in, st, out, hist)
 	out.Thinking(Step{ID: "understand", Title: "理解你的问题", Status: StepDone})
 	out.Thinking(Step{ID: "plan", Title: "判断需求：" + IntentTitle(plan.Intent), Status: StepDone})
 	out.Trace("planner", "rule", "ok", r.deps.Now().Sub(start), planMeta(plan))
 
 	s := newSession(r, in, out, plan)
-	s.history = loadHistory(ctx, r.deps.Store, in.AccountID, in.SessionID, in.RunID)
+	s.history = hist
 	for id := range s.history.Evidence {
 		s.tc.Evidence[id] = true
+	}
+	if st.AgentEnabled && usesModelAnswer(plan) && s.answerWithModel(ctx, st) {
+		s.finish(start)
+		return ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if err := s.handle(ctx); err != nil {
 		return err

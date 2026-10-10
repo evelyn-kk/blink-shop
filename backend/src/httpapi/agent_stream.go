@@ -248,11 +248,12 @@ func (o *runOutput) Trace(stage, eventType, status string, d time.Duration, meta
 	o.s.trace(o.run, stage, eventType, status, d, "", meta)
 }
 
-// trace 写一条轨迹；写失败只记日志，不影响运行。
+// trace 写一条轨迹；写失败只记日志，不影响运行。metadata 里的 model 同时写入事件的 model 字段。
 func (s *Server) trace(r domain.AgentRun, stage, eventType, status string, d time.Duration, errText string, meta map[string]any) {
 	ctx, cancel := context.WithTimeout(context.Background(), runPersistTimeout)
 	defer cancel()
-	if _, err := s.store.AppendTraceEvent(ctx, domain.AgentTraceEvent{RunID: r.RunID, TraceID: r.TraceID, AccountID: r.AccountID,
+	model, _ := meta["model"].(string)
+	if _, err := s.store.AppendTraceEvent(ctx, domain.AgentTraceEvent{RunID: r.RunID, TraceID: r.TraceID, AccountID: r.AccountID, Model: model,
 		Stage: stage, EventType: eventType, Status: status, DurationMS: d.Milliseconds(), Error: errText, Metadata: meta}); err != nil {
 		s.logger.Error("append trace event failed", "run_id", r.RunID, "error", err)
 	}

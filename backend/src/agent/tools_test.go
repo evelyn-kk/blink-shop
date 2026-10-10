@@ -28,7 +28,7 @@ func TestRegistryPolicy(t *testing.T) {
 	e.mustFail(t, e.tc("", IntentCart), ToolGetCart, nil, CodeUnauthorized)
 	// 白名单里没有写工具的意图
 	for _, intent := range []Intent{IntentGuide, IntentProductSearch, IntentProductCompare, IntentKnowledge, IntentImageSearch, IntentNavigation, IntentNonGuide} {
-		for _, name := range e.reg.Allowed(intent) {
+		for _, name := range e.reg.Allowed(context.Background(), intent) {
 			if e.reg.tools[name].Write {
 				t.Errorf("intent %s allows write tool %s", intent, name)
 			}

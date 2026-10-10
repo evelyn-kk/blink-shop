@@ -10,6 +10,7 @@ import (
 	"github.com/evelyn-kk/blink-shop/backend/src/agent"
 	"github.com/evelyn-kk/blink-shop/backend/src/configcenter"
 	"github.com/evelyn-kk/blink-shop/backend/src/ingest"
+	"github.com/evelyn-kk/blink-shop/backend/src/llm"
 	"github.com/evelyn-kk/blink-shop/backend/src/objectstore"
 	"github.com/evelyn-kk/blink-shop/backend/src/rag"
 	"github.com/evelyn-kk/blink-shop/backend/src/risk"
@@ -54,6 +55,10 @@ type Options struct {
 	AgentRunner agent.Runner
 	// RiskWords 返回当前生效的导购风险词（configcenter.RiskBlockedWords）；nil 表示用 risk.blocked_words 的默认词表。
 	RiskWords func(ctx context.Context) []string
+	// LLM 是模型调用入口；nil 表示没有配置模型，导购只走规则。
+	LLM llm.Provider
+	// AgentSettings 返回当前的模型开关、模型名、轮数和工具白名单（configcenter.AgentSettingsNow）；nil 表示默认值。
+	AgentSettings func(ctx context.Context) agent.ModelSettings
 	// AgentRunTimeout 是一次运行的最长时间，0 表示 DefaultAgentRunTimeout。
 	AgentRunTimeout time.Duration
 	// SSEHeartbeat 是流式响应的心跳间隔，0 表示 DefaultSSEHeartbeat。
@@ -121,8 +126,9 @@ func NewServer(opts Options) *Server {
 		if words == nil {
 			words = func(context.Context) []string { return risk.Split(configcenter.KeyRiskBlockedWords.Default) }
 		}
-		s.runner = agent.NewRuleRunner(agent.Deps{Store: s.store, Shop: s.shop(), Retriever: rag.NewRetriever(s.store, opts.VectorIndex, s.logger),
-			Risk: risk.WordList{Words: words}, Logger: s.logger, Now: func() time.Time { return s.now() }})
+		s.runner = agent.NewRuleRunner(agent.Deps{LLM: opts.LLM, Settings: opts.AgentSettings, Store: s.store, Shop: s.shop(),
+			Retriever: rag.NewRetriever(s.store, opts.VectorIndex, s.logger), Risk: risk.WordList{Words: words}, Logger: s.logger,
+			Now: func() time.Time { return s.now() }})
 	}
 	if s.runTimeout <= 0 {
 		s.runTimeout = DefaultAgentRunTimeout
@@ -140,6 +146,12 @@ func NewServer(opts Options) *Server {
 	s.ingestor = ingest.NewService(s.store, opts.VectorIndex, fetcher, s.logger, s.now)
 	s.routes()
 	return s
+}
+
+// ModelSettingsFrom 把配置中心的 Agent 设置转成 agent 包的类型（cmd/api 和测试共用）。
+func ModelSettingsFrom(s configcenter.AgentSettings) agent.ModelSettings {
+	return agent.ModelSettings{PlannerEnabled: s.PlannerEnabled, AgentEnabled: s.AgentEnabled, PlannerModel: s.PlannerModel, AgentModel: s.AgentModel,
+		Timeout: s.Timeout, MaxToolRounds: s.MaxToolRounds, ToolPolicy: s.ToolPolicy}
 }
 
 // shop 返回购物车、结算、订单的业务层（与导购 Agent 的工具共用同一套规则）。每次按当前的 Store 和时钟构造，

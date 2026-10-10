@@ -2,8 +2,10 @@ package configcenter
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -78,6 +80,41 @@ func riskWords(v string) error {
 	return nil
 }
 
+func nonEmpty(v string) error {
+	if strings.TrimSpace(v) == "" {
+		return errors.New("不能为空")
+	}
+	return nil
+}
+
+func retries(v string) error {
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 0 || n > 5 {
+		return errors.New("必须是 0 到 5 的整数")
+	}
+	return nil
+}
+
+func toolRounds(v string) error {
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 1 || n > 12 {
+		return errors.New("必须是 1 到 12 的整数")
+	}
+	return nil
+}
+
+// toolPolicy 只校验形状：JSON 对象，键是意图名，值是工具名数组。工具名是否存在由 Agent 加载时判断（未知的忽略）。
+func toolPolicy(v string) error {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	var m map[string][]string
+	if err := json.Unmarshal([]byte(v), &m); err != nil {
+		return errors.New("必须是 JSON 对象，值为工具名数组")
+	}
+	return nil
+}
+
 // settings 按管理端展示的顺序列出全部配置项。
 var settings = []Setting{
 	{Key: KeyAppEnv, Description: "运行环境（development / test / production）"},
@@ -95,7 +132,16 @@ var settings = []Setting{
 	{Key: KeyRateLimitAccountPerMin, Description: "已登录请求每个账号每分钟上限", Runtime: true, validate: positiveInt},
 	{Key: KeyAuthTokenTTL, Description: "登录有效期，例如 24h", Runtime: true, validate: positiveDuration},
 	{Key: KeyLoginAttemptsPerMin, Description: "同一账号每分钟登录尝试上限", Runtime: true, validate: positiveInt},
-	{Key: KeyRiskBlockedWords, Description: "导购对话的风险词，逗号分隔，命中即拦截（导购 Agent 接入后生效）", Runtime: true, validate: riskWords},
+	{Key: KeyRiskBlockedWords, Description: "导购对话的风险词，逗号分隔，命中即拦截", Runtime: true, validate: riskWords},
+	{Key: KeyAIPlannerEnabled, Description: "导购用小模型规划意图和生成追问（未配置 API Key 时始终走规则）", Runtime: true, validate: boolValue},
+	{Key: KeyAIAgentEnabled, Description: "导购用大模型做工具循环和最终回答（关闭时回到规则回答）", Runtime: true, validate: boolValue},
+	{Key: KeyAIPlannerModel, Description: "规划 / 追问用的小模型名", Runtime: true, validate: nonEmpty},
+	{Key: KeyAIAgentModel, Description: "工具循环 / 最终回答用的大模型名", Runtime: true, validate: nonEmpty},
+	{Key: KeyAITimeout, Description: "单次模型调用超时，例如 30s", Runtime: true, validate: positiveDuration},
+	{Key: KeyAIMaxRetries, Description: "模型调用失败（限流、5xx、网络）的重试次数，0–5", Runtime: true, validate: retries},
+	{Key: KeyAIMaxToolRounds, Description: "一次回答最多的工具循环轮数，1–12", Runtime: true, validate: toolRounds},
+	{Key: KeyAgentToolPolicy, Description: "意图 → 可用工具白名单（JSON，如 {\"cart\":[\"get_cart\"]}），空表示内置默认；未知工具会被忽略，模型不能绕过", Runtime: true, validate: toolPolicy},
+	{Key: KeyAIBaseURL, Description: "模型服务地址（OpenAI 兼容）"},
 	{Key: KeyAvatarUploadDir, Description: "头像文件目录"},
 	{Key: KeyMinIOEndpoint, Description: "对象存储地址"},
 	{Key: KeyMinIOBucket, Description: "对象存储桶名"},

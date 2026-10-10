@@ -371,8 +371,11 @@ curl -s -X POST $API/agent/runs/<run_id>:cancel -H "Authorization: Bearer $TOKEN
 没有配置任何模型时，导购也必须能完成真实的购物动作，而且不能比用户在页面上多做任何事。实现分三层（`src/agent`）：
 
 ```text
-用户消息 → 风险词检查（risk）→ 规则规划 Classify → 按意图白名单调用工具 Registry.Call → 只用工具返回的数据生成回答、块和追问
+用户消息 → 风险词检查（risk）→ 规划（规则 Classify；配置了模型时小模型规划、失败回退规则）
+        → 按意图白名单调用工具 Registry.Call（模型做工具循环，或规则处理器）→ 只用工具返回的数据生成回答、块和追问
 ```
+
+模型只是规划和组织语言的可选加速：工具层的白名单、参数校验、商品来源校验与模型无关，模型关闭或出错时行为与纯规则完全一致，API 契约不变。
 
 ### 风险策略
 
@@ -448,6 +451,28 @@ boolean / array，required、additionalProperties=false、enum、minimum/maximum
 | `review_list` | 评价与评分摘要 | list_reviews |
 
 客户端遇到未知 `type` 应忽略。弱命中的搜索结果只作为“相近商品”展示，正文会说明没有完全匹配。
+
+### 模型（可选）
+
+配置 `AI_API_KEY` 后创建 OpenAI 兼容客户端（`src/llm`：`/chat/completions`，支持 JSON 模式和 SSE 流式；429 / 5xx / 网络错误指数退避重试，
+4xx 不重试，调用方 ctx 取消立即返回；`llm.Mock` 供测试按脚本回放）。开关、模型名、轮数和白名单每次运行从动态配置读取（管理后台可改，立即生效）。
+
+- **规划**（`ai.planner_enabled`）：小模型按 `agent.planner` 提示输出一个 JSON（意图 + 槽位），用 `agent.Schema` 校验（意图枚举、预算数字、
+  序号范围等）；意图和动作以模型为准，槽位模型没给的用规则抽的。坏 JSON、未知意图、超时、HTTP 错误都回到规则结果，
+  轨迹 `planner.model` 记 `error`（timeout / http_503 / invalid_output）和 `fallback=rule`。导航、非导购、图搜、打招呼不走大模型。
+- **工具循环**（`ai.agent_enabled`）：大模型按 `agent.react` 提示工作，每轮只能输出一个 JSON 动作：
+  `{"type":"tool","name":…,"args":{…}}` 或 `{"type":"final","text":…,"followups":[…]}`。提示里只列出当前意图白名单内的工具及其参数 schema；
+  工具调用仍经 `Registry.Call`（白名单、schema、`add_cart_item` 的商品来源校验），被拒时把错误码作为观察交回模型，不执行。
+  观察结果先压缩（去掉图片、属性、时间等字段，截断长文本和长数组）再喂给模型。连续两次不是合法动作、达到 `ai.max_tool_rounds`、
+  模型调用出错、最终回答过滤后为空，都写一条 `react.fallback`（reason）然后交给规则处理器，循环中收集的卡片整体丢弃，不会和规则回答重复。
+- **最终输出过滤**（`FilterFinal`）：去掉代码围栏和 `<final>`/`<tool>` 等内部标签，删掉所有 `p_…` 商品 ID（不在可信集里的记入轨迹
+  `removed_product_ids`），丢弃含内部规则标记或以 `system:`/`可用工具：` 等开头的行，限制 4000 字。卡片只由工具观察生成：
+  商品卡按 ID 去重累加，购物车 / 订单 / 券只留最新一次，加购后附“去购物车”、下单后附“去我的订单”。模型给的追问最多 3 条、每条 40 字内。
+- **白名单可配置**（`agent.tool_policy`）：JSON 对象，键是意图、值是工具名数组；没写的意图沿用内置默认，未知意图和未知工具忽略，
+  导航 / 非导购 / 图搜永远没有工具，`guide` 不能获得写工具；JSON 不合法时整体退回默认并记日志。规则处理器和模型共用同一份白名单。
+- **轨迹**：`planner.model`、`react.step.N`（动作、工具、轮次）、`react.fallback`、`answer.model` 都带 `model`、token 用量、耗时、
+  提示字数和提示摘要（hash，不记原文）；错误只记分类，不记带地址或密钥的原始错误。事件的 `model` 字段由 metadata 里的 `model` 填充。
+- 提示模板内置在 `src/agent/prompts.go`（`agent.planner` / `agent.react`，版本 1），9.1 接入 Prompt 生命周期管理后由配置中心下发。
 
 ### 无模型闭环
 
@@ -543,8 +568,16 @@ boolean / array，required、additionalProperties=false、enum、minimum/maximum
 | `MINIO_USE_SSL` | — | `false` | 是否用 HTTPS 连接对象存储 |
 | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | — | `minioadmin` | 密钥类 |
 | `MILVUS_TOKEN` | — | 空 | 密钥类 |
-| `AI_API_KEY` | — | 空 | 密钥类 |
-| `RISK_BLOCKED_WORDS` | `risk.blocked_words` | `违法,违禁,假货,绕过风控` | 导购对话的风险词，逗号分隔（最多 200 个、每个 20 字内）；导购 Agent 接入后生效 |
+| `AI_API_KEY` | — | 空 | 密钥类。为空时不创建模型客户端，导购完全走规则 |
+| `AI_BASE_URL` | — | `https://dashscope.aliyuncs.com/compatible-mode/v1` | OpenAI 兼容的模型服务地址（`/chat/completions`） |
+| `AI_PLANNER_ENABLED` | `ai.planner_enabled` | `true` | 用小模型规划意图（失败回退规则） |
+| `AI_AGENT_ENABLED` | `ai.agent_enabled` | `true` | 用大模型做工具循环和最终回答（关闭或失败都回到规则回答） |
+| `AI_PLANNER_MODEL` / `AI_AGENT_MODEL` | `ai.planner_model` / `ai.agent_model` | `qwen-turbo` / `qwen-plus` | 小模型 / 大模型名 |
+| `AI_TIMEOUT` | `ai.timeout` | `30s` | 单次模型调用超时 |
+| `AI_MAX_RETRIES` | `ai.max_retries` | `2` | 429 / 5xx / 网络错误的重试次数（0–5；客户端在启动时读取） |
+| `AI_MAX_TOOL_ROUNDS` | `ai.max_tool_rounds` | `6` | 一次回答最多的工具循环轮数（1–12） |
+| `AGENT_TOOL_POLICY` | `agent.tool_policy` | 空 | 意图 → 工具白名单 JSON（如 `{"cart":["get_cart"]}`）；空用内置默认，见“导购规划与工具 → 模型” |
+| `RISK_BLOCKED_WORDS` | `risk.blocked_words` | `违法,违禁,假货,绕过风控` | 导购对话的风险词，逗号分隔（最多 200 个、每个 20 字内） |
 
 ### 生产危险配置
 

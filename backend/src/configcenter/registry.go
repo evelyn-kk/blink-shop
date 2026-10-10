@@ -56,3 +56,17 @@ var (
 var (
 	KeyRiskBlockedWords = Key{Name: "risk.blocked_words", Env: "RISK_BLOCKED_WORDS", Default: "违法,违禁,假货,绕过风控"}
 )
+
+// 模型与导购 Agent。密钥（ai.api_key）和服务地址只在启动时读取；其余每次运行读取，可在运行中开关和切换模型。
+var (
+	KeyAIBaseURL        = Key{Name: "ai.base_url", Env: "AI_BASE_URL", Default: "https://dashscope.aliyuncs.com/compatible-mode/v1"}
+	KeyAIPlannerModel   = Key{Name: "ai.planner_model", Env: "AI_PLANNER_MODEL", Default: "qwen-turbo"}
+	KeyAIAgentModel     = Key{Name: "ai.agent_model", Env: "AI_AGENT_MODEL", Default: "qwen-plus"}
+	KeyAIPlannerEnabled = Key{Name: "ai.planner_enabled", Env: "AI_PLANNER_ENABLED", Default: "true"}
+	KeyAIAgentEnabled   = Key{Name: "ai.agent_enabled", Env: "AI_AGENT_ENABLED", Default: "true"}
+	KeyAITimeout        = Key{Name: "ai.timeout", Env: "AI_TIMEOUT", Default: "30s"}
+	KeyAIMaxRetries     = Key{Name: "ai.max_retries", Env: "AI_MAX_RETRIES", Default: "2"}
+	KeyAIMaxToolRounds  = Key{Name: "ai.max_tool_rounds", Env: "AI_MAX_TOOL_ROUNDS", Default: "6"}
+	// KeyAgentToolPolicy 是意图 → 可用工具的白名单（JSON 对象，值为工具名数组）；空表示用内置默认。模型只能在白名单内选工具。
+	KeyAgentToolPolicy = Key{Name: "agent.tool_policy", Env: "AGENT_TOOL_POLICY"}
+)

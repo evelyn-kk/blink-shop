@@ -2,14 +2,17 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
+	"github.com/evelyn-kk/blink-shop/backend/src/llm"
 	"github.com/evelyn-kk/blink-shop/backend/src/rag"
 	"github.com/evelyn-kk/blink-shop/backend/src/risk"
 	"github.com/evelyn-kk/blink-shop/backend/src/shop"
@@ -18,7 +21,11 @@ import (
 
 // Deps 是规则运行器和工具层的依赖。
 type Deps struct {
-	Store store.Store
+	// LLM 是模型调用入口；nil 表示没有配置模型，规划和回答全部走规则。
+	LLM llm.Provider
+	// Settings 返回当前的模型设置（开关、模型名、轮数上限、工具白名单）；nil 表示默认值。每次运行读取，运行中可改。
+	Settings SettingsSource
+	Store    store.Store
 	// Shop 是购物车、结算、订单的业务层，与 HTTP 接口共用同一份校验和金额计算。
 	Shop *shop.Service
 	// Retriever 是知识检索；nil 表示未配置，search_knowledge 返回 knowledge_unavailable。
@@ -107,11 +114,16 @@ type Tool struct {
 }
 
 // Registry 是工具注册表：按名字查找、按意图限制可用工具、校验参数后执行。
+// 白名单默认是 DefaultPolicy；配置了 Deps.Settings 时每次调用按 ToolPolicy（JSON）解析，解析结果按原文缓存。
 type Registry struct {
 	deps   Deps
 	tools  map[string]*Tool
 	names  []string
 	policy map[Intent][]string
+
+	policyMu     sync.Mutex
+	policyRaw    string
+	policyParsed map[Intent][]string
 }
 
 // NewRegistry 注册全部工具和默认的意图白名单。
@@ -140,20 +152,84 @@ func (r *Registry) Tools() []*Tool {
 	return out
 }
 
-// Allowed 返回意图允许的工具（按名字排序）。
-func (r *Registry) Allowed(intent Intent) []string {
-	out := append([]string{}, r.policy[intent]...)
+// Allowed 返回意图当前允许的工具（按名字排序）。
+func (r *Registry) Allowed(ctx context.Context, intent Intent) []string {
+	out := append([]string{}, r.policyFor(ctx)[intent]...)
 	sort.Strings(out)
 	return out
 }
 
-func (r *Registry) allowed(intent Intent, tool string) bool {
-	for _, t := range r.policy[intent] {
+func (r *Registry) allowed(ctx context.Context, intent Intent, tool string) bool {
+	for _, t := range r.policyFor(ctx)[intent] {
 		if t == tool {
 			return true
 		}
 	}
 	return false
+}
+
+// policyFor 返回当前生效的白名单：没有动态配置或配置为空时是内置默认；否则解析 JSON（结果按原文缓存）。
+func (r *Registry) policyFor(ctx context.Context) map[Intent][]string {
+	if r.deps.Settings == nil {
+		return r.policy
+	}
+	raw := strings.TrimSpace(r.deps.Settings(ctx).ToolPolicy)
+	if raw == "" {
+		return r.policy
+	}
+	r.policyMu.Lock()
+	defer r.policyMu.Unlock()
+	if raw == r.policyRaw && r.policyParsed != nil {
+		return r.policyParsed
+	}
+	parsed, warnings := ParsePolicy(raw, r.tools)
+	if parsed == nil {
+		r.deps.Logger.Warn("agent tool policy invalid, using default", "warnings", warnings)
+		parsed = r.policy
+	} else if len(warnings) > 0 {
+		r.deps.Logger.Warn("agent tool policy adjusted", "warnings", warnings)
+	}
+	r.policyRaw, r.policyParsed = raw, parsed
+	return parsed
+}
+
+// noToolIntents 永远不能调用任何工具，写工具也不能通过配置赋给它们：导航只返回跳转，非导购和图搜只做说明。
+var noToolIntents = map[Intent]bool{IntentNavigation: true, IntentNonGuide: true, IntentImageSearch: true}
+
+// ParsePolicy 解析动态配置的白名单：JSON 对象，键是意图名，值是工具名数组。未知意图和未知工具忽略（记入 warnings），
+// 无工具意图里的工具被去掉；JSON 不合法时返回 nil。没有出现在配置里的意图沿用内置默认。
+func ParsePolicy(raw string, known map[string]*Tool) (map[Intent][]string, []string) {
+	var m map[string][]string
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return nil, []string{"not a JSON object of string arrays: " + err.Error()}
+	}
+	out := DefaultPolicy()
+	var warnings []string
+	for name, tools := range m {
+		intent := Intent(name)
+		if _, ok := out[intent]; !ok {
+			warnings = append(warnings, "unknown intent "+name)
+			continue
+		}
+		var list []string
+		for _, t := range tools {
+			t = strings.TrimSpace(t)
+			tool, ok := known[t]
+			switch {
+			case !ok:
+				warnings = append(warnings, "unknown tool "+t+" for "+name)
+			case noToolIntents[intent]:
+				warnings = append(warnings, "intent "+name+" cannot use tools, dropped "+t)
+			case tool.Write && intent == IntentGuide:
+				warnings = append(warnings, "intent guide cannot use write tool "+t)
+			case containsStr(list, t):
+			default:
+				list = append(list, t)
+			}
+		}
+		out[intent] = list
+	}
+	return out, warnings
 }
 
 // DefaultPolicy 是意图 → 可用工具的白名单。导航和非导购不能调用任何工具；只有购物车意图能改购物车，
@@ -189,7 +265,7 @@ func (r *Registry) call(ctx context.Context, tc *ToolContext, name string, args 
 	if !ok {
 		return Observation{Code: CodeToolNotFound, Message: "没有这个工具：" + name}
 	}
-	if !r.allowed(tc.Intent, name) {
+	if !r.allowed(ctx, tc.Intent, name) {
 		return Observation{Code: CodeToolNotAllowed, Message: fmt.Sprintf("当前意图 %s 不允许使用 %s", tc.Intent, name)}
 	}
 	if tc.AccountID == "" {

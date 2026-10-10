@@ -17,8 +17,10 @@ import (
 	"github.com/go-sql-driver/mysql"
 
 	"github.com/evelyn-kk/blink-shop/backend/migrations"
+	"github.com/evelyn-kk/blink-shop/backend/src/agent"
 	"github.com/evelyn-kk/blink-shop/backend/src/configcenter"
 	"github.com/evelyn-kk/blink-shop/backend/src/httpapi"
+	"github.com/evelyn-kk/blink-shop/backend/src/llm"
 	"github.com/evelyn-kk/blink-shop/backend/src/logging"
 	"github.com/evelyn-kk/blink-shop/backend/src/objectstore"
 	"github.com/evelyn-kk/blink-shop/backend/src/store/mysqlstore"
@@ -55,6 +57,7 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 	if err != nil {
 		return fmt.Errorf("配置不合法: %w", err)
 	}
+	agentSettings, _ := configcenter.AgentSettingsOf(ctx, resolver) // Load 已校验
 	if err := configcenter.ValidateProduction(ctx, cfg, resolver); err != nil {
 		return fmt.Errorf("生产环境配置不安全: %w", err)
 	}
@@ -86,6 +89,14 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 	if err != nil {
 		return err
 	}
+	// 模型：没有 AI_API_KEY 时为 nil，导购只走规则。超时和重试取启动时的配置（运行中改动对已建客户端不生效）。
+	var provider llm.Provider
+	if client := llm.NewClient(llm.Options{BaseURL: cfg.AIBaseURL, APIKey: cfg.AIAPIKey, Timeout: agentSettings.Timeout, MaxRetries: agentSettings.MaxRetries}); client != nil {
+		provider = client
+		logger.Info("llm configured", "base_url", cfg.AIBaseURL, "planner_model", agentSettings.PlannerModel, "agent_model", agentSettings.AgentModel)
+	} else {
+		logger.Warn("AI_API_KEY not set, agent runs on rules only")
+	}
 
 	server := httpapi.NewServer(httpapi.Options{
 		Logger:      logger,
@@ -94,8 +105,12 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 		ObjectStore: objects,
 		AvatarDir:   cfg.AvatarUploadDir,
 		Configs:     configcenter.NewAdmin(resolver, dynamic),
-		// 导购风险词跟随动态配置（管理后台风控页可改，立即生效）。
+		// 导购风险词和模型设置跟随动态配置（管理后台可改，立即生效）。
 		RiskWords: func(ctx context.Context) []string { return configcenter.RiskBlockedWords(ctx, resolver) },
+		LLM:       provider,
+		AgentSettings: func(ctx context.Context) agent.ModelSettings {
+			return httpapi.ModelSettingsFrom(configcenter.AgentSettingsNow(ctx, resolver))
+		},
 		Readiness: []httpapi.ReadinessCheck{
 			{Name: "mysql", Check: func(ctx context.Context) error { return schemaReady(ctx, st) }},
 		},

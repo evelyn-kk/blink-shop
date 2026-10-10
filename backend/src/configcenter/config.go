@@ -26,6 +26,7 @@ type Config struct {
 	MinIOUseSSL          bool
 	MilvusToken          string
 	AIAPIKey             string
+	AIBaseURL            string
 	AvatarUploadDir      string
 }
 
@@ -51,6 +52,7 @@ func Load(ctx context.Context, r *Resolver) (Config, error) {
 		MinIOBucket:     r.Get(ctx, KeyMinIOBucket),
 		MilvusToken:     r.Get(ctx, KeyMilvusToken),
 		AIAPIKey:        r.Get(ctx, KeyAIAPIKey),
+		AIBaseURL:       strings.TrimSpace(r.Get(ctx, KeyAIBaseURL)),
 		AvatarUploadDir: r.Get(ctx, KeyAvatarUploadDir),
 	}
 	switch cfg.AppEnv {
@@ -76,10 +78,86 @@ func Load(ctx context.Context, r *Resolver) (Config, error) {
 	if _, err := parseHTTPSettings(ctx, r); err != nil {
 		errs = append(errs, err)
 	}
+	if !strings.HasPrefix(cfg.AIBaseURL, "http://") && !strings.HasPrefix(cfg.AIBaseURL, "https://") {
+		errs = append(errs, fmt.Errorf("%s: %q 必须是 http(s) 地址", KeyAIBaseURL.Env, cfg.AIBaseURL))
+	}
+	if _, err := AgentSettingsOf(ctx, r); err != nil {
+		errs = append(errs, err)
+	}
 	if err := errors.Join(errs...); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+// AgentSettings 是导购 Agent 每次运行读取的模型相关配置（可随动态配置变化）。
+type AgentSettings struct {
+	PlannerEnabled bool
+	AgentEnabled   bool
+	PlannerModel   string
+	AgentModel     string
+	Timeout        time.Duration
+	MaxRetries     int
+	MaxToolRounds  int
+	// ToolPolicy 是意图 → 工具白名单的 JSON；空表示内置默认。
+	ToolPolicy string
+}
+
+// AgentSettingsOf 读取并解析 Agent 配置；任一项不合法时返回错误（启动时校验用）。
+func AgentSettingsOf(ctx context.Context, r *Resolver) (AgentSettings, error) {
+	var errs []error
+	s := AgentSettings{PlannerModel: strings.TrimSpace(r.Get(ctx, KeyAIPlannerModel)), AgentModel: strings.TrimSpace(r.Get(ctx, KeyAIAgentModel)),
+		ToolPolicy: strings.TrimSpace(r.Get(ctx, KeyAgentToolPolicy))}
+	s.PlannerEnabled = collect(&errs, KeyAIPlannerEnabled, func() (bool, error) { return parseBool(r.Get(ctx, KeyAIPlannerEnabled), true) })
+	s.AgentEnabled = collect(&errs, KeyAIAgentEnabled, func() (bool, error) { return parseBool(r.Get(ctx, KeyAIAgentEnabled), true) })
+	s.Timeout = collect(&errs, KeyAITimeout, func() (time.Duration, error) { return parsePositiveDuration(r.Get(ctx, KeyAITimeout)) })
+	s.MaxRetries = int(collect(&errs, KeyAIMaxRetries, func() (int64, error) {
+		n, err := strconv.ParseInt(strings.TrimSpace(r.Get(ctx, KeyAIMaxRetries)), 10, 64)
+		if err != nil || n < 0 || n > 5 {
+			return 0, errors.New("必须是 0 到 5 的整数")
+		}
+		return n, nil
+	}))
+	s.MaxToolRounds = int(collect(&errs, KeyAIMaxToolRounds, func() (int64, error) {
+		n, err := strconv.ParseInt(strings.TrimSpace(r.Get(ctx, KeyAIMaxToolRounds)), 10, 64)
+		if err != nil || n < 1 || n > 12 {
+			return 0, errors.New("必须是 1 到 12 的整数")
+		}
+		return n, nil
+	}))
+	if s.PlannerModel == "" || s.AgentModel == "" {
+		errs = append(errs, errors.New("AI_PLANNER_MODEL / AI_AGENT_MODEL 不能为空"))
+	}
+	if err := toolPolicy(s.ToolPolicy); err != nil {
+		errs = append(errs, fmt.Errorf("%s: %w", KeyAgentToolPolicy.Env, err))
+	}
+	return s, errors.Join(errs...)
+}
+
+// AgentSettingsNow 读取当前配置；某项不合法时该项回到默认值（运行中改坏一项不影响服务）。
+func AgentSettingsNow(ctx context.Context, r *Resolver) AgentSettings {
+	s, err := AgentSettingsOf(ctx, r)
+	if err == nil {
+		return s
+	}
+	def := AgentSettings{PlannerEnabled: true, AgentEnabled: true, PlannerModel: KeyAIPlannerModel.Default, AgentModel: KeyAIAgentModel.Default,
+		Timeout: 30 * time.Second, MaxRetries: 2, MaxToolRounds: 6}
+	if s.Timeout <= 0 {
+		s.Timeout = def.Timeout
+	}
+	if s.MaxToolRounds <= 0 {
+		s.MaxToolRounds = def.MaxToolRounds
+	}
+	if s.PlannerModel == "" {
+		s.PlannerModel = def.PlannerModel
+	}
+	if s.AgentModel == "" {
+		s.AgentModel = def.AgentModel
+	}
+	if toolPolicy(s.ToolPolicy) != nil {
+		s.ToolPolicy = ""
+	}
+	return s
 }
 
 func collect[T any](errs *[]error, key Key, parse func() (T, error)) T {
