@@ -96,3 +96,24 @@ var (
 	// KeyImageFetchAllowedHosts 是服务端可以下载商品图的 https 域名（逗号分隔，精确匹配）；为空表示只读平台内图片。
 	KeyImageFetchAllowedHosts = Key{Name: "image_search.fetch_allowed_hosts", Env: "IMAGE_FETCH_ALLOWED_HOSTS"}
 )
+
+// 语音：识别和合成各选一个供应商，off 表示不提供（接口返回 *_not_enabled）。凭据只在服务端，客户端经后端代理使用。
+// mock 不调外部服务（演示 / 测试），生产环境不允许。仅启动时读取。
+var (
+	KeySTTProvider   = Key{Name: "speech.stt.provider", Env: "STT_PROVIDER", Default: "off"}
+	KeySTTAppID      = Key{Name: "speech.stt.app_id", Env: "STT_APP_ID"}
+	KeySTTAPIKey     = Key{Name: "speech.stt.api_key", Env: "STT_API_KEY", Secret: true}
+	KeySTTAPISecret  = Key{Name: "speech.stt.api_secret", Env: "STT_API_SECRET", Secret: true}
+	KeySTTEndpoint   = Key{Name: "speech.stt.endpoint", Env: "STT_ENDPOINT", Default: "wss://office-api-ast-dx.iflyaisol.com/ast/communicate/v1"}
+	KeySTTLang       = Key{Name: "speech.stt.lang", Env: "STT_LANG", Default: "autodialect"}
+	KeySTTMaxSeconds = Key{Name: "speech.stt.max_seconds", Env: "STT_MAX_SECONDS", Default: "60"}
+
+	KeyTTSProvider     = Key{Name: "speech.tts.provider", Env: "TTS_PROVIDER", Default: "off"}
+	KeyTTSAppID        = Key{Name: "speech.tts.app_id", Env: "TTS_APP_ID"}
+	KeyTTSAPIKey       = Key{Name: "speech.tts.api_key", Env: "TTS_API_KEY", Secret: true}
+	KeyTTSAPISecret    = Key{Name: "speech.tts.api_secret", Env: "TTS_API_SECRET", Secret: true}
+	KeyTTSEndpoint     = Key{Name: "speech.tts.endpoint", Env: "TTS_ENDPOINT"}
+	KeyTTSDefaultVoice = Key{Name: "speech.tts.default_voice", Env: "TTS_DEFAULT_VOICE"}
+	KeyTTSCluster      = Key{Name: "speech.tts.cluster", Env: "TTS_CLUSTER", Default: "volcano_tts"}
+	KeyTTSMaxRunes     = Key{Name: "speech.tts.max_runes", Env: "TTS_MAX_RUNES", Default: "800"}
+)

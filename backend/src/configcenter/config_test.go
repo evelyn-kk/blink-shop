@@ -118,6 +118,26 @@ func TestLoad(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "speech defaults off; tts provider fills endpoint and voice",
+			env:  map[string]string{"TTS_PROVIDER": "Doubao", "TTS_APP_ID": "app", "TTS_API_KEY": "tok"},
+			check: func(t *testing.T, cfg Config) {
+				sp := cfg.Speech
+				if sp.STTProvider != "off" || sp.STTMaxSeconds != 60 || sp.TTSProvider != "doubao" || sp.TTSMaxRunes != 800 ||
+					sp.TTSEndpoint != "https://openspeech.bytedance.com/api/v1/tts" || sp.TTSDefaultVoice != "BV700_streaming" || sp.TTSCluster != "volcano_tts" {
+					t.Fatalf("speech: %+v", sp)
+				}
+			},
+		},
+		{name: "unknown stt provider", env: map[string]string{"STT_PROVIDER": "whisper"}, wantErr: []string{"STT_PROVIDER"}},
+		{name: "xunfei stt needs credentials", env: map[string]string{"STT_PROVIDER": "xunfei", "STT_APP_ID": "a"}, wantErr: []string{"STT_API_KEY"}},
+		{name: "stt endpoint must be websocket", env: map[string]string{"STT_PROVIDER": "xunfei", "STT_APP_ID": "a", "STT_API_KEY": "k", "STT_API_SECRET": "s",
+			"STT_ENDPOINT": "https://x/ast"}, wantErr: []string{"STT_ENDPOINT"}},
+		{name: "xunfei tts needs secret", env: map[string]string{"TTS_PROVIDER": "xunfei", "TTS_APP_ID": "a", "TTS_API_KEY": "k"}, wantErr: []string{"TTS_API_SECRET"}},
+		{name: "doubao needs token", env: map[string]string{"TTS_PROVIDER": "doubao", "TTS_APP_ID": "a"}, wantErr: []string{"TTS_API_KEY"}},
+		{name: "unknown tts provider", env: map[string]string{"TTS_PROVIDER": "polly"}, wantErr: []string{"TTS_PROVIDER"}},
+		{name: "speech limits", env: map[string]string{"STT_MAX_SECONDS": "1", "TTS_MAX_RUNES": "5000"}, wantErr: []string{"STT_MAX_SECONDS", "TTS_MAX_RUNES"}},
+		{name: "bad default voice", env: map[string]string{"TTS_PROVIDER": "mock", "TTS_DEFAULT_VOICE": "a b"}, wantErr: []string{"TTS_DEFAULT_VOICE"}},
 		{name: "unknown image provider", env: map[string]string{"IMAGE_EMBEDDING_PROVIDER": "clip"}, wantErr: []string{"IMAGE_EMBEDDING_PROVIDER"}},
 		{name: "dashscope needs key", env: map[string]string{"IMAGE_EMBEDDING_PROVIDER": "dashscope"}, wantErr: []string{"IMAGE_EMBEDDING_API_KEY"}},
 		{name: "image dim out of range", env: map[string]string{"IMAGE_EMBEDDING_DIM": "4"}, wantErr: []string{"IMAGE_EMBEDDING_DIM"}},
@@ -197,6 +217,8 @@ func TestValidateProduction(t *testing.T) {
 		{name: "trust all proxies", override: map[string]string{"TRUST_ALL_PROXIES": "true"}, wantErr: []string{"TRUST_ALL_PROXIES"}},
 		{name: "no milvus: token not required", override: map[string]string{"MILVUS_ADDR": "", "MILVUS_TOKEN": ""}},
 		{name: "placeholder embedding key", override: map[string]string{"EMBEDDING_API_KEY": "sk-xxx"}, wantErr: []string{"EMBEDDING_API_KEY"}},
+		{name: "mock speech in production", override: map[string]string{"STT_PROVIDER": "mock"}, wantErr: []string{"mock"}},
+		{name: "placeholder speech secret", override: map[string]string{"TTS_PROVIDER": "doubao", "TTS_APP_ID": "a", "TTS_API_KEY": "changeme"}, wantErr: []string{"TTS_API_KEY"}},
 		{name: "placeholder image embedding key", override: map[string]string{"IMAGE_EMBEDDING_PROVIDER": "dashscope", "IMAGE_EMBEDDING_API_KEY": "changeme"}, wantErr: []string{"IMAGE_EMBEDDING_API_KEY"}},
 	}
 	for _, tt := range tests {

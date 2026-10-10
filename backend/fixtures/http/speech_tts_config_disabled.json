@@ -1,0 +1,24 @@
+{
+  "description": "语音能力配置（未配置供应商）：enabled=false、stt.enabled=false，客户端据此隐藏或置灰朗读和语音输入；响应不含任何凭据",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/speech/tts/config",
+    "as": "blink_user"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "enabled": false,
+      "provider": "",
+      "voice": "",
+      "max_text_chars": 800,
+      "stt": {
+        "enabled": false,
+        "provider": "",
+        "sample_rate": 16000,
+        "encoding": "pcm_s16le",
+        "max_seconds": 60
+      }
+    }
+  }
+}

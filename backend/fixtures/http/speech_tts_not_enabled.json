@@ -1,0 +1,19 @@
+{
+  "description": "没有配置语音合成：501 tts_not_enabled（成功时直接返回音频字节，Content-Type 为 audio/*）",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/speech/tts",
+    "as": "blink_user",
+    "body": {
+      "text": "你好"
+    }
+  },
+  "response": {
+    "status": 501,
+    "body": {
+      "code": "tts_not_enabled",
+      "message": "语音朗读暂未开通",
+      "request_id": "<request_id>"
+    }
+  }
+}

@@ -122,6 +122,22 @@
             android:textSize="12sp"
             android:visibility="gone" />
 
+        <!-- 朗读这一段回答（语音合成开通且开启了语音功能时显示）：再点一次停止 -->
+        <TextView
+            android:id="@+id/speak_button"
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/touch_target"
+            android:layout_marginTop="2dp"
+            android:drawablePadding="4dp"
+            android:drawableStart="@drawable/ic_speaker"
+            android:gravity="center_vertical"
+            android:minWidth="@dimen/touch_target"
+            android:paddingEnd="8dp"
+            android:text="朗读"
+            android:textColor="@color/brand"
+            android:textSize="13sp"
+            android:visibility="gone" />
+
         <TextView
             android:id="@+id/retry_button"
             style="@style/SecondaryButton"

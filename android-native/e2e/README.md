@@ -72,3 +72,17 @@ cd ../android-native && python3 e2e/image_flow.py
 
 快门和确认按钮按 AOSP 相机（模拟器自带的 `com.android.camera2`）定位；真机的相机应用不同，脚本会等最多 60 秒让人手动拍照。
 权限框按英文系统的按钮文字（“Don’t allow”）点击。用完删掉临时集合（`blink_shop_e2e_images`）。
+
+## 语音 `voice_flow.py`
+
+覆盖 8.4：首次点麦克风先看隐私说明 → 拒绝录音权限（提示可以打字）→ 再次拒绝即“不再询问”（提示去设置，“去设置”打开本应用设置页）→
+授权后语音输入（正在听、转写实时写进输入框、再点麦克风得到最终结果）→ 再开一次后“取消”还原输入 → 发送 → “朗读 / 停止朗读”→
+朗读中回桌面（离开页面自动停止，回来不崩溃）→ 设置里关闭语音功能后不再显示麦克风和朗读按钮。
+
+后端开 mock 语音（测试库）：`STT_PROVIDER=mock TTS_PROVIDER=mock`，mock 识别结果固定为“推荐一款降噪耳机”。
+
+```bash
+cd android-native && python3 e2e/voice_flow.py
+```
+
+模拟器的虚拟麦克风在 `-no-audio` 下也能出数据。权限框按英文系统的按钮文字点击。

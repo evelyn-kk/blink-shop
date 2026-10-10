@@ -17,6 +17,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 | `ui` | 页面基类、后台调用、图片加载、加载/空/出错占位 |
 | `catalog` / `account` / `settings` | 商品列表与详情、登录注册与账户、设置与帮助、调试版接口设置 |
 | `cart` / `order` / `coupon` | 购物车与确认订单、支付/订单列表/详情/评价、领券与我的券 |
+| `voice` | 语音：`VoiceInputController`、`TtsController`、`TtsText`（纯 Java）、`AudioRecordMic`、`OkHttpSpeechConnector`、`MediaAudioPlayer`、`VoicePrefs` |
 | `chat` | AI 导购：`ChatController`（纯 Java 的发送/接收/停止/重试/恢复流程）、`ChatTurn`（一轮的状态）、`AttachmentController`（附图上传状态，纯 Java）、`ChatImage`（附图压缩）、`MarkdownLite`（Markdown 子集解析，纯 Java）、`MarkdownView`、`BlockViews`（结构化块卡片）、`ChatAdapter`、`ChatHistoryAdapter`、`ChatActivity` |
 
 单测里的 `ShopApiContractTest`、`TradeContractTest`、`ChatApiContractTest`、`AgentStreamContractTest` 直接读取 `backend/fixtures/http` 的接口样例：检查 App 发出的请求与样例一致、样例响应能正确解析。
@@ -33,7 +34,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 | `INTERNET` | 访问接口和图片 |
 | `ACCESS_NETWORK_STATE` | 判断是否断网：断网时直接提示“网络未连接”，不发请求；网络恢复后列表自动重试 |
 
-更换头像用系统图片选择器（`ACTION_GET_CONTENT`），不需要存储权限。聊天附图从相册选择同样不需要存储权限；拍照时才申请相机权限（见“AI 导购聊天 → 图片附件”）。录音权限在语音功能里再申请。
+更换头像用系统图片选择器（`ACTION_GET_CONTENT`），不需要存储权限。聊天附图从相册选择同样不需要存储权限；拍照时才申请相机权限（见“AI 导购聊天 → 图片附件”）；语音输入时才申请录音权限（见“AI 导购聊天 → 语音”）。
 
 ## 网络错误怎么提示
 
@@ -80,6 +81,15 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
   `POST /files` 上传；输入框上方显示缩略图和状态（上传中 / 已就绪 / 失败原因），可以重试或移除，换图或移除后旧的上传结果丢弃。
   上传完成才能发送；只附图不写字时发“帮我找找图片里的同款”。附件随这一轮保存（重试、重新提问照样带上，历史回放显示“附带 1 张图片”）。
   按钮、缩略图、移除都有内容描述，触控区域 48dp，状态文字用 `accessibilityLiveRegion` 朗读。
+- **语音**（`voice` 包）：服务端能力配置（`GET /speech/tts/config`）开通且设置里没关时才显示麦克风和“朗读”按钮。
+  - 语音输入：`VoiceInputController`（纯 Java 状态机：连接 → ready 后才开始录音 → 正在听 → 再点麦克风发 end → 最终结果写进输入框 → 关闭）
+    + `AudioRecordMic`（16kHz 单声道 16 位 PCM，每 100ms 一块）+ `OkHttpSpeechConnector`（WebSocket，token 由会话拦截器带上，15 秒心跳）。
+    转写实时写进输入框（接在原有文字后），可以改了再发；“取消”还原原来的输入；离开聊天页、直接点发送都会停止录音并断开。
+    录音权限：首次申请前先展示隐私说明（`VoicePrefs.PRIVACY`），拒绝提示可以打字，“不再询问”后提示去系统设置并提供入口。
+  - 朗读：`TtsText`（去掉代码块、图片、链接地址、标题 / 列表 / 引用标记、强调符号、表格、HTML、商品 ID 和网址，按句末截断到
+    `max_text_chars`）→ `TtsController`（同一时间一段，再点停止，换一段或停止时丢弃迟到的音频）→ `MediaAudioPlayer`（缓存目录临时文件，
+    播完 / 停止删除）。离开页面停止播放，页面销毁释放播放器。
+  - 关闭入口：设置与帮助 →“语音输入与朗读”开关（默认开）；“语音隐私说明”。APK 里没有任何语音密钥或供应商地址。
 - **历史抽屉**：列表（置顶在前）、搜索、置顶/取消、重命名、删除、新对话；没有消息的会话不会出现在列表里，服务端会话等第一条消息发送时才创建。
 - 端到端脚本 `e2e/chat_flow.py`（见 `e2e/README.md`）。
 

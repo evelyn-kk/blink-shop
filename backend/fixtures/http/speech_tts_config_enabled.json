@@ -1,0 +1,25 @@
+{
+  "description": "语音能力配置（开通了识别和合成，这里是 mock 供应商）：provider 只是名称，凭据只在服务端；实时识别只接受 16000Hz 单声道 16 位 PCM",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/speech/tts/config",
+    "as": "blink_user",
+    "speech": "mock"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "enabled": true,
+      "provider": "mock",
+      "voice": "mock",
+      "max_text_chars": 800,
+      "stt": {
+        "enabled": true,
+        "provider": "mock",
+        "sample_rate": 16000,
+        "encoding": "pcm_s16le",
+        "max_seconds": 60
+      }
+    }
+  }
+}

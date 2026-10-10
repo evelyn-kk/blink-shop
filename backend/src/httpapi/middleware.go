@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -329,6 +330,15 @@ func (r *responseRecorder) Flush() {
 }
 
 func (r *responseRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
+// Hijack 让 WebSocket（实时语音）可以接管连接；记 101 便于访问日志。
+func (r *responseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	c, rw, err := http.NewResponseController(r.ResponseWriter).Hijack()
+	if err == nil && r.status == 0 {
+		r.status = http.StatusSwitchingProtocols
+	}
+	return c, rw, err
+}
 
 // Status 返回已写出的状态码；handler 什么都没写时按 200 计。
 func (r *responseRecorder) Status() int {

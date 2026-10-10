@@ -24,6 +24,7 @@ import (
 	"github.com/evelyn-kk/blink-shop/backend/src/logging"
 	"github.com/evelyn-kk/blink-shop/backend/src/objectstore"
 	"github.com/evelyn-kk/blink-shop/backend/src/rag"
+	"github.com/evelyn-kk/blink-shop/backend/src/speech"
 	"github.com/evelyn-kk/blink-shop/backend/src/store/mysqlstore"
 	"github.com/evelyn-kk/blink-shop/backend/src/vector"
 )
@@ -111,7 +112,13 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 		logger.Warn("image search not configured (MILVUS_ADDR), /search/image returns 503")
 	}
 
+	// 语音：识别 / 合成各自按配置选供应商；凭据只在服务端，客户端经 /speech/* 代理使用。
+	recognizer, synthesizer := speech.FromConfig(cfg.Speech)
+	logger.Info("speech configured", "stt_provider", cfg.Speech.STTProvider, "stt_enabled", recognizer != nil,
+		"tts_provider", cfg.Speech.TTSProvider, "tts_enabled", synthesizer != nil)
+
 	server := httpapi.NewServer(httpapi.Options{
+		Speech:       httpapi.SpeechOptions{Recognizer: recognizer, Synthesizer: synthesizer, MaxSeconds: cfg.Speech.STTMaxSeconds, MaxRunes: cfg.Speech.TTSMaxRunes},
 		VectorIndex:  vec.knowledgeOpt(),
 		ProductIndex: vec.productOpt(),
 		ImageSearch:  images,

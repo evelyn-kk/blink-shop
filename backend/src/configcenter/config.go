@@ -45,6 +45,34 @@ type Config struct {
 	ImageEmbeddingModel    string
 	ImageEmbeddingDim      int
 	ImageFetchAllowedHosts []string
+	Speech                 SpeechConfig
+}
+
+// SpeechConfig 是语音识别与合成的供应商配置（Provider 为 off 表示不提供）。
+type SpeechConfig struct {
+	STTProvider   string
+	STTAppID      string
+	STTAPIKey     string
+	STTAPISecret  string
+	STTEndpoint   string
+	STTLang       string
+	STTMaxSeconds int
+
+	TTSProvider     string
+	TTSAppID        string
+	TTSAPIKey       string
+	TTSAPISecret    string
+	TTSEndpoint     string
+	TTSDefaultVoice string
+	TTSCluster      string
+	TTSMaxRunes     int
+}
+
+// 各供应商的默认合成地址和音色（TTS_ENDPOINT / TTS_DEFAULT_VOICE 为空时）。
+var ttsDefaults = map[string][2]string{
+	"xunfei": {"wss://tts-api.xfyun.cn/v2/tts", "xiaoyan"},
+	"doubao": {"https://openspeech.bytedance.com/api/v1/tts", "BV700_streaming"},
+	"mock":   {"", "mock"},
 }
 
 // ImageSearchEnabled 表示可以做图片搜索：配置了 Milvus（本地图片特征不需要外部服务；dashscope 的密钥在 Load 时已校验）。
@@ -95,6 +123,15 @@ func Load(ctx context.Context, r *Resolver) (Config, error) {
 		ImageEmbeddingAPIKey:   r.Get(ctx, KeyImageEmbeddingAPIKey),
 		ImageEmbeddingModel:    strings.TrimSpace(r.Get(ctx, KeyImageEmbeddingModel)),
 		ImageFetchAllowedHosts: splitHosts(r.Get(ctx, KeyImageFetchAllowedHosts)),
+		Speech: SpeechConfig{
+			STTProvider: strings.ToLower(strings.TrimSpace(r.Get(ctx, KeySTTProvider))), STTAppID: strings.TrimSpace(r.Get(ctx, KeySTTAppID)),
+			STTAPIKey: strings.TrimSpace(r.Get(ctx, KeySTTAPIKey)), STTAPISecret: strings.TrimSpace(r.Get(ctx, KeySTTAPISecret)),
+			STTEndpoint: strings.TrimSpace(r.Get(ctx, KeySTTEndpoint)), STTLang: strings.TrimSpace(r.Get(ctx, KeySTTLang)),
+			TTSProvider: strings.ToLower(strings.TrimSpace(r.Get(ctx, KeyTTSProvider))), TTSAppID: strings.TrimSpace(r.Get(ctx, KeyTTSAppID)),
+			TTSAPIKey: strings.TrimSpace(r.Get(ctx, KeyTTSAPIKey)), TTSAPISecret: strings.TrimSpace(r.Get(ctx, KeyTTSAPISecret)),
+			TTSEndpoint: strings.TrimSpace(r.Get(ctx, KeyTTSEndpoint)), TTSDefaultVoice: strings.TrimSpace(r.Get(ctx, KeyTTSDefaultVoice)),
+			TTSCluster: strings.TrimSpace(r.Get(ctx, KeyTTSCluster)),
+		},
 	}
 	switch cfg.AppEnv {
 	case "development", "test", "production", "prod":
@@ -156,6 +193,7 @@ func Load(ctx context.Context, r *Resolver) (Config, error) {
 	default:
 		errs = append(errs, fmt.Errorf("%s: %q 无效，可选 local / dashscope", KeyImageEmbeddingProvider.Env, cfg.ImageEmbeddingProvider))
 	}
+	errs = append(errs, loadSpeech(ctx, r, &cfg.Speech)...)
 	for _, h := range cfg.ImageFetchAllowedHosts {
 		if !validHost(h) {
 			errs = append(errs, fmt.Errorf("%s: %q 不是合法的域名（只写主机名，不带协议、端口或路径）", KeyImageFetchAllowedHosts.Env, h))
@@ -298,6 +336,16 @@ func ValidateProduction(ctx context.Context, cfg Config, r *Resolver) error {
 	}
 	if key := strings.ToLower(strings.TrimSpace(cfg.ImageEmbeddingAPIKey)); key != "" && contains(devAIKeys, key) {
 		errs = append(errs, errors.New("IMAGE_EMBEDDING_API_KEY 不能使用示例值"))
+	}
+	// 语音：mock 只用于演示和测试；凭据不能是示例值
+	if cfg.Speech.STTProvider == "mock" || cfg.Speech.TTSProvider == "mock" {
+		errs = append(errs, errors.New("STT_PROVIDER / TTS_PROVIDER 不能是 mock（生产环境请配置真实供应商或 off）"))
+	}
+	for env, v := range map[string]string{"STT_API_KEY": cfg.Speech.STTAPIKey, "STT_API_SECRET": cfg.Speech.STTAPISecret,
+		"TTS_API_KEY": cfg.Speech.TTSAPIKey, "TTS_API_SECRET": cfg.Speech.TTSAPISecret} {
+		if key := strings.ToLower(v); key != "" && contains(devAIKeys, key) {
+			errs = append(errs, fmt.Errorf("%s 不能使用示例值", env))
+		}
 	}
 	if key := strings.ToLower(strings.TrimSpace(cfg.AIAPIKey)); key != "" && contains(devAIKeys, key) {
 		errs = append(errs, errors.New("AI_API_KEY 不能使用示例值（为空表示不接模型，导购走规则）"))
@@ -494,6 +542,71 @@ func without(list []string, v string) []string {
 func RiskBlockedWords(ctx context.Context, r *Resolver) []string {
 	return splitList(r.Get(ctx, KeyRiskBlockedWords))
 }
+
+// loadSpeech 校验语音配置：供应商名、所需凭据、地址协议和数值范围；补上合成的默认地址和音色。
+func loadSpeech(ctx context.Context, r *Resolver, sp *SpeechConfig) []error {
+	var errs []error
+	intIn := func(k Key, lo, hi int64) int {
+		return int(collect(&errs, k, func() (int64, error) {
+			n, err := strconv.ParseInt(strings.TrimSpace(r.Get(ctx, k)), 10, 64)
+			if err != nil || n < lo || n > hi {
+				return 0, fmt.Errorf("必须是 %d 到 %d 的整数", lo, hi)
+			}
+			return n, nil
+		}))
+	}
+	sp.STTMaxSeconds = intIn(KeySTTMaxSeconds, 5, 300)
+	sp.TTSMaxRunes = intIn(KeyTTSMaxRunes, 1, 2000)
+	wsURL := func(k Key, v string) {
+		if !strings.HasPrefix(v, "wss://") && !strings.HasPrefix(v, "ws://") {
+			errs = append(errs, fmt.Errorf("%s: %q 必须是 ws(s) 地址", k.Env, v))
+		}
+	}
+	switch sp.STTProvider {
+	case "off", "mock":
+	case "xunfei":
+		if sp.STTAppID == "" || sp.STTAPIKey == "" || sp.STTAPISecret == "" {
+			errs = append(errs, fmt.Errorf("%s=xunfei 时必须配置 STT_APP_ID、STT_API_KEY、STT_API_SECRET", KeySTTProvider.Env))
+		}
+		wsURL(KeySTTEndpoint, sp.STTEndpoint)
+	default:
+		errs = append(errs, fmt.Errorf("%s: %q 无效，可选 off / mock / xunfei", KeySTTProvider.Env, sp.STTProvider))
+	}
+	d, known := ttsDefaults[sp.TTSProvider]
+	if sp.TTSEndpoint == "" && known {
+		sp.TTSEndpoint = d[0]
+	}
+	if sp.TTSDefaultVoice == "" && known {
+		sp.TTSDefaultVoice = d[1]
+	}
+	switch sp.TTSProvider {
+	case "off", "mock":
+	case "xunfei":
+		if sp.TTSAppID == "" || sp.TTSAPIKey == "" || sp.TTSAPISecret == "" {
+			errs = append(errs, fmt.Errorf("%s=xunfei 时必须配置 TTS_APP_ID、TTS_API_KEY、TTS_API_SECRET", KeyTTSProvider.Env))
+		}
+		wsURL(KeyTTSEndpoint, sp.TTSEndpoint)
+	case "doubao":
+		if sp.TTSAppID == "" || sp.TTSAPIKey == "" {
+			errs = append(errs, fmt.Errorf("%s=doubao 时必须配置 TTS_APP_ID、TTS_API_KEY（token）", KeyTTSProvider.Env))
+		}
+		if !strings.HasPrefix(sp.TTSEndpoint, "https://") && !strings.HasPrefix(sp.TTSEndpoint, "http://") {
+			errs = append(errs, fmt.Errorf("%s: %q 必须是 http(s) 地址", KeyTTSEndpoint.Env, sp.TTSEndpoint))
+		}
+	default:
+		errs = append(errs, fmt.Errorf("%s: %q 无效，可选 off / mock / xunfei / doubao", KeyTTSProvider.Env, sp.TTSProvider))
+	}
+	if !voicePattern.MatchString(sp.TTSDefaultVoice) && sp.TTSDefaultVoice != "" {
+		errs = append(errs, fmt.Errorf("%s: %q 只能是字母、数字、下划线和短横线", KeyTTSDefaultVoice.Env, sp.TTSDefaultVoice))
+	}
+	return errs
+}
+
+// voicePattern 是音色名的格式（也用于校验客户端传来的 voice）。
+var voicePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// ValidVoice 判断音色名格式是否合法。
+func ValidVoice(v string) bool { return voicePattern.MatchString(v) }
 
 // splitHosts 按逗号拆分域名列表，去空白、转小写、去掉空项。
 func splitHosts(raw string) []string {

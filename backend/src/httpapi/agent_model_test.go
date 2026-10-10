@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"bytes"
 	"context"
 	"log/slog"
 	"net/http"
@@ -24,7 +23,7 @@ import (
 // newModelServer 创建带 mock 模型的服务；模型设置跟随动态配置（管理员接口可改）。
 func newModelServer(t *testing.T, mock *llm.Mock) (*testServer, string) {
 	t.Helper()
-	logs := &bytes.Buffer{}
+	logs := &lockedBuffer{}
 	dynamic := configcenter.NewMemorySource(nil)
 	resolver := configcenter.NewResolver(func(string) string { return "" }, dynamic)
 	mem := memstore.New()

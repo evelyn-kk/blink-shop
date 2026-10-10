@@ -1,0 +1,21 @@
+{
+  "description": "朗读文本为空（只有空白）：400 invalid_argument，field=text；超过 max_text_chars 同样 400",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/speech/tts",
+    "as": "blink_user",
+    "speech": "mock",
+    "body": {
+      "text": "   "
+    }
+  },
+  "response": {
+    "status": 400,
+    "body": {
+      "code": "invalid_argument",
+      "message": "请提供要朗读的文字",
+      "field": "text",
+      "request_id": "<request_id>"
+    }
+  }
+}

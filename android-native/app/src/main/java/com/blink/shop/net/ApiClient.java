@@ -106,6 +106,42 @@ public final class ApiClient {
         }
     }
 
+    /** 二进制响应（如合成的音频）。 */
+    public static final class Bytes {
+        public final byte[] data;
+        public final String contentType;
+
+        public Bytes(byte[] data, String contentType) {
+            this.data = data;
+            this.contentType = contentType == null ? "" : contentType;
+        }
+    }
+
+    /** 执行请求并读取二进制响应体；非 2xx 按 JSON 错误解析。 */
+    public Bytes executeBytes(Request request) throws ApiException {
+        ensureOnline();
+        Call call = http.newCall(request);
+        try (Response response = call.execute()) {
+            ResponseBody body = response.body();
+            if (!response.isSuccessful()) {
+                throw ApiException.fromHttp(response.code(), body == null ? "" : body.string(), response.header("X-Request-ID"));
+            }
+            if (body == null) {
+                throw ApiException.badResponse(null);
+            }
+            return new Bytes(body.bytes(), response.header("Content-Type"));
+        } catch (IOException e) {
+            throw networkFailure(e, call.isCanceled());
+        }
+    }
+
+    /** 建立 WebSocket（握手同样经过会话拦截器带上 token）；不设读超时，每 15 秒 ping 一次保持连接。 */
+    public okhttp3.WebSocket openWebSocket(String path, okhttp3.WebSocketListener listener) throws ApiException {
+        ensureOnline();
+        OkHttpClient ws = http.newBuilder().readTimeout(0, TimeUnit.SECONDS).pingInterval(15, TimeUnit.SECONDS).build();
+        return ws.newWebSocket(request(path).build(), listener);
+    }
+
     void ensureOnline() throws ApiException {
         if (connectivity != null && !connectivity.isOnline()) {
             throw ApiException.offline();

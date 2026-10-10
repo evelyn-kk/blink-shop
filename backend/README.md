@@ -226,6 +226,29 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
   说“拍照找同款”但没带图时请用户上传，附件不是图片 / 图片损坏时说明原因。按图找到的商品进入可信集，可以“把第一个加入购物车”。
   轨迹 `retrieval.images` 记 Embedder、候选数、过期丢弃数、过滤数和每件的相似度与等级。
 
+## 语音
+
+语音输入（实时识别）和朗读（语音合成）由后端代理（`src/speech` 供应商抽象 + `httpapi/speech.go`），供应商凭据只在服务端配置里，
+客户端只调 Blink 的接口，拿不到任何密钥。识别和合成各自选一个供应商，`off`（默认）表示不提供：
+
+| 能力 | 供应商 | 说明 |
+| --- | --- | --- |
+| 识别 `STT_PROVIDER` | `mock` / `xunfei` | mock 不调外部服务，按收到的音频时长逐字“识别”出固定文字（本地演示和测试）；xunfei 为讯飞实时转写（签名 URL：查询参数排序后 HMAC-SHA1，结果按稳定段累积 + 当前段拼整句） |
+| 合成 `TTS_PROVIDER` | `mock` / `xunfei` / `doubao` | mock 生成提示音 WAV；xunfei 为在线合成 WebSocket（HMAC-SHA256 鉴权，Base64 分帧）；doubao 为 HTTP（`Bearer;<token>`，不跟随重定向） |
+
+生产环境不允许 mock，凭据不能是示例值。供应商错误只记服务端日志，日志里的地址去掉查询串（签名、密钥都在查询串里）。
+
+- **能力配置** `GET /speech/tts/config`：`{enabled, provider, voice, max_text_chars, stt:{enabled, provider, sample_rate, encoding, max_seconds}}`，
+  客户端据此显示 / 隐藏朗读和麦克风按钮；不含任何凭据。
+- **朗读** `POST /speech/tts {text, voice?}`：成功直接返回音频字节（`Content-Type` audio/*，`Cache-Control: no-store`）；文本去空白后 1–`TTS_MAX_RUNES` 字，
+  音色只能是字母数字下划线短横线；未配置 501 `tts_not_enabled`，供应商失败 / 超时（20 秒）502 `tts_failed`。只记字数和字节数，不记文本。
+- **实时识别** `GET /speech/realtime?sample_rate=16000`（WebSocket）：需要登录（`Authorization` 头；浏览器 Origin 必须在 CORS 白名单）；
+  同一账户同时一个会话（409 `speech_session_active`）。客户端发二进制帧（16kHz 单声道 16 位 PCM，单帧 ≤ 64KB）和控制帧
+  `{"type":"end"|"cancel"}`；服务端推 `ready` → `partial`… → `final` → `closed`，达到 `STT_MAX_SECONDS` 时自动结束输入（`end_of_input`）
+  再给 `final`；10 秒没有消息 `idle_timeout`、供应商连不上 `speech_unavailable`，每个会话最后一条都是 `closed`。客户端断开或会话时限
+  （最长输入 + 10 秒）到了都会关掉到供应商的连接。会话日志记结果、音频时长、最后一帧时间、读错误和结果字数，不记转写原文。
+  每次推送设 5 秒写超时、发完清掉——否则客户端心跳（OkHttp 每 15 秒 ping）触发的自动 pong 会撞上过期的写超时，会话在 15 秒处被误判为空闲。
+
 ## 购物车与优惠券
 
 接口（仅普通用户，商家和管理员 403）：`GET /cart`、`GET /cart/discount-preview`、`POST /cart/items`、`PATCH,DELETE /cart/items/{id}`、`GET /coupons/available`、`GET /coupons/mine`、`POST /coupons/{id}:claim`。购物车的写操作返回整个购物车（与上游一致），金额全部由服务端计算。
@@ -700,6 +723,11 @@ go run ./cmd/eval -suite=images -image-embedder=env       # 用 IMAGE_EMBEDDING_
 | `IMAGE_EMBEDDING_PROVIDER` | — | `local` | `local`（本地特征，不调外部服务）或 `dashscope`（需要 `IMAGE_EMBEDDING_API_KEY`） |
 | `IMAGE_EMBEDDING_API_KEY` | — | 空 | 密钥类；dashscope 时必填，非空的示例值在生产被拒 |
 | `IMAGE_EMBEDDING_BASE_URL` / `IMAGE_EMBEDDING_MODEL` / `IMAGE_EMBEDDING_DIM` | — | `https://dashscope.aliyuncs.com` / `qwen3-vl-embedding` / `512` | dashscope 多模态 Embedding（local 固定 160 维，不看这三项）；换模型或维度要重建集合 |
+| `STT_PROVIDER` / `TTS_PROVIDER` | — | `off` | 语音识别 / 合成供应商：off、mock（演示，生产拒绝）、xunfei、doubao（仅合成） |
+| `STT_APP_ID` / `STT_API_KEY` / `STT_API_SECRET` | — | 空 | 讯飞实时转写凭据（后两个是密钥类） |
+| `STT_ENDPOINT` / `STT_LANG` / `STT_MAX_SECONDS` | — | 讯飞实时转写地址 / `autodialect` / `60` | ws(s) 地址、语种；单次语音输入最长秒数（5–300） |
+| `TTS_APP_ID` / `TTS_API_KEY` / `TTS_API_SECRET` | — | 空 | 合成凭据：讯飞三项都要；豆包为 appid + token（`TTS_API_KEY`） |
+| `TTS_ENDPOINT` / `TTS_DEFAULT_VOICE` / `TTS_CLUSTER` / `TTS_MAX_RUNES` | — | 按供应商默认 / 按供应商默认 / `volcano_tts` / `800` | 合成地址和默认音色（为空用供应商默认）、豆包集群、单次朗读最多字数（1–2000） |
 | `IMAGE_FETCH_ALLOWED_HOSTS` | — | 空 | 服务端可以下载商品图的 https 域名（逗号分隔，只写主机名，不接受 IP）；为空只读平台内图片 |
 | `RISK_BLOCKED_WORDS` | `risk.blocked_words` | `违法,违禁,假货,绕过风控` | 导购对话的风险词，逗号分隔（最多 200 个、每个 20 字内） |
 
@@ -712,6 +740,7 @@ go run ./cmd/eval -suite=images -image-embedder=env       # 用 IMAGE_EMBEDDING_
 - `MINIO_ACCESS_KEY` 或 `MINIO_SECRET_KEY` 为空或 `minioadmin`；
 - 配置了 `MILVUS_ADDR` 时 `MILVUS_TOKEN` 为空或 `root:Milvus`（不用 Milvus 时不检查）；
 - `EMBEDDING_API_KEY` 非空但是示例值；
+- `STT_PROVIDER` / `TTS_PROVIDER` 为 mock，或 `STT_API_KEY`、`STT_API_SECRET`、`TTS_API_KEY`、`TTS_API_SECRET` 非空但是示例值；
 - `AI_API_KEY` 非空但是示例值（`changeme`、`your-api-key`、`sk-xxx`）；为空允许，表示不接模型，导购只走规则；
 - `TRUST_ALL_PROXIES` 开启。
 

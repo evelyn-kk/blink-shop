@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,7 +30,7 @@ var testNow = time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
 type testServer struct {
 	*Server
 	handler http.Handler
-	logs    *bytes.Buffer
+	logs    *lockedBuffer
 	dynamic *configcenter.MemorySource
 	mem     *memstore.Store     // 已写入开发种子
 	objects *objectstore.Memory // 默认的对象存储；测试“未配置”时把 Server.objects 置为 nil
@@ -38,7 +39,7 @@ type testServer struct {
 // newTestServer 用给定环境变量创建 Server；extra 在构建 handler 前注册测试路由。
 func newTestServer(t *testing.T, env map[string]string, readiness []ReadinessCheck, extra func(mux *http.ServeMux)) *testServer {
 	t.Helper()
-	logs := &bytes.Buffer{}
+	logs := &lockedBuffer{}
 	dynamic := configcenter.NewMemorySource(nil)
 	resolver := configcenter.NewResolver(func(k string) string { return env[k] }, dynamic)
 	production := env["APP_ENV"] == "production"
@@ -550,4 +551,22 @@ func TestDynamicSettingsApplyWithoutRestart(t *testing.T) {
 	if got := req().Header().Get("Access-Control-Allow-Origin"); got != "" {
 		t.Fatalf("after dynamic update Allow-Origin = %q, want empty", got)
 	}
+}
+
+// lockedBuffer 是并发安全的日志缓冲：WebSocket 等被接管的连接在测试读取日志时可能还在写访问日志。
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

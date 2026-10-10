@@ -41,6 +41,14 @@ import com.blink.shop.catalog.ProductDetailActivity;
 import com.blink.shop.catalog.ProductListActivity;
 import com.blink.shop.coupon.CouponActivity;
 import com.blink.shop.model.ChatSession;
+import com.blink.shop.model.SpeechConfig;
+import com.blink.shop.net.ApiClient;
+import com.blink.shop.voice.AudioRecordMic;
+import com.blink.shop.voice.MediaAudioPlayer;
+import com.blink.shop.voice.OkHttpSpeechConnector;
+import com.blink.shop.voice.TtsController;
+import com.blink.shop.voice.VoiceInputController;
+import com.blink.shop.voice.VoicePrefs;
 import com.blink.shop.model.PageResult;
 import com.blink.shop.net.ApiException;
 import com.blink.shop.order.OrderDetailActivity;
@@ -56,7 +64,7 @@ import com.blink.shop.ui.StateView;
  * 状态都在 ChatController 里；页面只负责渲染和把用户操作转给控制器。进程被回收后按会话 ID 从服务端恢复，不重复发送。
  */
 public final class ChatActivity extends BaseActivity implements ChatController.Listener, ChatAdapter.Listener, BlockViews.Actions,
-        ChatHistoryAdapter.Listener, AttachmentController.Listener {
+        ChatHistoryAdapter.Listener, AttachmentController.Listener, VoiceInputController.Listener, TtsController.Listener {
 
     private static final String EXTRA_PROMPT = "prompt";
     private static final String STATE_SESSION = "session_id";
@@ -65,6 +73,7 @@ public final class ChatActivity extends BaseActivity implements ChatController.L
     private static final int REQUEST_GALLERY = 41;
     private static final int REQUEST_CAMERA = 42;
     private static final int REQUEST_CAMERA_PERMISSION = 43;
+    private static final int REQUEST_MIC_PERMISSION = 44;
 
     /** 打开聊天页；prompt 非空时预填到输入框（例如从商品页“问导购”进来）。 */
     public static Intent intent(Context c, String prompt) {
@@ -79,6 +88,16 @@ public final class ChatActivity extends BaseActivity implements ChatController.L
     private TextView attachmentRetry;
     /** 拍照时交给相机应用写入的临时文件（页面重建后从 savedInstanceState 恢复）。 */
     private File cameraFile;
+    private VoiceInputController voice;
+    private TtsController tts;
+    private SpeechConfig speechConfig = SpeechConfig.DISABLED;
+    private View micButton;
+    private View voiceBar;
+    private TextView voiceStatus;
+    /** 开始语音输入时输入框里的原文（取消时还原）；voiceBase 是转写结果接在后面的前缀。 */
+    private String voiceOriginal = "";
+    private String voiceBase = "";
+    private Async.Handle speechConfigCall;
     private ChatAdapter adapter;
     private ChatHistoryAdapter historyAdapter;
     private DrawerLayout drawer;
@@ -141,7 +160,40 @@ public final class ChatActivity extends BaseActivity implements ChatController.L
         findViewById(R.id.attachment_remove).setOnClickListener(v -> attachment.clear());
         attachmentRetry.setOnClickListener(v -> attachment.retry());
 
+        voice = new VoiceInputController(new OkHttpSpeechConnector(app.api()), new AudioRecordMic(), main);
+        voice.setListener(this);
+        tts = new TtsController(text -> {
+            ApiClient.Bytes b = app.api().tts(text);
+            return new TtsController.Audio(b.data, b.contentType);
+        }, new MediaAudioPlayer(this), io, main);
+        tts.setListener(this);
+        micButton = findViewById(R.id.mic_button);
+        voiceBar = findViewById(R.id.voice_bar);
+        voiceStatus = findViewById(R.id.voice_status);
+        micButton.setOnClickListener(v -> onMicClicked());
+        findViewById(R.id.voice_cancel).setOnClickListener(v -> {
+            voice.cancel();
+            input.setText(voiceOriginal);
+            input.setSelection(voiceOriginal.length());
+        });
+
         adapter = new ChatAdapter(new BlockViews(this, app.images(), this), this);
+        adapter.setSpeakState(new ChatAdapter.SpeakState() {
+            @Override
+            public boolean available() {
+                return speechConfig.ttsEnabled && VoicePrefs.enabled(ChatActivity.this);
+            }
+
+            @Override
+            public boolean loading(ChatTurn turn) {
+                return tts.isLoading(turn.clientMessageId);
+            }
+
+            @Override
+            public boolean playing(ChatTurn turn) {
+                return tts.isActive(turn.clientMessageId) && !tts.isLoading(turn.clientMessageId);
+            }
+        });
         LinearLayoutManager lm = new LinearLayoutManager(this);
         lm.setStackFromEnd(true);
         list.setLayoutManager(lm);
@@ -227,6 +279,7 @@ public final class ChatActivity extends BaseActivity implements ChatController.L
         super.onStart();
         if (controller != null) {
             controller.attach(this); // 后台期间收到的内容，回来时一次补齐
+            loadSpeechConfig();
         }
     }
 
@@ -234,6 +287,9 @@ public final class ChatActivity extends BaseActivity implements ChatController.L
     protected void onStop() {
         if (controller != null) {
             controller.detach(); // 后台继续接收，不再刷新界面
+            // 离开页面：停止录音和朗读（不在后台录音）
+            voice.cancel();
+            tts.stop();
         }
         super.onStop();
     }
@@ -242,8 +298,127 @@ public final class ChatActivity extends BaseActivity implements ChatController.L
     protected void onDestroy() {
         if (controller != null) {
             controller.dispose();
+            voice.cancel();
+            tts.release();
+        }
+        if (speechConfigCall != null) {
+            speechConfigCall.cancel();
         }
         super.onDestroy();
+    }
+
+    // ---------- 语音 ----------
+
+    /** 读取语音能力配置：决定是否显示麦克风和朗读按钮（读取失败按都没开通处理）。 */
+    private void loadSpeechConfig() {
+        if (speechConfigCall != null) {
+            speechConfigCall.cancel();
+        }
+        speechConfigCall = Async.run(() -> app.api().speechConfig(), new Async.Callback<SpeechConfig>() {
+            @Override
+            public void onSuccess(SpeechConfig c) {
+                applySpeechConfig(c);
+            }
+
+            @Override
+            public void onError(ApiException e) {
+                applySpeechConfig(SpeechConfig.DISABLED);
+            }
+        });
+    }
+
+    private void applySpeechConfig(SpeechConfig c) {
+        speechConfig = c;
+        tts.setMaxChars(c.maxTextChars);
+        boolean on = VoicePrefs.enabled(this);
+        micButton.setVisibility(on && c.sttEnabled ? View.VISIBLE : View.GONE);
+        if (!on || !c.ttsEnabled) {
+            tts.stop();
+        }
+        adapter.refreshSpeak();
+    }
+
+    private void onMicClicked() {
+        if (voice.isActive()) {
+            voice.finish(); // 说完了
+            return;
+        }
+        if (controller.isBusy()) {
+            toast("正在回答，请稍候或先停止");
+            return;
+        }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            startVoice();
+            return;
+        }
+        // 第一次申请前说明语音怎么用、去哪里
+        new AlertDialog.Builder(this)
+                .setTitle("使用语音输入")
+                .setMessage(VoicePrefs.PRIVACY)
+                .setPositiveButton("继续", (d, w) -> requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQUEST_MIC_PERMISSION))
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void startVoice() {
+        tts.stop(); // 录音时不朗读
+        voiceOriginal = input.getText().toString();
+        voiceBase = voiceOriginal;
+        if (!voiceBase.isEmpty() && !voiceBase.endsWith(" ")) {
+            voiceBase += " ";
+        }
+        voice.start();
+    }
+
+    @Override
+    public void onVoiceState(VoiceInputController.State state) {
+        voiceBar.setVisibility(state == VoiceInputController.State.IDLE ? View.GONE : View.VISIBLE);
+        switch (state) {
+            case CONNECTING:
+                voiceStatus.setText("正在连接语音服务…");
+                break;
+            case LISTENING:
+                voiceStatus.setText("正在听…说完再点一次麦克风");
+                break;
+            case FINISHING:
+                voiceStatus.setText("正在识别…");
+                break;
+            default:
+                voiceStatus.setText("");
+        }
+        micButton.setContentDescription(state == VoiceInputController.State.IDLE ? "语音输入" : "结束语音输入");
+        micButton.setAlpha(state == VoiceInputController.State.LISTENING ? 0.6f : 1f);
+    }
+
+    @Override
+    public void onTranscript(String text, boolean isFinal) {
+        if (isFinal && text.trim().isEmpty()) {
+            toast("没有听清，请再说一次");
+            return;
+        }
+        String full = voiceBase + text;
+        input.setText(full);
+        input.setSelection(full.length());
+    }
+
+    @Override
+    public void onVoiceError(String message) {
+        toast(message);
+    }
+
+    @Override
+    public void onSpeak(ChatTurn turn) {
+        tts.toggle(turn.clientMessageId, turn.text());
+    }
+
+    @Override
+    public void onTtsState(String key, boolean loading, boolean playing) {
+        adapter.refreshSpeak();
+    }
+
+    @Override
+    public void onTtsError(String message) {
+        toast(message);
     }
 
     @Override
@@ -275,6 +450,9 @@ public final class ChatActivity extends BaseActivity implements ChatController.L
         if (text.isEmpty() && files.isEmpty()) {
             toast("先说说想买什么");
             return;
+        }
+        if (voice.isActive()) {
+            voice.cancel(); // 直接发送：以输入框里现有的文字为准
         }
         if (sendText(text, files)) {
             input.setText("");
@@ -353,6 +531,10 @@ public final class ChatActivity extends BaseActivity implements ChatController.L
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == REQUEST_MIC_PERMISSION) {
+            onMicPermission(results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED);
+            return;
+        }
         if (requestCode != REQUEST_CAMERA_PERMISSION) {
             return;
         }
@@ -374,6 +556,29 @@ public final class ChatActivity extends BaseActivity implements ChatController.L
                     startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", getPackageName(), null)));
                 } catch (ActivityNotFoundException e) {
                     toast("请到系统设置里打开相机权限");
+                }
+            });
+        }
+        b.show();
+    }
+
+    private void onMicPermission(boolean granted) {
+        if (granted) {
+            startVoice();
+            return;
+        }
+        boolean blocked = !shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO);
+        AlertDialog.Builder b = new AlertDialog.Builder(this)
+                .setTitle("没有录音权限")
+                .setMessage(blocked ? "录音权限已被关闭，语音输入用不了。可以直接打字提问，或到系统设置里为 Blink Shop 打开麦克风权限。"
+                        : "语音输入需要录音权限。不授权也可以直接打字提问。")
+                .setPositiveButton("知道了", null);
+        if (blocked) {
+            b.setNeutralButton("去设置", (d, w) -> {
+                try {
+                    startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", getPackageName(), null)));
+                } catch (ActivityNotFoundException e) {
+                    toast("请到系统设置里打开麦克风权限");
                 }
             });
         }

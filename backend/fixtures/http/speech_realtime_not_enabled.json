@@ -1,0 +1,16 @@
+{
+  "description": "没有配置语音识别时连接实时识别：在 WebSocket 握手前返回 501 speech_not_enabled",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/speech/realtime?sample_rate=16000",
+    "as": "blink_user"
+  },
+  "response": {
+    "status": 501,
+    "body": {
+      "code": "speech_not_enabled",
+      "message": "语音输入暂未开通，请用文字提问",
+      "request_id": "<request_id>"
+    }
+  }
+}

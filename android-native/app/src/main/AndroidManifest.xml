@@ -8,6 +8,11 @@
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
+    <!-- 聊天里的语音输入（点麦克风后才录音）；没有麦克风或拒绝授权时仍可打字。 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
 
     <!-- 拍照用系统相机应用（Android 11+ 需要声明才能查询到）。 -->
     <queries>

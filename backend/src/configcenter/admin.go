@@ -165,6 +165,17 @@ var settings = []Setting{
 	{Key: KeyImageEmbeddingModel, Description: "图片 Embedding 模型名（dashscope）"},
 	{Key: KeyImageEmbeddingDim, Description: "图片向量维度（dashscope；换模型或维度要重建集合）"},
 	{Key: KeyImageFetchAllowedHosts, Description: "允许服务端下载商品图的 https 域名（逗号分隔）；为空只读平台内图片"},
+	{Key: KeySTTProvider, Description: "语音识别：off / mock（演示）/ xunfei（讯飞实时转写）"},
+	{Key: KeySTTAppID, Description: "语音识别 AppID"},
+	{Key: KeySTTEndpoint, Description: "语音识别 WebSocket 地址"},
+	{Key: KeySTTLang, Description: "语音识别语种（讯飞 lang 参数）"},
+	{Key: KeySTTMaxSeconds, Description: "单次语音输入最长秒数，5–300"},
+	{Key: KeyTTSProvider, Description: "语音合成：off / mock（演示）/ xunfei / doubao"},
+	{Key: KeyTTSAppID, Description: "语音合成 AppID"},
+	{Key: KeyTTSEndpoint, Description: "语音合成地址；为空用供应商默认地址"},
+	{Key: KeyTTSDefaultVoice, Description: "默认音色；为空用供应商默认音色"},
+	{Key: KeyTTSCluster, Description: "豆包合成集群"},
+	{Key: KeyTTSMaxRunes, Description: "单次朗读最多字数，1–2000"},
 	{Key: KeyAvatarUploadDir, Description: "头像文件目录"},
 	{Key: KeyMinIOEndpoint, Description: "对象存储地址"},
 	{Key: KeyMinIOBucket, Description: "对象存储桶名"},
@@ -176,6 +187,10 @@ var settings = []Setting{
 	{Key: KeyAIAPIKey, Description: "模型服务 API Key"},
 	{Key: KeyEmbeddingAPIKey, Description: "Embedding 服务 API Key"},
 	{Key: KeyImageEmbeddingAPIKey, Description: "图片 Embedding 服务 API Key（dashscope）"},
+	{Key: KeySTTAPIKey, Description: "语音识别 API Key"},
+	{Key: KeySTTAPISecret, Description: "语音识别 API Secret"},
+	{Key: KeyTTSAPIKey, Description: "语音合成 API Key（豆包为 token）"},
+	{Key: KeyTTSAPISecret, Description: "语音合成 API Secret（讯飞）"},
 }
 
 // Settings 返回全部配置项（副本）。

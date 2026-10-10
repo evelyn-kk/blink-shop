@@ -12,6 +12,7 @@ import com.blink.shop.R;
 import com.blink.shop.data.ApiBaseStore;
 import com.blink.shop.ui.BaseActivity;
 import com.blink.shop.ui.Rows;
+import com.blink.shop.voice.VoicePrefs;
 
 /** 设置：帮助、接口设置（仅调试版）、版本信息。不需要登录。 */
 public final class SettingsActivity extends BaseActivity {
@@ -35,6 +36,13 @@ public final class SettingsActivity extends BaseActivity {
         content.removeAllViews();
         LinearLayout card = card(content);
         card.addView(row("帮助", "购物、支付、优惠券和账户的常见问题", v -> startActivity(new Intent(this, HelpActivity.class))));
+        boolean voiceOn = VoicePrefs.enabled(this);
+        card.addView(row("语音输入与朗读", voiceOn ? "已开启：聊天里显示麦克风和“朗读”按钮（服务端开通时）" : "已关闭：聊天里不显示语音按钮", v -> {
+            VoicePrefs.setEnabled(this, !VoicePrefs.enabled(this));
+            render();
+        }));
+        card.addView(row("语音隐私说明", "录音什么时候开始、发给谁、会不会保存", v -> new android.app.AlertDialog.Builder(this)
+                .setTitle("语音隐私说明").setMessage(VoicePrefs.PRIVACY).setPositiveButton("知道了", null).show()));
         if (ApiBaseStore.editable()) {
             card.addView(row(getString(R.string.api_settings), app.apiBase().get(),
                     v -> startActivity(new Intent(this, ApiSettingsActivity.class))));

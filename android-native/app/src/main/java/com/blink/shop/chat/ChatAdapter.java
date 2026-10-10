@@ -26,7 +26,21 @@ public final class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.Holder> 
         void onResend(ChatTurn turn);
 
         void onFollowup(String question);
+
+        /** 点了“朗读 / 停止”。 */
+        void onSpeak(ChatTurn turn);
     }
+
+    /** 朗读按钮的状态来源（TtsController）。 */
+    public interface SpeakState {
+        boolean available();
+
+        boolean loading(ChatTurn turn);
+
+        boolean playing(ChatTurn turn);
+    }
+
+    private SpeakState speak;
 
     private final List<ChatTurn> turns = new ArrayList<>();
     private final BlockViews blocks;
@@ -36,6 +50,15 @@ public final class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.Holder> 
         this.blocks = blocks;
         this.listener = listener;
         setHasStableIds(true);
+    }
+
+    public void setSpeakState(SpeakState s) {
+        speak = s;
+    }
+
+    /** 朗读状态变化：只刷新朗读按钮。 */
+    public void refreshSpeak() {
+        notifyItemRangeChanged(0, turns.size(), "speak");
     }
 
     /** 用控制器的最新列表刷新；按 client_message_id 判断同一轮，只有修订号变了才重绑。 */
@@ -92,6 +115,7 @@ public final class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.Holder> 
         final LinearLayout blockList;
         final TextView status;
         final TextView retry;
+        final TextView speakButton;
         final LinearLayout followups;
         final View typing;
 
@@ -112,6 +136,7 @@ public final class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.Holder> 
             blockList = v.findViewById(R.id.block_list);
             status = v.findViewById(R.id.status_text);
             retry = v.findViewById(R.id.retry_button);
+            speakButton = v.findViewById(R.id.speak_button);
             followups = v.findViewById(R.id.followups);
             typing = v.findViewById(R.id.typing);
             stepsSummary.setOnClickListener(x -> {
@@ -121,7 +146,20 @@ public final class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.Holder> 
             });
         }
 
+        void bindSpeak(ChatTurn t) {
+            boolean show = speak != null && speak.available() && t.status() == ChatTurn.Status.DONE && !t.text().isEmpty();
+            speakButton.setVisibility(show ? View.VISIBLE : View.GONE);
+            if (!show) {
+                return;
+            }
+            boolean loading = speak.loading(t), playing = speak.playing(t);
+            speakButton.setText(loading ? "准备中…" : playing ? "停止朗读" : "朗读");
+            speakButton.setContentDescription(loading || playing ? "停止朗读这段回答" : "朗读这段回答");
+            speakButton.setOnClickListener(v -> listener.onSpeak(t));
+        }
+
         void bind(ChatTurn t, boolean full) {
+            bindSpeak(t);
             boolean same = bound == t && !full;
             if (same && boundRevision == t.revision()) {
                 return;

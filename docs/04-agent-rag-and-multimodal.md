@@ -25,4 +25,4 @@ Prompt 由 `prompt_key + version + status` 管理；发布时创建新版本、�
 
 ## 向导、风控、语音
 
-浮窗建议按页面生成 1–3 条短问题：规则候选 → 上下文增强 → 小模型改写排序 → 长度/重复/相关性校验 → 规则兜底；页面支持 products/cart/orders/product_detail。风险检查位于模型调用前，命中阻断词要写审计并给出安全替代说明。实时 STT/TTS 仅经后端代理，密钥不进入 APK；文本朗读前清洗 markdown、长度限制并提供关闭入口。
+浮窗建议按页面生成 1–3 条短问题：规则候选 → 上下文增强 → 小模型改写排序 → 长度/重复/相关性校验 → 规则兜底；页面支持 products/cart/orders/product_detail。风险检查位于模型调用前，命中阻断词要写审计并给出安全替代说明。实时 STT/TTS 仅经后端代理，密钥不进入 APK；文本朗读前清洗 markdown、长度限制并提供关闭入口。实现（供应商、接口、WebSocket 协议、限制）见 `backend/README.md`“语音”，Android 端见 `android-native/README.md`“语音”。

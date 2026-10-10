@@ -45,6 +45,8 @@ type Options struct {
 	ProductIndex rag.ProductIndex
 	// ImageSearch 是图片找商品；nil 表示图搜不可用（接口返回 503，导购如实说明）。商品图随商品变更异步重建。
 	ImageSearch *imagesearch.Service
+	// Speech 是语音识别与合成；字段为 nil 表示未配置（接口返回 *_not_enabled）。
+	Speech SpeechOptions
 	// Fetcher 抓取知识采集的 URL；nil 时使用带 SSRF 防护的默认实现。测试可替换。
 	Fetcher ingest.URLFetcher
 	// AvatarDir 是头像文件目录，不存在时在首次上传时创建。
@@ -87,6 +89,8 @@ type Server struct {
 	imageSearch    *imagesearch.Service
 	vectorSync     sync.WaitGroup
 	syncs          productSyncs
+	speech         SpeechOptions
+	speechSessions speechSessions
 	runTimeout     time.Duration
 	heartbeat      time.Duration
 	runs           *runRegistry
@@ -114,6 +118,7 @@ func NewServer(opts Options) *Server {
 		runner:         opts.AgentRunner,
 		productIndex:   opts.ProductIndex,
 		imageSearch:    opts.ImageSearch,
+		speech:         opts.Speech,
 		runTimeout:     opts.AgentRunTimeout,
 		heartbeat:      opts.SSEHeartbeat,
 		runs:           newRunRegistry(),
@@ -192,6 +197,9 @@ func (s *Server) routes() {
 
 	s.handle("POST /api/v1/files", accessAccount, s.handleUploadFile)
 	s.handle("POST /api/v1/search/image", accessAccount, s.handleSearchImage)
+	s.handle("GET /api/v1/speech/tts/config", accessUser, s.handleSpeechConfig)
+	s.handle("POST /api/v1/speech/tts", accessUser, s.handleTTS)
+	s.handle("GET /api/v1/speech/realtime", accessUser, s.handleSpeechRealtime)
 	s.handle("GET /api/v1/files/{id}", accessAccount, s.handleGetFile)
 
 	s.handle("GET /api/v1/categories/tree", accessPublic, s.handleCategoryTree)

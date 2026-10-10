@@ -86,6 +86,41 @@
             <include layout="@layout/view_state" />
         </FrameLayout>
 
+        <!-- 语音输入进行中：状态（正在连接 / 正在听 / 正在识别）和取消 -->
+        <LinearLayout
+            android:id="@+id/voice_bar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@color/brand_soft"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingEnd="8dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/voice_status"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:accessibilityLiveRegion="polite"
+                android:textColor="@color/brand"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/voice_cancel"
+                android:layout_width="wrap_content"
+                android:layout_height="@dimen/touch_target"
+                android:contentDescription="取消语音输入"
+                android:gravity="center"
+                android:minWidth="@dimen/touch_target"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:text="取消"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp" />
+        </LinearLayout>
+
         <!-- 待发送的图片：缩略图、上传状态、重试 / 移除 -->
         <LinearLayout
             android:id="@+id/attachment_bar"
@@ -165,6 +200,16 @@
                 android:contentDescription="添加图片：从相册选择或拍照"
                 android:padding="12dp"
                 android:src="@drawable/ic_image" />
+
+            <ImageView
+                android:id="@+id/mic_button"
+                android:layout_width="@dimen/touch_target"
+                android:layout_height="@dimen/touch_target"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="语音输入"
+                android:padding="12dp"
+                android:src="@drawable/ic_mic"
+                android:visibility="gone" />
 
             <EditText
                 android:id="@+id/input"

@@ -40,6 +40,8 @@ tags:
     description: 商家后台。merchant_id 一律由登录账号决定；其他商家的资源 403，不存在或已删除 404
   - name: files
     description: 私有文件。只有上传者本人和管理员可以读取；对象存储未配置或不可用时返回 503 `object_storage_unavailable`
+  - name: speech
+    description: 语音输入（实时识别）和朗读（语音合成）。供应商凭据只在服务端配置，客户端经这些接口代理使用；未配置时返回 `*_not_enabled`
   - name: knowledge
     description: |
       知识文档。入库流程：清洗 → 按商家去重（清洗后正文的 SHA-256）→ 切块 → 写分块 → 向量索引（未配置时跳过，检索走关键词）。
@@ -565,6 +567,170 @@ paths:
               example:
                 code: image_search_unavailable
                 message: 图片搜索暂不可用，请稍后再试或用文字描述商品
+  /speech/tts/config:
+    get:
+      tags: [speech]
+      operationId: getSpeechConfig
+      summary: 语音能力配置
+      description: |
+        返回语音合成和实时识别是否开通、供应商名、默认音色和限制，客户端据此决定是否显示朗读 / 语音输入按钮。
+        不包含任何凭据。仅普通用户可用。
+      responses:
+        "200":
+          description: 能力配置
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpeechConfig"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccountStatusForbidden"
+  /speech/tts:
+    post:
+      tags: [speech]
+      operationId: synthesizeSpeech
+      summary: 朗读文本（语音合成）
+      description: |
+        把文本合成音频，成功直接返回音频字节（`Content-Type` 为 `audio/mpeg`、`audio/wav` 等，`Cache-Control: no-store`）。
+        客户端应先清洗文本（去掉 Markdown、链接、商品 ID 等），长度不超过能力配置里的 `max_text_chars`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text:
+                  type: string
+                  description: 去掉首尾空白后 1–max_text_chars 个字
+                voice:
+                  type: string
+                  pattern: "^[A-Za-z0-9_-]{1,64}$"
+                  description: 音色；为空用默认音色
+      responses:
+        "200":
+          description: 音频字节
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            audio/mpeg: {}
+            audio/wav: {}
+            audio/ogg: {}
+        "400":
+          description: "`invalid_argument`：文本为空或超长（field=text）、音色名不合法（field=voice）"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: invalid_argument
+                message: 请提供要朗读的文字
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccountStatusForbidden"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "501":
+          description: 没有配置语音合成（`tts_not_enabled`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: tts_not_enabled
+                message: 语音朗读暂未开通
+        "502":
+          description: 供应商出错或超时（`tts_failed`）；详细原因只记在服务端日志（不含凭据）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: tts_failed
+                message: 语音合成服务暂时不可用，请稍后再试
+  /speech/realtime:
+    get:
+      tags: [speech]
+      operationId: speechRealtime
+      summary: 实时语音识别（WebSocket）
+      description: |
+        WebSocket 连接（`Authorization: Bearer` 头鉴权；浏览器的 `Origin` 必须在 CORS 白名单里，原生 App 不带 Origin）。
+        客户端发送：二进制帧为 16000Hz、单声道、16 位小端 PCM（建议每 100ms 一帧，单帧 ≤ 64KB）；文本帧为控制消息
+        `{"type":"start"}`（可选）、`{"type":"end"}`（说完了，等最终结果）、`{"type":"cancel"}`（放弃，不要结果）。
+        服务端推送 JSON 文本帧（见 `SpeechEvent`）：先 `ready`，之后 `partial`（到目前为止的整句，会变化）、`final`（最终结果），
+        达到 `max_seconds` 时服务端自动结束输入并发 `end_of_input`（reason=max_duration）后给出 `final`；出错发 `error`
+        （`speech_unavailable` 供应商连不上、`speech_failed`、`idle_timeout` 10 秒没有消息、`frame_too_large`、`speech_timeout`）；
+        每个会话最后一条是 `closed`，随后服务端关闭连接。同一账户同时只能有一个会话。转写原文不写入日志。
+      parameters:
+        - name: sample_rate
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [16000]
+      responses:
+        "101":
+          description: 升级为 WebSocket；之后服务端推送的每条 JSON 文本帧是一个 SpeechEvent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpeechEvent"
+        "400":
+          description: 采样率不是 16000（field=sample_rate），或不是 WebSocket 握手请求
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: invalid_argument
+                message: 只支持 16000Hz、单声道、16 位 PCM
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccountStatusForbidden"
+        "409":
+          description: 同一账户已有进行中的会话（`speech_session_active`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: speech_session_active
+                message: 已有一段语音输入正在进行，请先结束它
+        "501":
+          description: 没有配置语音识别（`speech_not_enabled`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: speech_not_enabled
+                message: 语音输入暂未开通，请用文字提问
   /merchant/documents:
     get:
       tags: [knowledge]
@@ -4962,6 +5128,68 @@ components:
         created_at:
           type: string
           format: date-time
+    SpeechConfig:
+      type: object
+      required: [enabled, provider, voice, max_text_chars, stt]
+      properties:
+        enabled:
+          type: boolean
+          description: 语音合成（朗读）是否开通
+        provider:
+          type: string
+          description: 合成供应商名（xunfei / doubao / mock），未开通为空
+        voice:
+          type: string
+          description: 默认音色
+        max_text_chars:
+          type: integer
+          description: 单次朗读最多字数
+        stt:
+          type: object
+          required: [enabled, provider, sample_rate, encoding, max_seconds]
+          properties:
+            enabled:
+              type: boolean
+              description: 实时语音识别是否开通
+            provider:
+              type: string
+            sample_rate:
+              type: integer
+              enum: [16000]
+            encoding:
+              type: string
+              enum: [pcm_s16le]
+            max_seconds:
+              type: integer
+              description: 单次语音输入最长秒数
+    SpeechEvent:
+      type: object
+      description: 实时识别 WebSocket 上服务端推送的事件（JSON 文本帧）
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [ready, partial, final, end_of_input, error, closed]
+        text:
+          type: string
+          description: partial / final 的整句文本
+        seq:
+          type: integer
+          description: partial / final 的序号，从 1 开始
+        code:
+          type: string
+          description: error 的错误码
+        message:
+          type: string
+        reason:
+          type: string
+          enum: [max_duration]
+        sample_rate:
+          type: integer
+          description: ready 时给出
+        max_seconds:
+          type: integer
+          description: ready 时给出
     ImageSearchResult:
       type: object
       required: [status, embedder, items]

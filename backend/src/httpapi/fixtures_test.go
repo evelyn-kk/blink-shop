@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/seed"
+	"github.com/evelyn-kk/blink-shop/backend/src/speech"
 )
 
 // fixtureMultipart 是一个 multipart 文件分段；ContentType 是客户端声明的类型（服务端不信任）。
@@ -58,6 +59,8 @@ type fixture struct {
 		ObjectStorage string `json:"object_storage"`
 		// ImageSearch 为 "unavailable" 时模拟没有配置图片搜索；否则 /search/image 的样例使用本地特征 + 内存索引（已为种子商品建好索引）。
 		ImageSearch string `json:"image_search"`
+		// Speech 为 "mock" 时接入 mock 语音识别和合成（否则语音未配置）。
+		Speech string `json:"speech"`
 	} `json:"request"`
 	Response struct {
 		Status  int               `json:"status"`
@@ -278,6 +281,9 @@ func TestHTTPFixtures(t *testing.T) {
 			ts := newTestServer(t, nil, []ReadinessCheck{{Name: "mysql", Check: func(context.Context) error { return dbErr }}}, nil)
 			if fx.Request.ObjectStorage == "unavailable" {
 				ts.Server.objects = nil
+			}
+			if fx.Request.Speech == "mock" {
+				ts.Server.speech = SpeechOptions{Recognizer: speech.MockRecognizer{}, Synthesizer: speech.MockSynthesizer{}}
 			}
 			if strings.HasPrefix(fx.Request.Path, "/api/v1/search/image") && fx.Request.ImageSearch != "unavailable" {
 				ts.Server.imageSearch = newTestImageSearch(t, ts)

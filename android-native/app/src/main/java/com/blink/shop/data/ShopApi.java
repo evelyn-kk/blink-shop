@@ -349,6 +349,23 @@ public final class ShopApi {
         return id;
     }
 
+    /** 语音能力配置（是否开通朗读 / 语音输入、限制），不含任何密钥。 */
+    public com.blink.shop.model.SpeechConfig speechConfig() throws ApiException {
+        return com.blink.shop.model.SpeechConfig.fromJson(api.get("/speech/tts/config"));
+    }
+
+    /** 朗读：返回合成的音频字节。文本应先用 TtsText 清洗。 */
+    public ApiClient.Bytes tts(String text) throws ApiException {
+        okhttp3.Request req = api.request("/speech/tts").header("Accept", "audio/*, application/json")
+                .post(RequestBody.create(obj("text", text).toString(), ApiClient.JSON)).build();
+        return api.executeBytes(req);
+    }
+
+    /** 打开实时语音识别的 WebSocket（16kHz 单声道 16 位 PCM）。 */
+    public okhttp3.WebSocket speechSocket(okhttp3.WebSocketListener listener) throws ApiException {
+        return api.openWebSocket("/speech/realtime?sample_rate=16000", listener);
+    }
+
     /** 检查服务地址是否可用（高级设置里的“测试连接”）。 */
     public void health() throws ApiException {
         api.get("/health");

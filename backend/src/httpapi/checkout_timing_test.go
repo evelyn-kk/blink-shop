@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"bytes"
 	"context"
 	"log/slog"
 	"net/http"
@@ -157,7 +156,7 @@ func newMySQLTestServer(t *testing.T, now func() time.Time) (*testServer, *mysql
 	if _, err := st.ApplySeed(ctx, storetest.DevSeed(t)); err != nil {
 		t.Fatal(err)
 	}
-	logs := &bytes.Buffer{}
+	logs := &lockedBuffer{}
 	s := NewServer(Options{
 		Logger: logging.New(logs, slog.LevelDebug), Store: st, PasswordCost: bcrypt.MinCost, AvatarDir: t.TempDir(), Now: now,
 		Settings: configcenter.NewHTTPSettingsProvider(configcenter.NewResolver(func(string) string { return "" }, configcenter.NewMemorySource(nil)), false),
