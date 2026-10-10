@@ -6,6 +6,7 @@ require (
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/minio/minio-go/v7 v7.0.98
 	golang.org/x/crypto v0.48.0
+	golang.org/x/image v0.32.0
 	golang.org/x/net v0.49.0
 )
 

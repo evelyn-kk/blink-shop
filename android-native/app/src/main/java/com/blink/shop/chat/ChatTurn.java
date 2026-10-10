@@ -42,6 +42,8 @@ public final class ChatTurn {
 
     public final String clientMessageId;
     public final String userText;
+    /** 本轮附带的文件 ID（聊天附图）；重试、重新提问时原样带上。 */
+    public final List<String> attachments;
     /** 服务端消息时间（历史回放时有），本地发送时为空。 */
     public final String createdAt;
 
@@ -60,9 +62,19 @@ public final class ChatTurn {
     int revision;
 
     ChatTurn(String clientMessageId, String userText, String createdAt) {
+        this(clientMessageId, userText, createdAt, null);
+    }
+
+    ChatTurn(String clientMessageId, String userText, String createdAt, List<String> attachments) {
         this.clientMessageId = clientMessageId;
         this.userText = userText;
         this.createdAt = createdAt == null ? "" : createdAt;
+        this.attachments = attachments == null ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<>(attachments));
+    }
+
+    /** 本轮带了几张图片（显示“附图”标记用）。 */
+    public int imageCount() {
+        return attachments.size();
     }
 
     public Status status() {

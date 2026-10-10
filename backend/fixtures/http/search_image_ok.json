@@ -1,0 +1,90 @@
+{
+  "description": "用本人上传的图片找相似的在售商品：status 为 matched（最像的达到同款阈值）/ similar（只有外观相近的）/ no_match；每件带相似度、等级（match / similar）和最像的那张商品图。只返回在售商品",
+  "setup": {
+    "as": "blink_user",
+    "multipart": {
+      "field": "file",
+      "filename": "photo.png",
+      "content_base64": "iVBORw0KGgoAAAANSUhEUgAAAEEAAABBCAIAAAABlV4SAAACrklEQVR4nGJ5+/ErwxAHTAPtACoAlv///w+0GygFwyEehoMfRtPS4AAsDDSOhyvXb3dMmAPnaqorVxelUdcKxlfvPlHXRDiITS9H5ioqyN1/8AjOXTyzk1oW0cQPaK6HgJaGipqGDjRBqviE6T+1AVYP4AKx6eWU20jlPB2XUUEHLWiAiYHhP7UQ2a4BayTfXqb//xmohSgBcRmVZNtLtbQUn1mJR7algdIEgwcwvnj9nnJT4rOq8MgiewCzaEIGC6e1kWE7y6BqaZDnGCrk6QS8kUASABtFsgNYBluTjwz3UJqnd+0/RqEJaCAxu5pULZS2+Zav2UpQzf///xkZGUkwlEQnMVGYG4gBtY2dx06cIVgoIbxAIqJT/2Hbjj3EK07KqSHJcIr6ccm5tWTrxQ9IctVoP452gBRXDa56Gg5IchX90hKRhRIErFy/nXjFTAPW2sYLLl25RbwzBmlaevn6LfEOYyG3sUgHQKzDBl2bDw6Id9ho/UAzICYqTLzDBmmeJqmKGKR5urkqm4Q8PSi9QFrADtK0RJKrBmlaIslVFI3z9bWU0soHpDiDonjg5GSnqsuhoLUmlyRXDcY8LSTAT5KrKB0TCPF3o7ofyBgToMgXTram1PXAtJ5qksf5Bl1aImOcj/KJh6ndVBtvNdTVIMMBgyseUmKDyIsHyjIEGE3pokJUTOmqIs92qs3HpcQFUewLMq2mWloy0FanRPuUzkqyXUKdtARBkzvxTcnhAZM7Kymxl5pzuwwM/yd3kjx3CNZCkaXUnNuFoEkdJHhjUkcF5TYy3rz7gNSQIxLkVeBbixEe6G5tbkAVixhv3qGVHyAgrxLdJ5PaSVjQQQxgvEFjP9ABDNp+HAlgcLU1yAMs/4e+J4ZJPAx5MJqnBwcYDnl6OMw/AAIAAP//Pw1Sn7VWogkAAAAASUVORK5CYII="
+    }
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/search/image",
+    "as": "blink_user",
+    "body": {
+      "file_id": "{setup_file_id}",
+      "top_k": 3
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "status": "matched",
+      "embedder": "local:color-edge-v1:160",
+      "items": [
+        {
+          "product": {
+            "product_id": "p_seed_mouse",
+            "sku_id": "sku_seed_mouse_gray",
+            "merchant_id": "m_seed_digital",
+            "merchant_name": "Blink 数码旗舰店",
+            "category_id": "c_mouse",
+            "name": "Blink 静音无线鼠标 M2",
+            "brand": "Blink",
+            "image_url": "/api/v1/assets/catalog/products/p_seed_mouse.png",
+            "price": "129.00",
+            "market_price": "159.00",
+            "stock_status": "in_stock",
+            "tags": [
+              "静音",
+              "无线",
+              "办公"
+            ],
+            "selling_points": [
+              "静音微动",
+              "双模连接"
+            ],
+            "recommend_reason": "安静办公首选。",
+            "risk_notes": [
+              "不适合高强度电竞"
+            ]
+          },
+          "score": 0.8038,
+          "level": "match",
+          "matched_image_url": "/api/v1/assets/catalog/products/p_seed_mouse.png"
+        },
+        {
+          "product": {
+            "product_id": "p_seed_nova",
+            "sku_id": "sku_seed_nova_128",
+            "merchant_id": "m_seed_digital",
+            "merchant_name": "Blink 数码旗舰店",
+            "category_id": "c_phone",
+            "name": "Blink Nova 12",
+            "brand": "Blink",
+            "image_url": "/api/v1/assets/catalog/products/p_seed_nova.png",
+            "price": "2999.00",
+            "market_price": "3299.00",
+            "stock_status": "in_stock",
+            "tags": [
+              "拍照",
+              "轻薄",
+              "长续航"
+            ],
+            "selling_points": [
+              "5000 万像素主摄",
+              "5000mAh 电池",
+              "6.5 英寸 OLED"
+            ],
+            "recommend_reason": "拍照和续航均衡，2999 元起。",
+            "risk_notes": []
+          },
+          "score": 0.6204,
+          "level": "similar",
+          "matched_image_url": "/api/v1/assets/catalog/products/p_seed_nova.png"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "description": "缺少 file_id（或 top_k 不在 1–20）：400 invalid_argument",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/search/image",
+    "as": "blink_user",
+    "body": {
+      "top_k": 3
+    }
+  },
+  "response": {
+    "status": 400,
+    "body": {
+      "code": "invalid_argument",
+      "message": "请先上传图片，再用返回的 file_id 搜索",
+      "field": "file_id",
+      "request_id": "<request_id>"
+    }
+  }
+}

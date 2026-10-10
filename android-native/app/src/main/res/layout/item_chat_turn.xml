@@ -19,6 +19,20 @@
         android:textSize="11sp"
         android:visibility="gone" />
 
+    <!-- 这一轮附带了图片 -->
+    <TextView
+        android:id="@+id/user_attachment"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end"
+        android:layout_marginBottom="4dp"
+        android:drawablePadding="4dp"
+        android:gravity="center_vertical"
+        android:textColor="@color/text_secondary"
+        android:textSize="12sp"
+        android:visibility="gone"
+        android:drawableStart="@drawable/ic_image" />
+
     <TextView
         android:id="@+id/user_text"
         android:layout_width="wrap_content"

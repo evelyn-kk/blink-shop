@@ -7,7 +7,7 @@ const (
 	IntentGuide          Intent = "guide"           // 打招呼、能力说明、泛泛的购物求助
 	IntentProductSearch  Intent = "product_search"  // 商品推荐 / 找商品
 	IntentProductCompare Intent = "product_compare" // 商品对比
-	IntentImageSearch    Intent = "image_search"    // 拍照找货（8.3 接入，当前如实说明）
+	IntentImageSearch    Intent = "image_search"    // 拍照找货：附图检索相似商品，没带图时请用户上传
 	IntentKnowledge      Intent = "knowledge"       // 售后、规则、使用方法等知识问答
 	IntentCart           Intent = "cart"            // 查看 / 加购 / 改数量 / 删除 / 选中
 	IntentCheckout       Intent = "checkout"        // 结算下单

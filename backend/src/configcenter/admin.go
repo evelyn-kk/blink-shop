@@ -159,6 +159,12 @@ var settings = []Setting{
 	{Key: KeyEmbeddingBaseURL, Description: "Embedding 服务地址（OpenAI 兼容 /embeddings）"},
 	{Key: KeyEmbeddingModel, Description: "Embedding 模型名"},
 	{Key: KeyEmbeddingDim, Description: "Embedding 向量维度（换模型或维度要重建集合）"},
+	{Key: KeyMilvusImageCollection, Description: "商品图向量集合名"},
+	{Key: KeyImageEmbeddingProvider, Description: "图片 Embedding：local（本地颜色 + 边缘特征）或 dashscope（多模态模型）"},
+	{Key: KeyImageEmbeddingBaseURL, Description: "图片 Embedding 服务地址（dashscope）"},
+	{Key: KeyImageEmbeddingModel, Description: "图片 Embedding 模型名（dashscope）"},
+	{Key: KeyImageEmbeddingDim, Description: "图片向量维度（dashscope；换模型或维度要重建集合）"},
+	{Key: KeyImageFetchAllowedHosts, Description: "允许服务端下载商品图的 https 域名（逗号分隔）；为空只读平台内图片"},
 	{Key: KeyAvatarUploadDir, Description: "头像文件目录"},
 	{Key: KeyMinIOEndpoint, Description: "对象存储地址"},
 	{Key: KeyMinIOBucket, Description: "对象存储桶名"},
@@ -169,6 +175,7 @@ var settings = []Setting{
 	{Key: KeyMilvusToken, Description: "Milvus 访问令牌"},
 	{Key: KeyAIAPIKey, Description: "模型服务 API Key"},
 	{Key: KeyEmbeddingAPIKey, Description: "Embedding 服务 API Key"},
+	{Key: KeyImageEmbeddingAPIKey, Description: "图片 Embedding 服务 API Key（dashscope）"},
 }
 
 // Settings 返回全部配置项（副本）。

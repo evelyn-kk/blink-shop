@@ -51,3 +51,24 @@ cd android-native && python3 e2e/chat_flow.py
 ```
 
 “停止生成”在本地规则运行器下回答只要一两百毫秒，模拟器上来不及点，由单测覆盖（`ChatControllerTest`、`ChatStreamTransportTest`）。
+
+## 聊天附图 `image_flow.py`
+
+覆盖 8.3 的附图：拍照时拒绝相机权限（提示改用相册）→ 再次拒绝即“不再询问”（提示去系统设置，“去设置”打开本应用设置页）→
+授权后用系统相机拍照 → 预览“图片已就绪” → 只发图片（气泡“附带 1 张图片”，模拟器相机画面和商品都不像，只给外观相近参考）→
+从相册选台灯照片（脚本先把商品图推进设备相册）→ 移除 → 重新选择并发送 →“按图片找到的商品”第一件是台灯 → 追问加购，API 核对购物车。
+
+后端需要配置图片搜索和对象存储（测试库 + 临时集合）：
+
+```bash
+cd backend
+MYSQL_DSN='root:blink_dev_root@tcp(127.0.0.1:3307)/blink_shop_e2e?parseTime=true' go run ./cmd/seed
+MYSQL_DSN='root:blink_dev_root@tcp(127.0.0.1:3307)/blink_shop_e2e?parseTime=true' API_ADDR=:8080 \
+  MINIO_ENDPOINT=127.0.0.1:9000 MINIO_ACCESS_KEY=minioadmin MINIO_SECRET_KEY=minioadmin \
+  MILVUS_ADDR=127.0.0.1:19530 MILVUS_IMAGE_COLLECTION=blink_shop_e2e_images \
+  RATE_LIMIT_IP_PER_MINUTE=6000 RATE_LIMIT_ACCOUNT_PER_MINUTE=6000 go run ./cmd/api
+cd ../android-native && python3 e2e/image_flow.py
+```
+
+快门和确认按钮按 AOSP 相机（模拟器自带的 `com.android.camera2`）定位；真机的相机应用不同，脚本会等最多 60 秒让人手动拍照。
+权限框按英文系统的按钮文字（“Don’t allow”）点击。用完删掉临时集合（`blink_shop_e2e_images`）。

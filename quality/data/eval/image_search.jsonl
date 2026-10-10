@@ -1,0 +1,232 @@
+# 图片搜索评测集：从种子商品图按变换生成查询图（模拟用户拍照），加上下架/风控/删除商品和无关图片。由 cmd/eval -suite images 运行。
+{"id": "img_nova_crop085", "source": "catalog/products/p_seed_nova.png", "transforms": ["crop:0.85"], "expect_top": "p_seed_nova", "tags": ["product", "nova"]}
+{"id": "img_nova_crop07", "source": "catalog/products/p_seed_nova.png", "transforms": ["crop:0.7"], "expect_top": "p_seed_nova", "tags": ["product", "nova"]}
+{"id": "img_nova_scale035", "source": "catalog/products/p_seed_nova.png", "transforms": ["scale:0.35"], "expect_top": "p_seed_nova", "tags": ["product", "nova"]}
+{"id": "img_nova_bright075", "source": "catalog/products/p_seed_nova.png", "transforms": ["bright:0.75"], "expect_top": "p_seed_nova", "tags": ["product", "nova"]}
+{"id": "img_nova_jpeg45", "source": "catalog/products/p_seed_nova.png", "transforms": ["jpeg:45"], "expect_top": "p_seed_nova", "tags": ["product", "nova"]}
+{"id": "img_nova_flip", "source": "catalog/products/p_seed_nova.png", "transforms": ["flip"], "expect_top": "p_seed_nova", "tags": ["product", "nova"]}
+{"id": "img_nova_pad02", "source": "catalog/products/p_seed_nova.png", "transforms": ["pad:0.2"], "expect_top": "p_seed_nova", "tags": ["product", "nova"]}
+{"id": "img_nova_noise006", "source": "catalog/products/p_seed_nova.png", "transforms": ["noise:0.06"], "expect_top": "p_seed_nova", "tags": ["product", "nova"]}
+{"id": "img_nova_crop075_scale05_jpeg60", "source": "catalog/products/p_seed_nova.png", "transforms": ["crop:0.75", "scale:0.5", "jpeg:60"], "expect_top": "p_seed_nova", "tags": ["product", "nova"]}
+{"id": "img_nova_ho_contrast08", "source": "catalog/products/p_seed_nova.png", "transforms": ["contrast:0.8"], "expect_top": "p_seed_nova", "tags": ["product", "nova", "held_out"]}
+{"id": "img_nova_ho_crop08_bright115", "source": "catalog/products/p_seed_nova.png", "transforms": ["crop:0.8", "bright:1.15"], "expect_top": "p_seed_nova", "tags": ["product", "nova", "held_out"]}
+{"id": "img_nova_ho_scale05_noise004", "source": "catalog/products/p_seed_nova.png", "transforms": ["scale:0.5", "noise:0.04"], "expect_top": "p_seed_nova", "tags": ["product", "nova", "held_out"]}
+{"id": "img_nova_ho_pad015_jpeg55", "source": "catalog/products/p_seed_nova.png", "transforms": ["pad:0.15", "jpeg:55"], "expect_top": "p_seed_nova", "tags": ["product", "nova", "held_out"]}
+{"id": "img_nova_2_crop085", "source": "catalog/products/p_seed_nova-2.png", "transforms": ["crop:0.85"], "expect_top": "p_seed_nova", "tags": ["product", "nova"]}
+{"id": "img_nova_2_crop07", "source": "catalog/products/p_seed_nova-2.png", "transforms": ["crop:0.7"], "expect_top": "p_seed_nova", "tags": ["product", "nova"]}
+{"id": "img_nova_2_scale035", "source": "catalog/products/p_seed_nova-2.png", "transforms": ["scale:0.35"], "expect_top": "p_seed_nova", "tags": ["product", "nova"]}
+{"id": "img_nova_2_bright075", "source": "catalog/products/p_seed_nova-2.png", "transforms": ["bright:0.75"], "expect_top": "p_seed_nova", "tags": ["product", "nova"]}
+{"id": "img_nova_2_jpeg45", "source": "catalog/products/p_seed_nova-2.png", "transforms": ["jpeg:45"], "expect_top": "p_seed_nova", "tags": ["product", "nova"]}
+{"id": "img_nova_2_flip", "source": "catalog/products/p_seed_nova-2.png", "transforms": ["flip"], "expect_top": "p_seed_nova", "tags": ["product", "nova"]}
+{"id": "img_nova_2_pad02", "source": "catalog/products/p_seed_nova-2.png", "transforms": ["pad:0.2"], "expect_top": "p_seed_nova", "tags": ["product", "nova"]}
+{"id": "img_nova_2_noise006", "source": "catalog/products/p_seed_nova-2.png", "transforms": ["noise:0.06"], "expect_top": "p_seed_nova", "tags": ["product", "nova"]}
+{"id": "img_nova_2_crop075_scale05_jpeg60", "source": "catalog/products/p_seed_nova-2.png", "transforms": ["crop:0.75", "scale:0.5", "jpeg:60"], "expect_top": "p_seed_nova", "tags": ["product", "nova"]}
+{"id": "img_nova_2_ho_contrast08", "source": "catalog/products/p_seed_nova-2.png", "transforms": ["contrast:0.8"], "expect_top": "p_seed_nova", "tags": ["product", "nova", "held_out"]}
+{"id": "img_nova_2_ho_crop08_bright115", "source": "catalog/products/p_seed_nova-2.png", "transforms": ["crop:0.8", "bright:1.15"], "expect_top": "p_seed_nova", "tags": ["product", "nova", "held_out"]}
+{"id": "img_nova_2_ho_scale05_noise004", "source": "catalog/products/p_seed_nova-2.png", "transforms": ["scale:0.5", "noise:0.04"], "expect_top": "p_seed_nova", "tags": ["product", "nova", "held_out"]}
+{"id": "img_nova_2_ho_pad015_jpeg55", "source": "catalog/products/p_seed_nova-2.png", "transforms": ["pad:0.15", "jpeg:55"], "expect_top": "p_seed_nova", "tags": ["product", "nova", "held_out"]}
+{"id": "img_vista_crop085", "source": "catalog/products/p_seed_vista.png", "transforms": ["crop:0.85"], "expect_top": "p_seed_vista", "tags": ["product", "vista"]}
+{"id": "img_vista_crop07", "source": "catalog/products/p_seed_vista.png", "transforms": ["crop:0.7"], "expect_top": "p_seed_vista", "tags": ["product", "vista"]}
+{"id": "img_vista_scale035", "source": "catalog/products/p_seed_vista.png", "transforms": ["scale:0.35"], "expect_top": "p_seed_vista", "tags": ["product", "vista"]}
+{"id": "img_vista_bright075", "source": "catalog/products/p_seed_vista.png", "transforms": ["bright:0.75"], "expect_top": "p_seed_vista", "tags": ["product", "vista"]}
+{"id": "img_vista_jpeg45", "source": "catalog/products/p_seed_vista.png", "transforms": ["jpeg:45"], "expect_top": "p_seed_vista", "tags": ["product", "vista"]}
+{"id": "img_vista_flip", "source": "catalog/products/p_seed_vista.png", "transforms": ["flip"], "expect_top": "p_seed_vista", "tags": ["product", "vista"]}
+{"id": "img_vista_pad02", "source": "catalog/products/p_seed_vista.png", "transforms": ["pad:0.2"], "expect_top": "p_seed_vista", "tags": ["product", "vista"]}
+{"id": "img_vista_noise006", "source": "catalog/products/p_seed_vista.png", "transforms": ["noise:0.06"], "expect_top": "p_seed_vista", "tags": ["product", "vista"]}
+{"id": "img_vista_crop075_scale05_jpeg60", "source": "catalog/products/p_seed_vista.png", "transforms": ["crop:0.75", "scale:0.5", "jpeg:60"], "expect_top": "p_seed_vista", "tags": ["product", "vista"]}
+{"id": "img_vista_ho_contrast08", "source": "catalog/products/p_seed_vista.png", "transforms": ["contrast:0.8"], "expect_top": "p_seed_vista", "tags": ["product", "vista", "held_out"]}
+{"id": "img_vista_ho_crop08_bright115", "source": "catalog/products/p_seed_vista.png", "transforms": ["crop:0.8", "bright:1.15"], "expect_top": "p_seed_vista", "tags": ["product", "vista", "held_out"]}
+{"id": "img_vista_ho_scale05_noise004", "source": "catalog/products/p_seed_vista.png", "transforms": ["scale:0.5", "noise:0.04"], "expect_top": "p_seed_vista", "tags": ["product", "vista", "held_out"]}
+{"id": "img_vista_ho_pad015_jpeg55", "source": "catalog/products/p_seed_vista.png", "transforms": ["pad:0.15", "jpeg:55"], "expect_top": "p_seed_vista", "tags": ["product", "vista", "held_out"]}
+{"id": "img_vista_2_crop085", "source": "catalog/products/p_seed_vista-2.png", "transforms": ["crop:0.85"], "expect_top": "p_seed_vista", "tags": ["product", "vista"]}
+{"id": "img_vista_2_crop07", "source": "catalog/products/p_seed_vista-2.png", "transforms": ["crop:0.7"], "expect_top": "p_seed_vista", "tags": ["product", "vista"]}
+{"id": "img_vista_2_scale035", "source": "catalog/products/p_seed_vista-2.png", "transforms": ["scale:0.35"], "expect_top": "p_seed_vista", "tags": ["product", "vista"]}
+{"id": "img_vista_2_bright075", "source": "catalog/products/p_seed_vista-2.png", "transforms": ["bright:0.75"], "expect_top": "p_seed_vista", "tags": ["product", "vista"]}
+{"id": "img_vista_2_jpeg45", "source": "catalog/products/p_seed_vista-2.png", "transforms": ["jpeg:45"], "expect_top": "p_seed_vista", "tags": ["product", "vista"]}
+{"id": "img_vista_2_flip", "source": "catalog/products/p_seed_vista-2.png", "transforms": ["flip"], "expect_top": "p_seed_vista", "tags": ["product", "vista"]}
+{"id": "img_vista_2_pad02", "source": "catalog/products/p_seed_vista-2.png", "transforms": ["pad:0.2"], "expect_top": "p_seed_vista", "tags": ["product", "vista"]}
+{"id": "img_vista_2_noise006", "source": "catalog/products/p_seed_vista-2.png", "transforms": ["noise:0.06"], "expect_top": "p_seed_vista", "tags": ["product", "vista"]}
+{"id": "img_vista_2_crop075_scale05_jpeg60", "source": "catalog/products/p_seed_vista-2.png", "transforms": ["crop:0.75", "scale:0.5", "jpeg:60"], "expect_top": "p_seed_vista", "tags": ["product", "vista"]}
+{"id": "img_vista_2_ho_contrast08", "source": "catalog/products/p_seed_vista-2.png", "transforms": ["contrast:0.8"], "expect_top": "p_seed_vista", "tags": ["product", "vista", "held_out"]}
+{"id": "img_vista_2_ho_crop08_bright115", "source": "catalog/products/p_seed_vista-2.png", "transforms": ["crop:0.8", "bright:1.15"], "expect_top": "p_seed_vista", "tags": ["product", "vista", "held_out"]}
+{"id": "img_vista_2_ho_scale05_noise004", "source": "catalog/products/p_seed_vista-2.png", "transforms": ["scale:0.5", "noise:0.04"], "expect_top": "p_seed_vista", "tags": ["product", "vista", "held_out"]}
+{"id": "img_vista_2_ho_pad015_jpeg55", "source": "catalog/products/p_seed_vista-2.png", "transforms": ["pad:0.15", "jpeg:55"], "expect_top": "p_seed_vista", "tags": ["product", "vista", "held_out"]}
+{"id": "img_earbuds_crop085", "source": "catalog/products/p_seed_earbuds.png", "transforms": ["crop:0.85"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds"]}
+{"id": "img_earbuds_crop07", "source": "catalog/products/p_seed_earbuds.png", "transforms": ["crop:0.7"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds"]}
+{"id": "img_earbuds_scale035", "source": "catalog/products/p_seed_earbuds.png", "transforms": ["scale:0.35"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds"]}
+{"id": "img_earbuds_bright075", "source": "catalog/products/p_seed_earbuds.png", "transforms": ["bright:0.75"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds"]}
+{"id": "img_earbuds_jpeg45", "source": "catalog/products/p_seed_earbuds.png", "transforms": ["jpeg:45"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds"]}
+{"id": "img_earbuds_flip", "source": "catalog/products/p_seed_earbuds.png", "transforms": ["flip"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds"]}
+{"id": "img_earbuds_pad02", "source": "catalog/products/p_seed_earbuds.png", "transforms": ["pad:0.2"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds"]}
+{"id": "img_earbuds_noise006", "source": "catalog/products/p_seed_earbuds.png", "transforms": ["noise:0.06"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds"]}
+{"id": "img_earbuds_crop075_scale05_jpeg60", "source": "catalog/products/p_seed_earbuds.png", "transforms": ["crop:0.75", "scale:0.5", "jpeg:60"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds"]}
+{"id": "img_earbuds_ho_contrast08", "source": "catalog/products/p_seed_earbuds.png", "transforms": ["contrast:0.8"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds", "held_out"]}
+{"id": "img_earbuds_ho_crop08_bright115", "source": "catalog/products/p_seed_earbuds.png", "transforms": ["crop:0.8", "bright:1.15"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds", "held_out"]}
+{"id": "img_earbuds_ho_scale05_noise004", "source": "catalog/products/p_seed_earbuds.png", "transforms": ["scale:0.5", "noise:0.04"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds", "held_out"]}
+{"id": "img_earbuds_ho_pad015_jpeg55", "source": "catalog/products/p_seed_earbuds.png", "transforms": ["pad:0.15", "jpeg:55"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds", "held_out"]}
+{"id": "img_earbuds_2_crop085", "source": "catalog/products/p_seed_earbuds-2.png", "transforms": ["crop:0.85"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds"]}
+{"id": "img_earbuds_2_crop07", "source": "catalog/products/p_seed_earbuds-2.png", "transforms": ["crop:0.7"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds"]}
+{"id": "img_earbuds_2_scale035", "source": "catalog/products/p_seed_earbuds-2.png", "transforms": ["scale:0.35"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds"]}
+{"id": "img_earbuds_2_bright075", "source": "catalog/products/p_seed_earbuds-2.png", "transforms": ["bright:0.75"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds"]}
+{"id": "img_earbuds_2_jpeg45", "source": "catalog/products/p_seed_earbuds-2.png", "transforms": ["jpeg:45"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds"]}
+{"id": "img_earbuds_2_flip", "source": "catalog/products/p_seed_earbuds-2.png", "transforms": ["flip"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds"]}
+{"id": "img_earbuds_2_pad02", "source": "catalog/products/p_seed_earbuds-2.png", "transforms": ["pad:0.2"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds"]}
+{"id": "img_earbuds_2_noise006", "source": "catalog/products/p_seed_earbuds-2.png", "transforms": ["noise:0.06"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds"]}
+{"id": "img_earbuds_2_crop075_scale05_jpeg60", "source": "catalog/products/p_seed_earbuds-2.png", "transforms": ["crop:0.75", "scale:0.5", "jpeg:60"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds"]}
+{"id": "img_earbuds_2_ho_contrast08", "source": "catalog/products/p_seed_earbuds-2.png", "transforms": ["contrast:0.8"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds", "held_out"]}
+{"id": "img_earbuds_2_ho_crop08_bright115", "source": "catalog/products/p_seed_earbuds-2.png", "transforms": ["crop:0.8", "bright:1.15"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds", "held_out"]}
+{"id": "img_earbuds_2_ho_scale05_noise004", "source": "catalog/products/p_seed_earbuds-2.png", "transforms": ["scale:0.5", "noise:0.04"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds", "held_out"]}
+{"id": "img_earbuds_2_ho_pad015_jpeg55", "source": "catalog/products/p_seed_earbuds-2.png", "transforms": ["pad:0.15", "jpeg:55"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds", "held_out"]}
+{"id": "img_mouse_crop085", "source": "catalog/products/p_seed_mouse.png", "transforms": ["crop:0.85"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse"]}
+{"id": "img_mouse_crop07", "source": "catalog/products/p_seed_mouse.png", "transforms": ["crop:0.7"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse"]}
+{"id": "img_mouse_scale035", "source": "catalog/products/p_seed_mouse.png", "transforms": ["scale:0.35"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse"]}
+{"id": "img_mouse_bright075", "source": "catalog/products/p_seed_mouse.png", "transforms": ["bright:0.75"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse"]}
+{"id": "img_mouse_jpeg45", "source": "catalog/products/p_seed_mouse.png", "transforms": ["jpeg:45"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse"]}
+{"id": "img_mouse_flip", "source": "catalog/products/p_seed_mouse.png", "transforms": ["flip"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse"]}
+{"id": "img_mouse_pad02", "source": "catalog/products/p_seed_mouse.png", "transforms": ["pad:0.2"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse"]}
+{"id": "img_mouse_noise006", "source": "catalog/products/p_seed_mouse.png", "transforms": ["noise:0.06"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse"]}
+{"id": "img_mouse_crop075_scale05_jpeg60", "source": "catalog/products/p_seed_mouse.png", "transforms": ["crop:0.75", "scale:0.5", "jpeg:60"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse"]}
+{"id": "img_mouse_ho_contrast08", "source": "catalog/products/p_seed_mouse.png", "transforms": ["contrast:0.8"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse", "held_out"]}
+{"id": "img_mouse_ho_crop08_bright115", "source": "catalog/products/p_seed_mouse.png", "transforms": ["crop:0.8", "bright:1.15"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse", "held_out"]}
+{"id": "img_mouse_ho_scale05_noise004", "source": "catalog/products/p_seed_mouse.png", "transforms": ["scale:0.5", "noise:0.04"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse", "held_out"]}
+{"id": "img_mouse_ho_pad015_jpeg55", "source": "catalog/products/p_seed_mouse.png", "transforms": ["pad:0.15", "jpeg:55"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse", "held_out"]}
+{"id": "img_mouse_2_crop085", "source": "catalog/products/p_seed_mouse-2.png", "transforms": ["crop:0.85"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse"]}
+{"id": "img_mouse_2_crop07", "source": "catalog/products/p_seed_mouse-2.png", "transforms": ["crop:0.7"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse"]}
+{"id": "img_mouse_2_scale035", "source": "catalog/products/p_seed_mouse-2.png", "transforms": ["scale:0.35"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse"]}
+{"id": "img_mouse_2_bright075", "source": "catalog/products/p_seed_mouse-2.png", "transforms": ["bright:0.75"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse"]}
+{"id": "img_mouse_2_jpeg45", "source": "catalog/products/p_seed_mouse-2.png", "transforms": ["jpeg:45"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse"]}
+{"id": "img_mouse_2_flip", "source": "catalog/products/p_seed_mouse-2.png", "transforms": ["flip"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse"]}
+{"id": "img_mouse_2_pad02", "source": "catalog/products/p_seed_mouse-2.png", "transforms": ["pad:0.2"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse"]}
+{"id": "img_mouse_2_noise006", "source": "catalog/products/p_seed_mouse-2.png", "transforms": ["noise:0.06"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse"]}
+{"id": "img_mouse_2_crop075_scale05_jpeg60", "source": "catalog/products/p_seed_mouse-2.png", "transforms": ["crop:0.75", "scale:0.5", "jpeg:60"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse"]}
+{"id": "img_mouse_2_ho_contrast08", "source": "catalog/products/p_seed_mouse-2.png", "transforms": ["contrast:0.8"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse", "held_out"]}
+{"id": "img_mouse_2_ho_crop08_bright115", "source": "catalog/products/p_seed_mouse-2.png", "transforms": ["crop:0.8", "bright:1.15"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse", "held_out"]}
+{"id": "img_mouse_2_ho_scale05_noise004", "source": "catalog/products/p_seed_mouse-2.png", "transforms": ["scale:0.5", "noise:0.04"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse", "held_out"]}
+{"id": "img_mouse_2_ho_pad015_jpeg55", "source": "catalog/products/p_seed_mouse-2.png", "transforms": ["pad:0.15", "jpeg:55"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse", "held_out"]}
+{"id": "img_keyboard_crop085", "source": "catalog/products/p_seed_keyboard.png", "transforms": ["crop:0.85"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard"]}
+{"id": "img_keyboard_crop07", "source": "catalog/products/p_seed_keyboard.png", "transforms": ["crop:0.7"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard"]}
+{"id": "img_keyboard_scale035", "source": "catalog/products/p_seed_keyboard.png", "transforms": ["scale:0.35"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard"]}
+{"id": "img_keyboard_bright075", "source": "catalog/products/p_seed_keyboard.png", "transforms": ["bright:0.75"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard"]}
+{"id": "img_keyboard_jpeg45", "source": "catalog/products/p_seed_keyboard.png", "transforms": ["jpeg:45"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard"]}
+{"id": "img_keyboard_flip", "source": "catalog/products/p_seed_keyboard.png", "transforms": ["flip"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard"]}
+{"id": "img_keyboard_pad02", "source": "catalog/products/p_seed_keyboard.png", "transforms": ["pad:0.2"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard"]}
+{"id": "img_keyboard_noise006", "source": "catalog/products/p_seed_keyboard.png", "transforms": ["noise:0.06"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard"]}
+{"id": "img_keyboard_crop075_scale05_jpeg60", "source": "catalog/products/p_seed_keyboard.png", "transforms": ["crop:0.75", "scale:0.5", "jpeg:60"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard"]}
+{"id": "img_keyboard_ho_contrast08", "source": "catalog/products/p_seed_keyboard.png", "transforms": ["contrast:0.8"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard", "held_out"]}
+{"id": "img_keyboard_ho_crop08_bright115", "source": "catalog/products/p_seed_keyboard.png", "transforms": ["crop:0.8", "bright:1.15"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard", "held_out"]}
+{"id": "img_keyboard_ho_scale05_noise004", "source": "catalog/products/p_seed_keyboard.png", "transforms": ["scale:0.5", "noise:0.04"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard", "held_out"]}
+{"id": "img_keyboard_ho_pad015_jpeg55", "source": "catalog/products/p_seed_keyboard.png", "transforms": ["pad:0.15", "jpeg:55"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard", "held_out"]}
+{"id": "img_keyboard_2_crop085", "source": "catalog/products/p_seed_keyboard-2.png", "transforms": ["crop:0.85"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard"]}
+{"id": "img_keyboard_2_crop07", "source": "catalog/products/p_seed_keyboard-2.png", "transforms": ["crop:0.7"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard"]}
+{"id": "img_keyboard_2_scale035", "source": "catalog/products/p_seed_keyboard-2.png", "transforms": ["scale:0.35"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard"]}
+{"id": "img_keyboard_2_bright075", "source": "catalog/products/p_seed_keyboard-2.png", "transforms": ["bright:0.75"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard"]}
+{"id": "img_keyboard_2_jpeg45", "source": "catalog/products/p_seed_keyboard-2.png", "transforms": ["jpeg:45"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard"]}
+{"id": "img_keyboard_2_flip", "source": "catalog/products/p_seed_keyboard-2.png", "transforms": ["flip"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard"]}
+{"id": "img_keyboard_2_pad02", "source": "catalog/products/p_seed_keyboard-2.png", "transforms": ["pad:0.2"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard"]}
+{"id": "img_keyboard_2_noise006", "source": "catalog/products/p_seed_keyboard-2.png", "transforms": ["noise:0.06"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard"]}
+{"id": "img_keyboard_2_crop075_scale05_jpeg60", "source": "catalog/products/p_seed_keyboard-2.png", "transforms": ["crop:0.75", "scale:0.5", "jpeg:60"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard"]}
+{"id": "img_keyboard_2_ho_contrast08", "source": "catalog/products/p_seed_keyboard-2.png", "transforms": ["contrast:0.8"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard", "held_out"]}
+{"id": "img_keyboard_2_ho_crop08_bright115", "source": "catalog/products/p_seed_keyboard-2.png", "transforms": ["crop:0.8", "bright:1.15"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard", "held_out"]}
+{"id": "img_keyboard_2_ho_scale05_noise004", "source": "catalog/products/p_seed_keyboard-2.png", "transforms": ["scale:0.5", "noise:0.04"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard", "held_out"]}
+{"id": "img_keyboard_2_ho_pad015_jpeg55", "source": "catalog/products/p_seed_keyboard-2.png", "transforms": ["pad:0.15", "jpeg:55"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard", "held_out"]}
+{"id": "img_lamp_crop085", "source": "catalog/products/p_seed_lamp.png", "transforms": ["crop:0.85"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp"]}
+{"id": "img_lamp_crop07", "source": "catalog/products/p_seed_lamp.png", "transforms": ["crop:0.7"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp"]}
+{"id": "img_lamp_scale035", "source": "catalog/products/p_seed_lamp.png", "transforms": ["scale:0.35"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp"]}
+{"id": "img_lamp_bright075", "source": "catalog/products/p_seed_lamp.png", "transforms": ["bright:0.75"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp"]}
+{"id": "img_lamp_jpeg45", "source": "catalog/products/p_seed_lamp.png", "transforms": ["jpeg:45"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp"]}
+{"id": "img_lamp_flip", "source": "catalog/products/p_seed_lamp.png", "transforms": ["flip"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp"]}
+{"id": "img_lamp_pad02", "source": "catalog/products/p_seed_lamp.png", "transforms": ["pad:0.2"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp"]}
+{"id": "img_lamp_noise006", "source": "catalog/products/p_seed_lamp.png", "transforms": ["noise:0.06"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp"]}
+{"id": "img_lamp_crop075_scale05_jpeg60", "source": "catalog/products/p_seed_lamp.png", "transforms": ["crop:0.75", "scale:0.5", "jpeg:60"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp"]}
+{"id": "img_lamp_ho_contrast08", "source": "catalog/products/p_seed_lamp.png", "transforms": ["contrast:0.8"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp", "held_out"]}
+{"id": "img_lamp_ho_crop08_bright115", "source": "catalog/products/p_seed_lamp.png", "transforms": ["crop:0.8", "bright:1.15"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp", "held_out"]}
+{"id": "img_lamp_ho_scale05_noise004", "source": "catalog/products/p_seed_lamp.png", "transforms": ["scale:0.5", "noise:0.04"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp", "held_out"]}
+{"id": "img_lamp_ho_pad015_jpeg55", "source": "catalog/products/p_seed_lamp.png", "transforms": ["pad:0.15", "jpeg:55"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp", "held_out"]}
+{"id": "img_lamp_2_crop085", "source": "catalog/products/p_seed_lamp-2.png", "transforms": ["crop:0.85"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp"]}
+{"id": "img_lamp_2_crop07", "source": "catalog/products/p_seed_lamp-2.png", "transforms": ["crop:0.7"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp"]}
+{"id": "img_lamp_2_scale035", "source": "catalog/products/p_seed_lamp-2.png", "transforms": ["scale:0.35"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp"]}
+{"id": "img_lamp_2_bright075", "source": "catalog/products/p_seed_lamp-2.png", "transforms": ["bright:0.75"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp"]}
+{"id": "img_lamp_2_jpeg45", "source": "catalog/products/p_seed_lamp-2.png", "transforms": ["jpeg:45"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp"]}
+{"id": "img_lamp_2_flip", "source": "catalog/products/p_seed_lamp-2.png", "transforms": ["flip"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp"]}
+{"id": "img_lamp_2_pad02", "source": "catalog/products/p_seed_lamp-2.png", "transforms": ["pad:0.2"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp"]}
+{"id": "img_lamp_2_noise006", "source": "catalog/products/p_seed_lamp-2.png", "transforms": ["noise:0.06"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp"]}
+{"id": "img_lamp_2_crop075_scale05_jpeg60", "source": "catalog/products/p_seed_lamp-2.png", "transforms": ["crop:0.75", "scale:0.5", "jpeg:60"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp"]}
+{"id": "img_lamp_2_ho_contrast08", "source": "catalog/products/p_seed_lamp-2.png", "transforms": ["contrast:0.8"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp", "held_out"]}
+{"id": "img_lamp_2_ho_crop08_bright115", "source": "catalog/products/p_seed_lamp-2.png", "transforms": ["crop:0.8", "bright:1.15"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp", "held_out"]}
+{"id": "img_lamp_2_ho_scale05_noise004", "source": "catalog/products/p_seed_lamp-2.png", "transforms": ["scale:0.5", "noise:0.04"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp", "held_out"]}
+{"id": "img_lamp_2_ho_pad015_jpeg55", "source": "catalog/products/p_seed_lamp-2.png", "transforms": ["pad:0.15", "jpeg:55"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp", "held_out"]}
+{"id": "img_hidden_speaker_orig", "source": "catalog/products/p_seed_speaker.png", "transforms": [], "absent": ["p_seed_speaker"], "tags": ["not_visible", "下架"]}
+{"id": "img_hidden_speaker_crop08", "source": "catalog/products/p_seed_speaker.png", "transforms": ["crop:0.8"], "absent": ["p_seed_speaker"], "tags": ["not_visible", "下架"]}
+{"id": "img_hidden_speaker_jpeg50", "source": "catalog/products/p_seed_speaker.png", "transforms": ["jpeg:50"], "absent": ["p_seed_speaker"], "tags": ["not_visible", "下架"]}
+{"id": "img_hidden_powerbank_orig", "source": "catalog/products/p_seed_powerbank.png", "transforms": [], "absent": ["p_seed_powerbank"], "tags": ["not_visible", "风控"]}
+{"id": "img_hidden_powerbank_crop08", "source": "catalog/products/p_seed_powerbank.png", "transforms": ["crop:0.8"], "absent": ["p_seed_powerbank"], "tags": ["not_visible", "风控"]}
+{"id": "img_hidden_powerbank_jpeg50", "source": "catalog/products/p_seed_powerbank.png", "transforms": ["jpeg:50"], "absent": ["p_seed_powerbank"], "tags": ["not_visible", "风控"]}
+{"id": "img_hidden_legacy_orig", "source": "catalog/products/p_seed_legacy.png", "transforms": [], "absent": ["p_seed_legacy"], "tags": ["not_visible", "已删除"]}
+{"id": "img_hidden_legacy_crop08", "source": "catalog/products/p_seed_legacy.png", "transforms": ["crop:0.8"], "absent": ["p_seed_legacy"], "tags": ["not_visible", "已删除"]}
+{"id": "img_hidden_legacy_jpeg50", "source": "catalog/products/p_seed_legacy.png", "transforms": ["jpeg:50"], "absent": ["p_seed_legacy"], "tags": ["not_visible", "已删除"]}
+{"id": "img_neg_solid_ffffff", "source": "synthetic:solid:#ffffff", "transforms": [], "expect_none": true, "tags": ["negative"]}
+{"id": "img_neg_solid_3366cc", "source": "synthetic:solid:#3366cc", "transforms": [], "expect_none": true, "tags": ["negative"]}
+{"id": "img_neg_solid_202020", "source": "synthetic:solid:#202020", "transforms": [], "expect_none": true, "tags": ["negative"]}
+{"id": "img_neg_noise", "source": "synthetic:noise", "transforms": [], "expect_none": true, "tags": ["negative"]}
+{"id": "img_neg_checker", "source": "synthetic:checker", "transforms": [], "expect_none": true, "tags": ["negative"]}
+{"id": "img_neg_stripes", "source": "synthetic:stripes", "transforms": [], "expect_none": true, "tags": ["negative"]}
+{"id": "img_nova_ho2_crop065_flip", "source": "catalog/products/p_seed_nova.png", "transforms": ["crop:0.65", "flip"], "expect_top": "p_seed_nova", "tags": ["product", "nova", "held_out", "held_out_v2"]}
+{"id": "img_nova_ho2_bright085_contrast12", "source": "catalog/products/p_seed_nova.png", "transforms": ["bright:0.85", "contrast:1.2"], "expect_top": "p_seed_nova", "tags": ["product", "nova", "held_out", "held_out_v2"]}
+{"id": "img_nova_ho2_scale025", "source": "catalog/products/p_seed_nova.png", "transforms": ["scale:0.25"], "expect_top": "p_seed_nova", "tags": ["product", "nova", "held_out", "held_out_v2"]}
+{"id": "img_nova_ho2_noise01", "source": "catalog/products/p_seed_nova.png", "transforms": ["noise:0.1"], "expect_top": "p_seed_nova", "tags": ["product", "nova", "held_out", "held_out_v2"]}
+{"id": "img_nova_ho2_pad03_scale06", "source": "catalog/products/p_seed_nova.png", "transforms": ["pad:0.3", "scale:0.6"], "expect_top": "p_seed_nova", "tags": ["product", "nova", "held_out", "held_out_v2"]}
+{"id": "img_nova_2_ho2_crop065_flip", "source": "catalog/products/p_seed_nova-2.png", "transforms": ["crop:0.65", "flip"], "expect_top": "p_seed_nova", "tags": ["product", "nova", "held_out", "held_out_v2"]}
+{"id": "img_nova_2_ho2_bright085_contrast12", "source": "catalog/products/p_seed_nova-2.png", "transforms": ["bright:0.85", "contrast:1.2"], "expect_top": "p_seed_nova", "tags": ["product", "nova", "held_out", "held_out_v2"]}
+{"id": "img_nova_2_ho2_scale025", "source": "catalog/products/p_seed_nova-2.png", "transforms": ["scale:0.25"], "expect_top": "p_seed_nova", "tags": ["product", "nova", "held_out", "held_out_v2"]}
+{"id": "img_nova_2_ho2_noise01", "source": "catalog/products/p_seed_nova-2.png", "transforms": ["noise:0.1"], "expect_top": "p_seed_nova", "tags": ["product", "nova", "held_out", "held_out_v2"]}
+{"id": "img_nova_2_ho2_pad03_scale06", "source": "catalog/products/p_seed_nova-2.png", "transforms": ["pad:0.3", "scale:0.6"], "expect_top": "p_seed_nova", "tags": ["product", "nova", "held_out", "held_out_v2"]}
+{"id": "img_vista_ho2_crop065_flip", "source": "catalog/products/p_seed_vista.png", "transforms": ["crop:0.65", "flip"], "expect_top": "p_seed_vista", "tags": ["product", "vista", "held_out", "held_out_v2"]}
+{"id": "img_vista_ho2_bright085_contrast12", "source": "catalog/products/p_seed_vista.png", "transforms": ["bright:0.85", "contrast:1.2"], "expect_top": "p_seed_vista", "tags": ["product", "vista", "held_out", "held_out_v2"]}
+{"id": "img_vista_ho2_scale025", "source": "catalog/products/p_seed_vista.png", "transforms": ["scale:0.25"], "expect_top": "p_seed_vista", "tags": ["product", "vista", "held_out", "held_out_v2"]}
+{"id": "img_vista_ho2_noise01", "source": "catalog/products/p_seed_vista.png", "transforms": ["noise:0.1"], "expect_top": "p_seed_vista", "tags": ["product", "vista", "held_out", "held_out_v2"]}
+{"id": "img_vista_ho2_pad03_scale06", "source": "catalog/products/p_seed_vista.png", "transforms": ["pad:0.3", "scale:0.6"], "expect_top": "p_seed_vista", "tags": ["product", "vista", "held_out", "held_out_v2"]}
+{"id": "img_vista_2_ho2_crop065_flip", "source": "catalog/products/p_seed_vista-2.png", "transforms": ["crop:0.65", "flip"], "expect_top": "p_seed_vista", "tags": ["product", "vista", "held_out", "held_out_v2"]}
+{"id": "img_vista_2_ho2_bright085_contrast12", "source": "catalog/products/p_seed_vista-2.png", "transforms": ["bright:0.85", "contrast:1.2"], "expect_top": "p_seed_vista", "tags": ["product", "vista", "held_out", "held_out_v2"]}
+{"id": "img_vista_2_ho2_scale025", "source": "catalog/products/p_seed_vista-2.png", "transforms": ["scale:0.25"], "expect_top": "p_seed_vista", "tags": ["product", "vista", "held_out", "held_out_v2"]}
+{"id": "img_vista_2_ho2_noise01", "source": "catalog/products/p_seed_vista-2.png", "transforms": ["noise:0.1"], "expect_top": "p_seed_vista", "tags": ["product", "vista", "held_out", "held_out_v2"]}
+{"id": "img_vista_2_ho2_pad03_scale06", "source": "catalog/products/p_seed_vista-2.png", "transforms": ["pad:0.3", "scale:0.6"], "expect_top": "p_seed_vista", "tags": ["product", "vista", "held_out", "held_out_v2"]}
+{"id": "img_earbuds_ho2_crop065_flip", "source": "catalog/products/p_seed_earbuds.png", "transforms": ["crop:0.65", "flip"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds", "held_out", "held_out_v2"]}
+{"id": "img_earbuds_ho2_bright085_contrast12", "source": "catalog/products/p_seed_earbuds.png", "transforms": ["bright:0.85", "contrast:1.2"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds", "held_out", "held_out_v2"]}
+{"id": "img_earbuds_ho2_scale025", "source": "catalog/products/p_seed_earbuds.png", "transforms": ["scale:0.25"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds", "held_out", "held_out_v2"]}
+{"id": "img_earbuds_ho2_noise01", "source": "catalog/products/p_seed_earbuds.png", "transforms": ["noise:0.1"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds", "held_out", "held_out_v2"]}
+{"id": "img_earbuds_ho2_pad03_scale06", "source": "catalog/products/p_seed_earbuds.png", "transforms": ["pad:0.3", "scale:0.6"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds", "held_out", "held_out_v2"]}
+{"id": "img_earbuds_2_ho2_crop065_flip", "source": "catalog/products/p_seed_earbuds-2.png", "transforms": ["crop:0.65", "flip"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds", "held_out", "held_out_v2"]}
+{"id": "img_earbuds_2_ho2_bright085_contrast12", "source": "catalog/products/p_seed_earbuds-2.png", "transforms": ["bright:0.85", "contrast:1.2"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds", "held_out", "held_out_v2"]}
+{"id": "img_earbuds_2_ho2_scale025", "source": "catalog/products/p_seed_earbuds-2.png", "transforms": ["scale:0.25"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds", "held_out", "held_out_v2"]}
+{"id": "img_earbuds_2_ho2_noise01", "source": "catalog/products/p_seed_earbuds-2.png", "transforms": ["noise:0.1"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds", "held_out", "held_out_v2"]}
+{"id": "img_earbuds_2_ho2_pad03_scale06", "source": "catalog/products/p_seed_earbuds-2.png", "transforms": ["pad:0.3", "scale:0.6"], "expect_top": "p_seed_earbuds", "tags": ["product", "earbuds", "held_out", "held_out_v2"]}
+{"id": "img_mouse_ho2_crop065_flip", "source": "catalog/products/p_seed_mouse.png", "transforms": ["crop:0.65", "flip"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse", "held_out", "held_out_v2"]}
+{"id": "img_mouse_ho2_bright085_contrast12", "source": "catalog/products/p_seed_mouse.png", "transforms": ["bright:0.85", "contrast:1.2"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse", "held_out", "held_out_v2"]}
+{"id": "img_mouse_ho2_scale025", "source": "catalog/products/p_seed_mouse.png", "transforms": ["scale:0.25"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse", "held_out", "held_out_v2"]}
+{"id": "img_mouse_ho2_noise01", "source": "catalog/products/p_seed_mouse.png", "transforms": ["noise:0.1"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse", "held_out", "held_out_v2"]}
+{"id": "img_mouse_ho2_pad03_scale06", "source": "catalog/products/p_seed_mouse.png", "transforms": ["pad:0.3", "scale:0.6"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse", "held_out", "held_out_v2"]}
+{"id": "img_mouse_2_ho2_crop065_flip", "source": "catalog/products/p_seed_mouse-2.png", "transforms": ["crop:0.65", "flip"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse", "held_out", "held_out_v2"]}
+{"id": "img_mouse_2_ho2_bright085_contrast12", "source": "catalog/products/p_seed_mouse-2.png", "transforms": ["bright:0.85", "contrast:1.2"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse", "held_out", "held_out_v2"]}
+{"id": "img_mouse_2_ho2_scale025", "source": "catalog/products/p_seed_mouse-2.png", "transforms": ["scale:0.25"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse", "held_out", "held_out_v2"]}
+{"id": "img_mouse_2_ho2_noise01", "source": "catalog/products/p_seed_mouse-2.png", "transforms": ["noise:0.1"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse", "held_out", "held_out_v2"]}
+{"id": "img_mouse_2_ho2_pad03_scale06", "source": "catalog/products/p_seed_mouse-2.png", "transforms": ["pad:0.3", "scale:0.6"], "expect_top": "p_seed_mouse", "tags": ["product", "mouse", "held_out", "held_out_v2"]}
+{"id": "img_keyboard_ho2_crop065_flip", "source": "catalog/products/p_seed_keyboard.png", "transforms": ["crop:0.65", "flip"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard", "held_out", "held_out_v2"]}
+{"id": "img_keyboard_ho2_bright085_contrast12", "source": "catalog/products/p_seed_keyboard.png", "transforms": ["bright:0.85", "contrast:1.2"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard", "held_out", "held_out_v2"]}
+{"id": "img_keyboard_ho2_scale025", "source": "catalog/products/p_seed_keyboard.png", "transforms": ["scale:0.25"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard", "held_out", "held_out_v2"]}
+{"id": "img_keyboard_ho2_noise01", "source": "catalog/products/p_seed_keyboard.png", "transforms": ["noise:0.1"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard", "held_out", "held_out_v2"]}
+{"id": "img_keyboard_ho2_pad03_scale06", "source": "catalog/products/p_seed_keyboard.png", "transforms": ["pad:0.3", "scale:0.6"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard", "held_out", "held_out_v2"]}
+{"id": "img_keyboard_2_ho2_crop065_flip", "source": "catalog/products/p_seed_keyboard-2.png", "transforms": ["crop:0.65", "flip"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard", "held_out", "held_out_v2"]}
+{"id": "img_keyboard_2_ho2_bright085_contrast12", "source": "catalog/products/p_seed_keyboard-2.png", "transforms": ["bright:0.85", "contrast:1.2"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard", "held_out", "held_out_v2"]}
+{"id": "img_keyboard_2_ho2_scale025", "source": "catalog/products/p_seed_keyboard-2.png", "transforms": ["scale:0.25"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard", "held_out", "held_out_v2"]}
+{"id": "img_keyboard_2_ho2_noise01", "source": "catalog/products/p_seed_keyboard-2.png", "transforms": ["noise:0.1"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard", "held_out", "held_out_v2"]}
+{"id": "img_keyboard_2_ho2_pad03_scale06", "source": "catalog/products/p_seed_keyboard-2.png", "transforms": ["pad:0.3", "scale:0.6"], "expect_top": "p_seed_keyboard", "tags": ["product", "keyboard", "held_out", "held_out_v2"]}
+{"id": "img_lamp_ho2_crop065_flip", "source": "catalog/products/p_seed_lamp.png", "transforms": ["crop:0.65", "flip"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp", "held_out", "held_out_v2"]}
+{"id": "img_lamp_ho2_bright085_contrast12", "source": "catalog/products/p_seed_lamp.png", "transforms": ["bright:0.85", "contrast:1.2"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp", "held_out", "held_out_v2"]}
+{"id": "img_lamp_ho2_scale025", "source": "catalog/products/p_seed_lamp.png", "transforms": ["scale:0.25"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp", "held_out", "held_out_v2"]}
+{"id": "img_lamp_ho2_noise01", "source": "catalog/products/p_seed_lamp.png", "transforms": ["noise:0.1"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp", "held_out", "held_out_v2"]}
+{"id": "img_lamp_ho2_pad03_scale06", "source": "catalog/products/p_seed_lamp.png", "transforms": ["pad:0.3", "scale:0.6"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp", "held_out", "held_out_v2"]}
+{"id": "img_lamp_2_ho2_crop065_flip", "source": "catalog/products/p_seed_lamp-2.png", "transforms": ["crop:0.65", "flip"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp", "held_out", "held_out_v2"]}
+{"id": "img_lamp_2_ho2_bright085_contrast12", "source": "catalog/products/p_seed_lamp-2.png", "transforms": ["bright:0.85", "contrast:1.2"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp", "held_out", "held_out_v2"]}
+{"id": "img_lamp_2_ho2_scale025", "source": "catalog/products/p_seed_lamp-2.png", "transforms": ["scale:0.25"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp", "held_out", "held_out_v2"]}
+{"id": "img_lamp_2_ho2_noise01", "source": "catalog/products/p_seed_lamp-2.png", "transforms": ["noise:0.1"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp", "held_out", "held_out_v2"]}
+{"id": "img_lamp_2_ho2_pad03_scale06", "source": "catalog/products/p_seed_lamp-2.png", "transforms": ["pad:0.3", "scale:0.6"], "expect_top": "p_seed_lamp", "tags": ["product", "lamp", "held_out", "held_out_v2"]}

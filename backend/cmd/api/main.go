@@ -20,6 +20,7 @@ import (
 	"github.com/evelyn-kk/blink-shop/backend/src/agent"
 	"github.com/evelyn-kk/blink-shop/backend/src/configcenter"
 	"github.com/evelyn-kk/blink-shop/backend/src/httpapi"
+	"github.com/evelyn-kk/blink-shop/backend/src/imagesearch"
 	"github.com/evelyn-kk/blink-shop/backend/src/llm"
 	"github.com/evelyn-kk/blink-shop/backend/src/logging"
 	"github.com/evelyn-kk/blink-shop/backend/src/objectstore"
@@ -102,10 +103,19 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 
 	// 向量检索：Milvus 和 Embedding 都配置了才启用；否则知识和商品都只用关键词检索。
 	vec := openVectorIndexes(cfg, logger)
+	// 图片搜索：配置了 Milvus 就启用（默认本地图片特征，不调外部服务）；商品图只读平台内图片和白名单域名。
+	images := vector.OpenImageSearch(cfg, st, objects, logger)
+	if images != nil {
+		logger.Info("image search configured", "embedder", images.EmbedderName(), "collection", cfg.MilvusImageCollection,
+			"fetch_allowed_hosts", len(cfg.ImageFetchAllowedHosts))
+	} else {
+		logger.Warn("image search not configured (MILVUS_ADDR), /search/image returns 503")
+	}
 
 	server := httpapi.NewServer(httpapi.Options{
 		VectorIndex:  vec.knowledgeOpt(),
 		ProductIndex: vec.productOpt(),
+		ImageSearch:  images,
 		Logger:       logger,
 		Settings:     configcenter.NewHTTPSettingsProvider(resolver, cfg.IsProduction()),
 		Store:        st,
@@ -128,8 +138,8 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 	// 上一个进程没跑完的导购运行标为失败（数据库就绪后执行一次；本进程启动后开始的运行不受影响）。
 	go recoverRunsWhenReady(ctx, server, st, startedAt, logger)
 	// 非生产默认在启动时把已有知识和商品写入向量索引（BOOTSTRAP_VECTOR_INDEX）；生产用 cmd/vectorindex 显式执行。
-	if cfg.BootstrapVectorIndex && vec.enabled() {
-		go bootstrapVectorsWhenReady(ctx, st, vec, logger)
+	if cfg.BootstrapVectorIndex && (vec.enabled() || images != nil) {
+		go bootstrapVectorsWhenReady(ctx, st, vec, images, logger)
 	}
 
 	httpServer := &http.Server{
@@ -283,7 +293,8 @@ func openVectorIndexes(cfg configcenter.Config, logger *slog.Logger) vectorIndex
 }
 
 // bootstrapVectorsWhenReady 等数据库迁移完成后建一次全量向量索引；失败只记日志（关键词检索照常可用）。
-func bootstrapVectorsWhenReady(ctx context.Context, st *mysqlstore.Store, vec vectorIndexes, logger *slog.Logger) {
+// 商品图索引同理（images 不为 nil 时）。
+func bootstrapVectorsWhenReady(ctx context.Context, st *mysqlstore.Store, vec vectorIndexes, images *imagesearch.Service, logger *slog.Logger) {
 	for schemaReady(ctx, st) != nil {
 		select {
 		case <-ctx.Done():
@@ -291,10 +302,20 @@ func bootstrapVectorsWhenReady(ctx context.Context, st *mysqlstore.Store, vec ve
 		case <-time.After(migrateRetryInterval):
 		}
 	}
-	stats, err := vector.Bootstrap(ctx, st, vec.knowledge, vec.products, logger)
-	if err != nil {
-		logger.Error("vector bootstrap failed", "error", err)
-		return
+	if vec.enabled() {
+		stats, err := vector.Bootstrap(ctx, st, vec.knowledge, vec.products, logger)
+		if err != nil {
+			logger.Error("vector bootstrap failed", "error", err)
+		} else {
+			logger.Info("vector bootstrap done", "documents", stats.Documents, "chunks", stats.Chunks, "products", stats.Products, "failed", stats.Failed)
+		}
 	}
-	logger.Info("vector bootstrap done", "documents", stats.Documents, "chunks", stats.Chunks, "products", stats.Products, "failed", stats.Failed)
+	if images != nil {
+		stats, err := images.Bootstrap(ctx)
+		if err != nil {
+			logger.Error("image index bootstrap failed", "error", err)
+			return
+		}
+		logger.Info("image index bootstrap done", "products", stats.Products, "images", stats.Images, "skipped", stats.Skipped, "failed", stats.Failed)
+	}
 }

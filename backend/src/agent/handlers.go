@@ -15,7 +15,7 @@ func (s *session) handle(ctx context.Context) error {
 	case IntentGuide:
 		s.handleGuide(ctx)
 	case IntentImageSearch:
-		s.handleImage()
+		s.handleImage(ctx)
 	case IntentNavigation:
 		s.handleNavigation()
 	case IntentNonGuide:
@@ -59,11 +59,6 @@ func (s *session) handleGuide(ctx context.Context) {
 	s.say("你好，我是 Blink 导购助手。我可以帮你：推荐和对比商品（比如“3000 以内拍照好的手机”）、查看和修改购物车、结算下单、查询订单和支付、领取优惠券，以及解答售后和使用问题。")
 	s.say("直接告诉我预算、用途或想买的品类就可以。")
 	s.followups("推荐一款通勤降噪耳机", "3000 以内拍照好的手机", "有什么优惠券")
-}
-
-func (s *session) handleImage() {
-	s.say("图片找同款的能力还在接入中（计划在图像检索上线后开放），现在我还不能识别图片内容。你可以用文字描述想找的商品，比如品类、品牌、颜色或用途，我按文字帮你找。")
-	s.followups("推荐一款降噪耳机", "3000 以内的手机", "看看我的购物车")
 }
 
 func (s *session) handleNavigation() {

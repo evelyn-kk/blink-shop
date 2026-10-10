@@ -34,7 +34,7 @@ func TestRegistryPolicy(t *testing.T) {
 			}
 		}
 	}
-	if len(e.reg.ExportTools()) != 19 {
+	if len(e.reg.ExportTools()) != 20 {
 		t.Fatalf("tools: %d", len(e.reg.ExportTools()))
 	}
 }

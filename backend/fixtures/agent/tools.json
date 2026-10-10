@@ -26,7 +26,10 @@
       "search_knowledge",
       "list_promotions"
     ],
-    "image_search": [],
+    "image_search": [
+      "search_image_products",
+      "search_products"
+    ],
     "knowledge": [
       "search_knowledge",
       "search_products"
@@ -547,6 +550,73 @@
       "write": false
     },
     {
+      "description": "用用户本轮上传的图片找相似的在售商品；file_id 必须是本轮消息附带的图片。可以带文字条件：query（品类等）用于加分，价格、品牌、排除词直接过滤。只有 relevance=ok 的结果能当作推荐。",
+      "intents": [
+        "image_search"
+      ],
+      "name": "search_image_products",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "brands": {
+            "description": "只要这些品牌",
+            "items": {
+              "maxLength": 30,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 5,
+            "type": "array"
+          },
+          "exclude": {
+            "description": "排除词",
+            "items": {
+              "maxLength": 30,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 10,
+            "type": "array"
+          },
+          "file_id": {
+            "description": "本轮消息附带的图片 file_id",
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "default": 5,
+            "description": "返回数量",
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_price": {
+            "description": "价格上限（元）",
+            "minimum": 0,
+            "type": "number"
+          },
+          "min_price": {
+            "description": "价格下限（元）",
+            "minimum": 0,
+            "type": "number"
+          },
+          "query": {
+            "description": "文字条件（品类、用途等），可以为空",
+            "maxLength": 100,
+            "minLength": 0,
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_id"
+        ],
+        "type": "object"
+      },
+      "private": [],
+      "write": false
+    },
+    {
       "description": "检索知识库（商品说明、售后政策、使用指南），返回可引用的分块；回答只能引用返回的片段。",
       "intents": [
         "guide",
@@ -589,6 +659,7 @@
       "intents": [
         "cart",
         "guide",
+        "image_search",
         "knowledge",
         "product_compare",
         "product_search",

@@ -80,7 +80,7 @@ public class AgentStreamContractTest {
         server.enqueue(new MockResponse().setHeader("Content-Type", "text/event-stream; charset=utf-8").setBody(wire.toString()));
         Recorder r = new Recorder();
         JSONObject body = f.request.getJSONObject("body");
-        api.streamAgentMessage("s_1", body.getString("client_message_id"), body.getString("content"), r);
+        api.streamAgentMessage("s_1", body.getString("client_message_id"), body.getString("content"), null, r);
         assertTrue(r.done.await(5, TimeUnit.SECONDS));
         assertEquals(null, r.error);
         assertEquals(want.length(), r.events.size());
@@ -112,6 +112,29 @@ public class AgentStreamContractTest {
         JSONObject sent = new JSONObject(req.getBody().readUtf8());
         assertEquals("fixture-1", sent.getString("client_message_id"));
         assertEquals("推荐一款通勤降噪耳机", sent.getString("content"));
+        assertTrue("没有附件时不带 attachments", !sent.has("attachments"));
+    }
+
+    /** 附图：先上传拿 file_id（按 file_upload_created 样例解析），再随消息以 attachments:[{file_id}] 发出。 */
+    @Test
+    public void uploadThenStreamWithAttachment() throws Exception {
+        Fixture up = Fixture.load("file_upload_created");
+        server.enqueue(new MockResponse().setResponseCode(201).setHeader("Content-Type", "application/json")
+                .setBody(up.response.getJSONObject("body").toString().replace("<file_id>", "file_0123456789abcdef")));
+        String fileId = api.uploadFile(new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF}, "image/jpeg", "photo.jpg");
+        assertEquals("file_0123456789abcdef", fileId);
+        RecordedRequest upload = server.takeRequest();
+        assertEquals("/api/v1/files", upload.getPath());
+        assertTrue(upload.getHeader("Content-Type").startsWith("multipart/form-data"));
+        assertTrue(upload.getBody().readUtf8().contains("name=\"file\"; filename=\"photo.jpg\""));
+
+        server.enqueue(new MockResponse().setHeader("Content-Type", "text/event-stream").setBody(
+                "event: message_start\ndata: {\"run_id\":\"r1\"}\n\nevent: message_done\ndata: {\"run_id\":\"r1\",\"status\":\"completed\"}\n\n"));
+        Recorder r = new Recorder();
+        api.streamAgentMessage("s_1", "cm-1", "帮我找同款", Collections.singletonList(fileId), r);
+        assertTrue(r.done.await(5, TimeUnit.SECONDS));
+        JSONObject sent = new JSONObject(server.takeRequest().getBody().readUtf8());
+        assertEquals("[{\"file_id\":\"file_0123456789abcdef\"}]", sent.getJSONArray("attachments").toString());
     }
 
     @Test
@@ -119,7 +142,7 @@ public class AgentStreamContractTest {
         Fixture f = Fixture.load("agent_message_stream_invalid");
         server.enqueue(f.mockResponse());
         Recorder r = new Recorder();
-        api.streamAgentMessage("s_1", "", "你好", r);
+        api.streamAgentMessage("s_1", "", "你好", null, r);
         assertTrue(r.done.await(5, TimeUnit.SECONDS));
         assertEquals("client_message_id", r.error.field());
         assertTrue(r.events.isEmpty());

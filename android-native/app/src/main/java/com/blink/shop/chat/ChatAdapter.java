@@ -83,6 +83,7 @@ public final class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.Holder> 
 
     final class Holder extends RecyclerView.ViewHolder {
         final TextView userText;
+        final TextView userAttachment;
         final TextView userTime;
         final LinearLayout stepsPanel;
         final TextView stepsSummary;
@@ -102,6 +103,7 @@ public final class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.Holder> 
         Holder(View v) {
             super(v);
             userText = v.findViewById(R.id.user_text);
+            userAttachment = v.findViewById(R.id.user_attachment);
             userTime = v.findViewById(R.id.user_time);
             stepsPanel = v.findViewById(R.id.steps_panel);
             stepsSummary = v.findViewById(R.id.steps_summary);
@@ -126,6 +128,9 @@ public final class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.Holder> 
             }
             if (!same) {
                 userText.setText(t.userText);
+                int images = t.imageCount();
+                userAttachment.setVisibility(images > 0 ? View.VISIBLE : View.GONE);
+                userAttachment.setText(images > 0 ? "附带 " + images + " 张图片" : "");
                 userTime.setText(t.createdAt.isEmpty() ? "" : com.blink.shop.model.Times.formatLocal(t.createdAt, java.util.TimeZone.getDefault()));
                 userTime.setVisibility(t.createdAt.isEmpty() ? View.GONE : View.VISIBLE);
                 blockList.removeAllViews();

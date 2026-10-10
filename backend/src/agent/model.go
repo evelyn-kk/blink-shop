@@ -63,7 +63,8 @@ var plannerSchema = object([]string{"intent"}, map[string]*Schema{
 
 // plan 先用规则得到基线，再（可选）用小模型覆盖意图和槽位。模型失败、超时、输出不合法都回到规则结果，并把原因写进轨迹。
 func (r *RuleRunner) plan(ctx context.Context, in Input, st ModelSettings, out Output, history history) Plan {
-	rule := Classify(in.Content, hasImage(in.Attachments))
+	hasImg := hasImage(in.Attachments)
+	rule := Classify(in.Content, hasImg)
 	if !st.PlannerEnabled {
 		return rule
 	}
@@ -78,7 +79,7 @@ func (r *RuleRunner) plan(ctx context.Context, in Input, st ModelSettings, out O
 		r.deps.Logger.WarnContext(ctx, "model planner failed, using rules", "run_id", in.RunID, "error", err)
 		return rule
 	}
-	merged := mergePlans(rule, modelPlan)
+	merged := imagePlan(mergePlans(rule, modelPlan), rule, hasImg)
 	meta["intent"], meta["action"], meta["rule_intent"] = string(merged.Intent), merged.Action, string(rule.Intent)
 	out.Trace("planner", "model", "ok", r.deps.Now().Sub(start), meta)
 	return merged
@@ -347,7 +348,7 @@ func (s *session) reactUserPrompt() string {
 		}
 	}
 	if hasImage(s.in.Attachments) {
-		b.WriteString("\n\n（用户附带了图片，但图片搜索还没有开放；按文字回答并说明。）")
+		b.WriteString("\n\n（用户附带了图片。按图找商品由系统单独处理，这一步只按文字回答，不要描述或猜测图片内容。）")
 	}
 	return b.String()
 }
@@ -367,6 +368,8 @@ func toolTitle(name string) string {
 	switch name {
 	case ToolSearchProducts:
 		return "搜索商品"
+	case ToolSearchImage:
+		return "按图片找商品"
 	case ToolSearchKnowledge:
 		return "查找资料"
 	case ToolGetCart:

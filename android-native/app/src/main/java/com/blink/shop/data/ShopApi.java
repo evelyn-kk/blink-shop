@@ -320,9 +320,33 @@ public final class ShopApi {
      * 向会话发送一条消息并流式接收回答（SSE）。clientMessageId 由调用方生成并在重试时复用：
      * 服务端对同一个 ID 不会再运行，而是重放已有的回答。取消返回的 Stream 会断开连接，服务端把这次运行记为已取消。
      */
-    public SseClient.Stream streamAgentMessage(String sessionId, String clientMessageId, String content, SseClient.Listener listener) {
-        return new SseClient(api).post("/agent/sessions/" + enc(sessionId) + "/messages:stream",
-                obj("client_message_id", clientMessageId, "content", content), listener);
+    /** 发一条导购消息并接收流式回答；attachments 是先用 uploadFile 上传得到的 file_id（只能是本人上传的文件）。 */
+    public SseClient.Stream streamAgentMessage(String sessionId, String clientMessageId, String content, List<String> attachments,
+            SseClient.Listener listener) {
+        JSONObject body = obj("client_message_id", clientMessageId, "content", content);
+        if (attachments != null && !attachments.isEmpty()) {
+            JSONArray list = new JSONArray();
+            for (String id : attachments) {
+                list.put(obj("file_id", id));
+            }
+            try {
+                body.put("attachments", list);
+            } catch (JSONException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+        return new SseClient(api).post("/agent/sessions/" + enc(sessionId) + "/messages:stream", body, listener);
+    }
+
+    /** 上传私有文件（聊天附图），返回 file_id。类型由服务端按内容判断。 */
+    public String uploadFile(byte[] data, String mimeType, String filename) throws ApiException {
+        JSONObject r = api.upload("/files", "file", filename, mimeType, data);
+        JSONObject file = r.optJSONObject("file");
+        String id = file == null ? "" : file.optString("file_id", "");
+        if (id.isEmpty()) {
+            throw ApiException.badResponse(null);
+        }
+        return id;
     }
 
     /** 检查服务地址是否可用（高级设置里的“测试连接”）。 */

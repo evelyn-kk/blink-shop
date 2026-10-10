@@ -118,6 +118,17 @@ func memoryMeta(h history, relevant []memTurn, p Plan, inherited bool) map[strin
 	return m
 }
 
+// imageIDs 是本轮图片附件的 file_id 集合。
+func imageIDs(atts []domain.Attachment) map[string]bool {
+	out := map[string]bool{}
+	for _, a := range atts {
+		if strings.HasPrefix(a.MimeType, "image/") {
+			out[a.FileID] = true
+		}
+	}
+	return out
+}
+
 func hasImage(atts []domain.Attachment) bool {
 	for _, a := range atts {
 		if strings.HasPrefix(a.MimeType, "image/") {
@@ -153,7 +164,8 @@ type session struct {
 
 func newSession(r *RuleRunner, in Input, out Output, plan Plan) *session {
 	return &session{r: r, in: in, out: out, plan: plan, followupSource: "rule",
-		tc: &ToolContext{AccountID: in.AccountID, SessionID: in.SessionID, RunID: in.RunID, Intent: plan.Intent, Evidence: map[string]bool{}}}
+		tc: &ToolContext{AccountID: in.AccountID, SessionID: in.SessionID, RunID: in.RunID, Intent: plan.Intent, Evidence: map[string]bool{},
+			Images: imageIDs(in.Attachments)}}
 }
 
 // say 按句子流式输出一段话。
@@ -243,6 +255,13 @@ func (s *session) call(ctx context.Context, title, tool string, args map[string]
 func summarize(data any) map[string]any {
 	out := map[string]any{}
 	switch d := data.(type) {
+	case ImageSearchResult:
+		out["count"], out["total"], out["relevance"], out["status"] = len(d.Products), d.Total, d.Relevance, d.Status
+		ids := make([]string, 0, len(d.Products))
+		for _, p := range d.Products {
+			ids = append(ids, p.ProductID)
+		}
+		out["product_ids"] = ids
 	case ProductSearchResult:
 		out["count"], out["total"], out["relevance"] = len(d.Products), d.Total, d.Relevance
 		ids := make([]string, 0, len(d.Products))
@@ -314,6 +333,9 @@ func (s *session) traceRetrieval(data any) {
 			meta["error"], meta["fallback"], status = d.Rerank.Error, "rule", "error"
 		}
 		s.out.Trace("rerank", "products", status, 0, meta)
+	case ImageSearchResult:
+		s.out.Trace("retrieval", "images", "ok", 0, map[string]any{"embedder": d.Embedder, "candidates": d.Candidates, "dropped": d.Dropped,
+			"filtered": d.Filtered, "status": d.Status, "relevance": d.Relevance, "matches": d.Matches})
 	case KnowledgeResult:
 		ids := make([]string, 0, len(d.Citations))
 		for _, c := range d.Citations {

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 拍照时相机应用写入的临时文件，只暴露应用缓存里的 camera/ 目录。 -->
+<paths>
+    <cache-path name="camera" path="camera/" />
+</paths>

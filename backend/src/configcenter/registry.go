@@ -84,3 +84,15 @@ var (
 	KeyEmbeddingModel          = Key{Name: "embedding.model", Env: "EMBEDDING_MODEL", Default: "text-embedding-v3"}
 	KeyEmbeddingDim            = Key{Name: "embedding.dim", Env: "EMBEDDING_DIM", Default: "1024"}
 )
+
+// 图片搜索：Milvus 配置了就启用。图片 Embedding 默认用本地特征（不调外部服务）；dashscope 需要密钥。仅启动时读取。
+var (
+	KeyMilvusImageCollection  = Key{Name: "milvus.image_collection", Env: "MILVUS_IMAGE_COLLECTION", Default: "blink_shop_product_images"}
+	KeyImageEmbeddingProvider = Key{Name: "image_embedding.provider", Env: "IMAGE_EMBEDDING_PROVIDER", Default: "local"}
+	KeyImageEmbeddingBaseURL  = Key{Name: "image_embedding.base_url", Env: "IMAGE_EMBEDDING_BASE_URL", Default: "https://dashscope.aliyuncs.com"}
+	KeyImageEmbeddingAPIKey   = Key{Name: "image_embedding.api_key", Env: "IMAGE_EMBEDDING_API_KEY", Secret: true}
+	KeyImageEmbeddingModel    = Key{Name: "image_embedding.model", Env: "IMAGE_EMBEDDING_MODEL", Default: "qwen3-vl-embedding"}
+	KeyImageEmbeddingDim      = Key{Name: "image_embedding.dim", Env: "IMAGE_EMBEDDING_DIM", Default: "512"}
+	// KeyImageFetchAllowedHosts 是服务端可以下载商品图的 https 域名（逗号分隔，精确匹配）；为空表示只读平台内图片。
+	KeyImageFetchAllowedHosts = Key{Name: "image_search.fetch_allowed_hosts", Env: "IMAGE_FETCH_ALLOWED_HOSTS"}
+)

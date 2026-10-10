@@ -112,13 +112,25 @@ public final class ChatController {
 
     // ---------- 发送 ----------
 
+    /** 只附图、没写文字时替用户发的问题。 */
+    public static final String IMAGE_ONLY_PROMPT = "帮我找找图片里的同款";
+
     /** 发送一条消息。正在生成、正在创建会话或内容为空时不发送（返回 false），避免重复点击发出两条。 */
     public boolean send(String text) {
+        return send(text, Collections.emptyList());
+    }
+
+    /** 发送一条带附件的消息；只有附件没有文字时用 IMAGE_ONLY_PROMPT。 */
+    public boolean send(String text, List<String> attachments) {
         String content = text == null ? "" : text.trim();
+        List<String> files = attachments == null ? Collections.emptyList() : attachments;
+        if (content.isEmpty() && !files.isEmpty()) {
+            content = IMAGE_ONLY_PROMPT;
+        }
         if (content.isEmpty() || isBusy()) {
             return false;
         }
-        ChatTurn turn = new ChatTurn(ids.next(), content, null);
+        ChatTurn turn = new ChatTurn(ids.next(), content, null, files);
         turns.add(turn);
         launch(turn);
         return true;
@@ -168,7 +180,7 @@ public final class ChatController {
         turn.status = ChatTurn.Status.SENDING;
         turn.touch();
         changed();
-        activeStream = backend.stream(sessionId, turn.clientMessageId, turn.userText, new SseClient.Listener() {
+        activeStream = backend.stream(sessionId, turn.clientMessageId, turn.userText, turn.attachments, new SseClient.Listener() {
             @Override
             public void onEvent(SseParser.Event event) {
                 main.execute(() -> handleEvent(gen, turn, event));
@@ -352,7 +364,7 @@ public final class ChatController {
             launch(turn);
             return true;
         }
-        ChatTurn fresh = new ChatTurn(ids.next(), turn.userText, null);
+        ChatTurn fresh = new ChatTurn(ids.next(), turn.userText, null, turn.attachments);
         turns.set(turns.indexOf(turn), fresh);
         launch(fresh);
         return true;
@@ -363,7 +375,7 @@ public final class ChatController {
         if (isBusy() || !turns.contains(turn) || turn.isActive()) {
             return false;
         }
-        ChatTurn fresh = new ChatTurn(ids.next(), turn.userText, null);
+        ChatTurn fresh = new ChatTurn(ids.next(), turn.userText, null, turn.attachments);
         turns.set(turns.indexOf(turn), fresh);
         launch(fresh);
         return true;
@@ -440,7 +452,8 @@ public final class ChatController {
                 if (m == null) {
                     continue;
                 }
-                ChatTurn turn = new ChatTurn(m.optString("client_message_id", ids.next()), m.optString("content", ""), m.optString("created_at", ""));
+                ChatTurn turn = new ChatTurn(m.optString("client_message_id", ids.next()), m.optString("content", ""), m.optString("created_at", ""),
+                        fileIds(m.optJSONArray("attachments")));
                 JSONObject run = m.optJSONObject("run");
                 if (run != null) {
                     turn.applyRun(run);
@@ -458,6 +471,21 @@ public final class ChatController {
             // 上个页面没收完的运行：用同一个 client_message_id 重新连接，服务端等它结束后重放，不会再跑一次
             start(resume);
         }
+    }
+
+    private static List<String> fileIds(JSONArray arr) {
+        List<String> out = new ArrayList<>();
+        if (arr == null) {
+            return out;
+        }
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject a = arr.optJSONObject(i);
+            String id = a == null ? "" : a.optString("file_id", "");
+            if (!id.isEmpty()) {
+                out.add(id);
+            }
+        }
+        return out;
     }
 
     private void abandonActive() {

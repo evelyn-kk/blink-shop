@@ -1,0 +1,28 @@
+{
+  "description": "没有配置图片搜索（未配置 Milvus）：503 image_search_unavailable，客户端提示改用文字描述",
+  "setup": {
+    "as": "blink_user",
+    "multipart": {
+      "field": "file",
+      "filename": "photo.png",
+      "content_base64": "iVBORw0KGgoAAAANSUhEUgAAAEEAAABBCAIAAAABlV4SAAACrklEQVR4nGJ5+/ErwxAHTAPtACoAlv///w+0GygFwyEehoMfRtPS4AAsDDSOhyvXb3dMmAPnaqorVxelUdcKxlfvPlHXRDiITS9H5ioqyN1/8AjOXTyzk1oW0cQPaK6HgJaGipqGDjRBqviE6T+1AVYP4AKx6eWU20jlPB2XUUEHLWiAiYHhP7UQ2a4BayTfXqb//xmohSgBcRmVZNtLtbQUn1mJR7algdIEgwcwvnj9nnJT4rOq8MgiewCzaEIGC6e1kWE7y6BqaZDnGCrk6QS8kUASABtFsgNYBluTjwz3UJqnd+0/RqEJaCAxu5pULZS2+Zav2UpQzf///xkZGUkwlEQnMVGYG4gBtY2dx06cIVgoIbxAIqJT/2Hbjj3EK07KqSHJcIr6ccm5tWTrxQ9IctVoP452gBRXDa56Gg5IchX90hKRhRIErFy/nXjFTAPW2sYLLl25RbwzBmlaevn6LfEOYyG3sUgHQKzDBl2bDw6Id9ho/UAzICYqTLzDBmmeJqmKGKR5urkqm4Q8PSi9QFrADtK0RJKrBmlaIslVFI3z9bWU0soHpDiDonjg5GSnqsuhoLUmlyRXDcY8LSTAT5KrKB0TCPF3o7ofyBgToMgXTram1PXAtJ5qksf5Bl1aImOcj/KJh6ndVBtvNdTVIMMBgyseUmKDyIsHyjIEGE3pokJUTOmqIs92qs3HpcQFUewLMq2mWloy0FanRPuUzkqyXUKdtARBkzvxTcnhAZM7Kymxl5pzuwwM/yd3kjx3CNZCkaXUnNuFoEkdJHhjUkcF5TYy3rz7gNSQIxLkVeBbixEe6G5tbkAVixhv3qGVHyAgrxLdJ5PaSVjQQQxgvEFjP9ABDNp+HAlgcLU1yAMs/4e+J4ZJPAx5MJqnBwcYDnl6OMw/AAIAAP//Pw1Sn7VWogkAAAAASUVORK5CYII="
+    }
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/search/image",
+    "as": "blink_user",
+    "image_search": "unavailable",
+    "body": {
+      "file_id": "{setup_file_id}"
+    }
+  },
+  "response": {
+    "status": 503,
+    "body": {
+      "code": "image_search_unavailable",
+      "message": "图片搜索暂不可用，请稍后再试或用文字描述商品",
+      "request_id": "<request_id>"
+    }
+  }
+}

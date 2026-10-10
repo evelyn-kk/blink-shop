@@ -482,6 +482,89 @@ paths:
                 message: 文件不存在
         "503":
           $ref: "#/components/responses/ObjectStorageUnavailable"
+  /search/image:
+    post:
+      tags: [files]
+      operationId: searchImage
+      summary: 按图片找商品
+      description: |
+        先用 `POST /files` 上传图片，再用返回的 `file_id` 检索。只能用本人上传的图片：别人的文件与不存在的文件一样返回 404。
+        服务端从对象存储读取图片、解码校验（JPG/PNG/WebP/GIF/BMP，单张不超过 10 MiB、边长 8–8000 像素），生成图片向量，
+        在商品图索引里找最相似的商品，命中一律回到商品库按可见性取回——下架、风控、删除的商品和停业店铺的商品不会返回。
+        `status`：`matched` 最像的商品达到同款阈值；`similar` 只有外观相近的商品（只作参考）；`no_match` 没有相似商品
+        （包括纯色、几乎空白的图片）。相似度只反映外形和配色，价格、库存以商品详情为准。
+        没有配置图片搜索（未配置 Milvus）时返回 503 `image_search_unavailable`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file_id]
+              properties:
+                file_id:
+                  type: string
+                  pattern: "^file_[A-Za-z0-9_]{1,64}$"
+                top_k:
+                  type: integer
+                  minimum: 1
+                  maximum: 20
+                  default: 6
+      responses:
+        "200":
+          description: 检索结果
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageSearchResult"
+        "400":
+          description: |
+            `invalid_argument`：缺少或不合法的 `file_id`、`top_k` 不在 1–20；`unsupported_file_type`：文件不是图片（field=file_id）；
+            `invalid_image`：图片无法解码或尺寸超限（field=file_id）。
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: invalid_image
+                message: 图片无法识别，请换一张清晰的 JPG / PNG 图片
+                field: file_id
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccountStatusForbidden"
+        "404":
+          description: 文件不存在或不是本人上传的（`file_not_found`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: file_not_found
+                message: 文件不存在
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "503":
+          description: 图片搜索未配置或索引不可用（`image_search_unavailable`），或对象存储不可用（`object_storage_unavailable`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: image_search_unavailable
+                message: 图片搜索暂不可用，请稍后再试或用文字描述商品
   /merchant/documents:
     get:
       tags: [knowledge]
@@ -4879,6 +4962,37 @@ components:
         created_at:
           type: string
           format: date-time
+    ImageSearchResult:
+      type: object
+      required: [status, embedder, items]
+      properties:
+        status:
+          type: string
+          enum: [matched, similar, no_match]
+        embedder:
+          type: string
+          description: 图片向量的提供方、模型和维度（如 `local:color-edge-v1:160`），用于排查和评测对照。
+        items:
+          type: array
+          description: 按相似度从高到低；低于相近阈值的不返回。
+          items:
+            $ref: "#/components/schemas/ImageMatch"
+    ImageMatch:
+      type: object
+      required: [product, score, level, matched_image_url]
+      properties:
+        product:
+          $ref: "#/components/schemas/ProductCard"
+        score:
+          type: number
+          description: 余弦相似度（保留 4 位小数）
+        level:
+          type: string
+          enum: [match, similar]
+          description: match 达到同款阈值；similar 只是外观相近
+        matched_image_url:
+          type: string
+          description: 该商品里最相似的那张图
     FileUpload:
       type: object
       required: [file]

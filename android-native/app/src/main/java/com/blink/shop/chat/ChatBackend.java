@@ -1,5 +1,7 @@
 package com.blink.shop.chat;
 
+import java.util.List;
+
 import org.json.JSONObject;
 
 import com.blink.shop.data.ShopApi;
@@ -13,7 +15,11 @@ public interface ChatBackend {
 
     JSONObject sessionDetail(String sessionId) throws ApiException;
 
-    SseClient.Stream stream(String sessionId, String clientMessageId, String content, SseClient.Listener listener);
+    /** attachments 是本轮附带的 file_id（可以为空列表）。 */
+    SseClient.Stream stream(String sessionId, String clientMessageId, String content, List<String> attachments, SseClient.Listener listener);
+
+    /** 上传聊天附图，返回 file_id。 */
+    String uploadImage(byte[] jpeg) throws ApiException;
 
     void cancelRun(String runId) throws ApiException;
 
@@ -30,8 +36,14 @@ public interface ChatBackend {
             }
 
             @Override
-            public SseClient.Stream stream(String sessionId, String clientMessageId, String content, SseClient.Listener listener) {
-                return api.streamAgentMessage(sessionId, clientMessageId, content, listener);
+            public SseClient.Stream stream(String sessionId, String clientMessageId, String content, List<String> attachments,
+                    SseClient.Listener listener) {
+                return api.streamAgentMessage(sessionId, clientMessageId, content, attachments, listener);
+            }
+
+            @Override
+            public String uploadImage(byte[] jpeg) throws ApiException {
+                return api.uploadFile(jpeg, "image/jpeg", "photo.jpg");
             }
 
             @Override

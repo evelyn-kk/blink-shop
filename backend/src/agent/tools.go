@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/evelyn-kk/blink-shop/backend/src/imagesearch"
 	"github.com/evelyn-kk/blink-shop/backend/src/llm"
 	"github.com/evelyn-kk/blink-shop/backend/src/rag"
 	"github.com/evelyn-kk/blink-shop/backend/src/risk"
@@ -32,6 +33,8 @@ type Deps struct {
 	Retriever *rag.Retriever
 	// ProductIndex 是商品向量索引；nil 表示商品只用关键词召回。
 	ProductIndex rag.ProductIndex
+	// ImageSearch 是图片找商品；nil 表示图搜不可用，search_image_products 返回 image_search_unavailable。
+	ImageSearch ImageSearcher
 	// Risk 在规划前检查用户输入；nil 表示不检查。
 	Risk risk.Checker
 	// Logger 记录工具审计（写操作）和内部错误；nil 表示丢弃。
@@ -43,6 +46,7 @@ type Deps struct {
 const (
 	ToolSearchProducts  = "search_products"
 	ToolSearchKnowledge = "search_knowledge"
+	ToolSearchImage     = "search_image_products"
 	ToolGetCart         = "get_cart"
 	ToolAddCartItem     = "add_cart_item"
 	ToolUpdateCartItem  = "update_cart_item"
@@ -70,6 +74,9 @@ const (
 	CodeInvalidArgument   = "invalid_argument"
 	CodeProductNotTrusted = "product_not_in_evidence"
 	CodeUnavailable       = "knowledge_unavailable"
+	CodeImageUnavailable  = "image_search_unavailable"
+	CodeImageNotAttached  = "image_not_attached"
+	CodeInvalidImage      = "invalid_image"
 	CodeInternal          = "internal_error"
 )
 
@@ -91,6 +98,13 @@ type ToolContext struct {
 	// Evidence 是本轮“可见”的商品 ID：本次运行里搜索到的，加上会话里上一张商品卡列出的。
 	// add_cart_item 只接受这些 product_id，模型或规则都不能凭空加购一个没给用户看过的商品。
 	Evidence map[string]bool
+	// Images 是本轮用户消息附带的图片 file_id（已在接口层校验为本人上传）。search_image_products 只接受这些文件。
+	Images map[string]bool
+}
+
+// ImageSearcher 用本人上传的图片检索商品（imagesearch.Service 实现）。
+type ImageSearcher interface {
+	SearchFile(ctx context.Context, accountID, fileID string, k int) (imagesearch.Result, error)
 }
 
 // Observation 是工具调用的结果（给规则回答或模型观察）。
@@ -139,7 +153,7 @@ func NewRegistry(deps Deps) *Registry {
 		deps.Now = time.Now
 	}
 	r := &Registry{deps: deps, tools: map[string]*Tool{}, policy: DefaultPolicy()}
-	for _, t := range r.shopTools() {
+	for _, t := range append(r.shopTools(), r.imageTool()) {
 		r.tools[t.Name] = t
 		r.names = append(r.names, t.Name)
 	}
@@ -197,8 +211,8 @@ func (r *Registry) policyFor(ctx context.Context) map[Intent][]string {
 	return parsed
 }
 
-// noToolIntents 永远不能调用任何工具，写工具也不能通过配置赋给它们：导航只返回跳转，非导购和图搜只做说明。
-var noToolIntents = map[Intent]bool{IntentNavigation: true, IntentNonGuide: true, IntentImageSearch: true}
+// noToolIntents 永远不能调用任何工具，写工具也不能通过配置赋给它们：导航只返回跳转，非导购只做说明。
+var noToolIntents = map[Intent]bool{IntentNavigation: true, IntentNonGuide: true}
 
 // ParsePolicy 解析动态配置的白名单：JSON 对象，键是意图名，值是工具名数组。未知意图和未知工具忽略（记入 warnings），
 // 无工具意图里的工具被去掉；JSON 不合法时返回 nil。没有出现在配置里的意图沿用内置默认。
@@ -224,8 +238,8 @@ func ParsePolicy(raw string, known map[string]*Tool) (map[Intent][]string, []str
 				warnings = append(warnings, "unknown tool "+t+" for "+name)
 			case noToolIntents[intent]:
 				warnings = append(warnings, "intent "+name+" cannot use tools, dropped "+t)
-			case tool.Write && intent == IntentGuide:
-				warnings = append(warnings, "intent guide cannot use write tool "+t)
+			case tool.Write && (intent == IntentGuide || intent == IntentImageSearch):
+				warnings = append(warnings, "intent "+name+" cannot use write tool "+t)
 			case containsStr(list, t):
 			default:
 				list = append(list, t)
@@ -244,7 +258,7 @@ func DefaultPolicy() map[Intent][]string {
 		IntentProductSearch:  {ToolSearchProducts, ToolSearchKnowledge, ToolListPromotions, ToolListReviews},
 		IntentProductCompare: {ToolSearchProducts, ToolSearchKnowledge, ToolListReviews},
 		IntentKnowledge:      {ToolSearchKnowledge, ToolSearchProducts},
-		IntentImageSearch:    {},
+		IntentImageSearch:    {ToolSearchImage, ToolSearchProducts},
 		IntentCart:           {ToolGetCart, ToolAddCartItem, ToolUpdateCartItem, ToolDeleteCartItem, ToolPreviewDiscount, ToolSearchProducts},
 		IntentCheckout:       {ToolGetCart, ToolPreviewDiscount, ToolCheckout},
 		IntentOrder:          {ToolListOrders, ToolGetOrder, ToolPayOrder, ToolCancelOrder, ToolConfirmReceipt},
@@ -282,6 +296,11 @@ func (r *Registry) call(ctx context.Context, tc *ToolContext, name string, args 
 		var ae *ArgError
 		errors.As(err, &ae)
 		return Observation{Code: CodeInvalidArgument, Field: ae.Field, Message: ae.Message}
+	}
+	if name == ToolSearchImage {
+		if fid := argString(args, "file_id"); !tc.Images[fid] {
+			return Observation{Code: CodeImageNotAttached, Field: "file_id", Message: "只能用本轮消息附带的图片搜索"}
+		}
 	}
 	if name == ToolAddCartItem {
 		if pid := argString(args, "product_id"); !tc.Evidence[pid] {

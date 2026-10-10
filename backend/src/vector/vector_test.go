@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/evelyn-kk/blink-shop/backend/assets"
+	"github.com/evelyn-kk/blink-shop/backend/src/imagesearch"
+	"github.com/evelyn-kk/blink-shop/backend/src/imagevector"
 	"github.com/evelyn-kk/blink-shop/backend/src/rag"
 	"github.com/evelyn-kk/blink-shop/backend/src/store/memstore"
 	"github.com/evelyn-kk/blink-shop/backend/src/store/storetest"
@@ -203,5 +207,63 @@ func TestBootstrapIndexesSeed(t *testing.T) {
 	res, err := rag.NewRetriever(mem, k, nil).Search(ctx, rag.Query{Text: "七天无理由退货"})
 	if err != nil || res.Mode != "hybrid" || len(res.Citations) == 0 || res.Citations[0].DocumentID != "doc_seed_after_sales" {
 		t.Fatalf("hybrid: %+v %v", res, err)
+	}
+}
+
+// TestMilvusImageIndex：商品图集合按商品整体替换、按商品删除、检索返回商品 ID 和图片地址；图片搜索服务在 Milvus 上的结果与内存索引一致。
+func TestMilvusImageIndex(t *testing.T) {
+	ctx := context.Background()
+	m := NewMilvus(milvusAddr(t), os.Getenv("BLINK_TEST_MILVUS_TOKEN"), 10*time.Second)
+	name := tempCollection(t, m, "img")
+	x := NewImageIndex(m, 3, name)
+	if NewImageIndex(nil, 3, name) != nil || NewImageIndex(m, 0, name) != nil {
+		t.Fatal("invalid index should be nil")
+	}
+	if err := x.ReplaceProduct(ctx, "p1", []imagesearch.IndexedImage{{ProductID: "p1", ImageURL: "/a/1.png", Vector: []float32{1, 0, 0}},
+		{ProductID: "p1", ImageURL: "/a/2.png", Vector: []float32{0, 1, 0}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := x.ReplaceProduct(ctx, "p2", []imagesearch.IndexedImage{{ProductID: "p2", ImageURL: "/b/1.png", Vector: []float32{0, 0, 1}}}); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := x.Search(ctx, []float32{0.1, 1, 0}, 5)
+	if err != nil || len(hits) == 0 || hits[0].ProductID != "p1" || hits[0].ImageURL != "/a/2.png" {
+		t.Fatalf("search: %+v %v", hits, err)
+	}
+	// 替换：旧图被删
+	if err := x.ReplaceProduct(ctx, "p1", []imagesearch.IndexedImage{{ProductID: "p1", ImageURL: "/a/3.png", Vector: []float32{0, 0, 1}}}); err != nil {
+		t.Fatal(err)
+	}
+	hits, _ = x.Search(ctx, []float32{0, 1, 0}, 5)
+	for _, h := range hits {
+		if h.ImageURL == "/a/2.png" || h.ImageURL == "/a/1.png" {
+			t.Fatalf("stale image after replace: %+v", hits)
+		}
+	}
+	if err := x.DeleteProducts(ctx, []string{"p1", "p2"}); err != nil {
+		t.Fatal(err)
+	}
+	if hits, _ := x.Search(ctx, []float32{0, 0, 1}, 5); len(hits) != 0 {
+		t.Fatalf("after delete: %+v", hits)
+	}
+	if err := NewImageIndex(m, 4, name).ReplaceProduct(ctx, "p3", nil); !errors.Is(err, ErrDimMismatch) {
+		t.Fatalf("dim mismatch: %v", err)
+	}
+
+	// 整条链路：种子商品图写入 Milvus，按图检索
+	mem := memstore.New()
+	if _, err := mem.ApplySeed(ctx, storetest.DevSeed(t)); err != nil {
+		t.Fatal(err)
+	}
+	e := imagevector.Local{}
+	svc := imagesearch.New(e, NewImageIndex(m, e.Dim(), tempCollection(t, m, "imgsvc")), imagesearch.NewSource(nil), mem, nil, nil)
+	stats, err := svc.Bootstrap(ctx)
+	if err != nil || stats.Products != 6 || stats.Images != 12 {
+		t.Fatalf("bootstrap: %+v %v", stats, err)
+	}
+	raw, _ := fs.ReadFile(assets.FS, "catalog/products/p_seed_lamp.png")
+	res, err := svc.Search(ctx, raw, 3)
+	if err != nil || res.Status != imagesearch.StatusMatched || res.Items[0].Product.ProductID != "p_seed_lamp" {
+		t.Fatalf("image search: %+v %v", res, err)
 	}
 }

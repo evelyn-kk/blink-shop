@@ -101,6 +101,31 @@ func TestLoad(t *testing.T) {
 		},
 		{name: "unknown APP_ENV", env: map[string]string{"APP_ENV": "staging"}, wantErr: []string{"APP_ENV"}},
 		{
+			name: "image search defaults: local embedder, only platform images",
+			check: func(t *testing.T, cfg Config) {
+				if cfg.ImageSearchEnabled() || cfg.ImageEmbeddingProvider != "local" || cfg.MilvusImageCollection != "blink_shop_product_images" ||
+					cfg.ImageEmbeddingDim != 512 || len(cfg.ImageFetchAllowedHosts) != 0 {
+					t.Fatalf("image defaults: %+v", cfg)
+				}
+			},
+		},
+		{
+			name: "image search with milvus and allowlist",
+			env:  map[string]string{"MILVUS_ADDR": "127.0.0.1:19530", "IMAGE_FETCH_ALLOWED_HOSTS": " CDN.Example.com, img.shop.example.cn ,"},
+			check: func(t *testing.T, cfg Config) {
+				if !cfg.ImageSearchEnabled() || cfg.VectorEnabled() || strings.Join(cfg.ImageFetchAllowedHosts, "|") != "cdn.example.com|img.shop.example.cn" {
+					t.Fatalf("image search config: %+v", cfg)
+				}
+			},
+		},
+		{name: "unknown image provider", env: map[string]string{"IMAGE_EMBEDDING_PROVIDER": "clip"}, wantErr: []string{"IMAGE_EMBEDDING_PROVIDER"}},
+		{name: "dashscope needs key", env: map[string]string{"IMAGE_EMBEDDING_PROVIDER": "dashscope"}, wantErr: []string{"IMAGE_EMBEDDING_API_KEY"}},
+		{name: "image dim out of range", env: map[string]string{"IMAGE_EMBEDDING_DIM": "4"}, wantErr: []string{"IMAGE_EMBEDDING_DIM"}},
+		{name: "bad image collection", env: map[string]string{"MILVUS_IMAGE_COLLECTION": "blink-images"}, wantErr: []string{"MILVUS_IMAGE_COLLECTION"}},
+		{name: "allowlist rejects IP", env: map[string]string{"IMAGE_FETCH_ALLOWED_HOSTS": "cdn.example.com,10.0.0.8"}, wantErr: []string{"10.0.0.8"}},
+		{name: "allowlist rejects url and port", env: map[string]string{"IMAGE_FETCH_ALLOWED_HOSTS": "https://cdn.example.com,cdn.example.com:8443"}, wantErr: []string{"https://cdn.example.com", "cdn.example.com:8443"}},
+		{name: "allowlist rejects localhost", env: map[string]string{"IMAGE_FETCH_ALLOWED_HOSTS": "localhost,a.localhost"}, wantErr: []string{"\"localhost\"", "a.localhost"}},
+		{
 			name: "all invalid values reported together",
 			env: map[string]string{
 				"RUN_MIGRATIONS":            "maybe",
@@ -172,6 +197,7 @@ func TestValidateProduction(t *testing.T) {
 		{name: "trust all proxies", override: map[string]string{"TRUST_ALL_PROXIES": "true"}, wantErr: []string{"TRUST_ALL_PROXIES"}},
 		{name: "no milvus: token not required", override: map[string]string{"MILVUS_ADDR": "", "MILVUS_TOKEN": ""}},
 		{name: "placeholder embedding key", override: map[string]string{"EMBEDDING_API_KEY": "sk-xxx"}, wantErr: []string{"EMBEDDING_API_KEY"}},
+		{name: "placeholder image embedding key", override: map[string]string{"IMAGE_EMBEDDING_PROVIDER": "dashscope", "IMAGE_EMBEDDING_API_KEY": "changeme"}, wantErr: []string{"IMAGE_EMBEDDING_API_KEY"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

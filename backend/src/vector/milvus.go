@@ -167,16 +167,22 @@ func (m *Milvus) Delete(ctx context.Context, name, filter string) error {
 	return m.call(ctx, "/v2/vectordb/entities/delete", map[string]any{"collectionName": name, "filter": filter}, nil)
 }
 
-// Hit 是检索命中：主键和余弦相似度（-1–1）。
+// Hit 是检索命中：主键和余弦相似度（-1–1）。ImageURL 只在商品图集合里有（SearchFields 请求了它时）。
 type Hit struct {
 	ID       string  `json:"id"`
 	Distance float64 `json:"distance"`
+	ImageURL string  `json:"image_url,omitempty"`
 }
 
 // Search 用一个向量检索（强一致，刚写入的数据也能查到）。filter 为空表示不过滤。
 func (m *Milvus) Search(ctx context.Context, name string, vec []float32, limit int, filter string) ([]Hit, error) {
+	return m.SearchFields(ctx, name, vec, limit, filter)
+}
+
+// SearchFields 同 Search，另外返回 fields 里的标量字段。
+func (m *Milvus) SearchFields(ctx context.Context, name string, vec []float32, limit int, filter string, fields ...string) ([]Hit, error) {
 	body := map[string]any{"collectionName": name, "data": [][]float32{vec}, "annsField": "vector", "limit": limit,
-		"outputFields": []string{"id"}, "consistencyLevel": "Strong"}
+		"outputFields": append([]string{"id"}, fields...), "consistencyLevel": "Strong"}
 	if filter != "" {
 		body["filter"] = filter
 	}

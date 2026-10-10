@@ -55,6 +55,8 @@ type fixture struct {
 		Multipart *fixtureMultipart `json:"multipart"` // multipart/form-data 请求体
 		// ObjectStorage 为 "unavailable" 时模拟未配置对象存储。
 		ObjectStorage string `json:"object_storage"`
+		// ImageSearch 为 "unavailable" 时模拟没有配置图片搜索；否则 /search/image 的样例使用本地特征 + 内存索引（已为种子商品建好索引）。
+		ImageSearch string `json:"image_search"`
 	} `json:"request"`
 	Response struct {
 		Status  int               `json:"status"`
@@ -269,6 +271,9 @@ func TestHTTPFixtures(t *testing.T) {
 			if fx.Request.ObjectStorage == "unavailable" {
 				ts.Server.objects = nil
 			}
+			if strings.HasPrefix(fx.Request.Path, "/api/v1/search/image") && fx.Request.ImageSearch != "unavailable" {
+				ts.Server.imageSearch = newTestImageSearch(t, ts)
+			}
 
 			path := fx.Request.Path
 			subs := map[string]string{}
@@ -285,7 +290,7 @@ func TestHTTPFixtures(t *testing.T) {
 				if rec.Code != 201 {
 					t.Fatalf("setup upload: %d %s", rec.Code, rec.Body)
 				}
-				path = strings.ReplaceAll(path, "{setup_file_id}", decodeBody[uploadFileResponse](t, rec).File.FileID)
+				subs["{setup_file_id}"] = decodeBody[uploadFileResponse](t, rec).File.FileID
 			}
 
 			for i, sr := range fx.SetupRequests {
@@ -331,7 +336,7 @@ func TestHTTPFixtures(t *testing.T) {
 				var body *strings.Reader
 				switch {
 				case len(fx.Request.Body) > 0:
-					body = strings.NewReader(string(fx.Request.Body))
+					body = strings.NewReader(substitute(string(fx.Request.Body)))
 				case fx.Request.BodyBytes > 0:
 					body = strings.NewReader(strings.Repeat("a", fx.Request.BodyBytes))
 				default:

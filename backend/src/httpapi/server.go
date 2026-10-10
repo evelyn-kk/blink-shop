@@ -10,6 +10,7 @@ import (
 
 	"github.com/evelyn-kk/blink-shop/backend/src/agent"
 	"github.com/evelyn-kk/blink-shop/backend/src/configcenter"
+	"github.com/evelyn-kk/blink-shop/backend/src/imagesearch"
 	"github.com/evelyn-kk/blink-shop/backend/src/ingest"
 	"github.com/evelyn-kk/blink-shop/backend/src/llm"
 	"github.com/evelyn-kk/blink-shop/backend/src/objectstore"
@@ -42,6 +43,8 @@ type Options struct {
 	VectorIndex rag.VectorIndex
 	// ProductIndex 是商品向量索引；nil 表示商品只用关键词召回。商品增改删和上下架后异步同步。
 	ProductIndex rag.ProductIndex
+	// ImageSearch 是图片找商品；nil 表示图搜不可用（接口返回 503，导购如实说明）。商品图随商品变更异步重建。
+	ImageSearch *imagesearch.Service
 	// Fetcher 抓取知识采集的 URL；nil 时使用带 SSRF 防护的默认实现。测试可替换。
 	Fetcher ingest.URLFetcher
 	// AvatarDir 是头像文件目录，不存在时在首次上传时创建。
@@ -81,6 +84,7 @@ type Server struct {
 	paymentTimeout time.Duration
 	runner         agent.Runner
 	productIndex   rag.ProductIndex
+	imageSearch    *imagesearch.Service
 	vectorSync     sync.WaitGroup
 	runTimeout     time.Duration
 	heartbeat      time.Duration
@@ -108,6 +112,7 @@ func NewServer(opts Options) *Server {
 		paymentTimeout: opts.PaymentTimeout,
 		runner:         opts.AgentRunner,
 		productIndex:   opts.ProductIndex,
+		imageSearch:    opts.ImageSearch,
 		runTimeout:     opts.AgentRunTimeout,
 		heartbeat:      opts.SSEHeartbeat,
 		runs:           newRunRegistry(),
@@ -133,7 +138,7 @@ func NewServer(opts Options) *Server {
 			words = func(context.Context) []string { return risk.Split(configcenter.KeyRiskBlockedWords.Default) }
 		}
 		s.runner = agent.NewRuleRunner(agent.Deps{LLM: opts.LLM, Settings: opts.AgentSettings, Store: s.store, Shop: s.shop(), ProductIndex: opts.ProductIndex,
-			Retriever: rag.NewRetriever(s.store, opts.VectorIndex, s.logger), Risk: risk.WordList{Words: words}, Logger: s.logger,
+			ImageSearch: serverImageSearch{s}, Retriever: rag.NewRetriever(s.store, opts.VectorIndex, s.logger), Risk: risk.WordList{Words: words}, Logger: s.logger,
 			Now: func() time.Time { return s.now() }})
 	}
 	if s.runTimeout <= 0 {
@@ -185,6 +190,7 @@ func (s *Server) routes() {
 	s.handle("GET /api/v1/assets/{path...}", accessPublic, s.handleGetAsset)
 
 	s.handle("POST /api/v1/files", accessAccount, s.handleUploadFile)
+	s.handle("POST /api/v1/search/image", accessAccount, s.handleSearchImage)
 	s.handle("GET /api/v1/files/{id}", accessAccount, s.handleGetFile)
 
 	s.handle("GET /api/v1/categories/tree", accessPublic, s.handleCategoryTree)

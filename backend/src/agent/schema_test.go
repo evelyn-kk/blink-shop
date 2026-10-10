@@ -78,7 +78,7 @@ func TestToolCatalogFixture(t *testing.T) {
 	if string(want) != string(got) {
 		t.Fatalf("tool catalog changed; regenerate with BLINK_UPDATE_FIXTURES=1\n%s", got)
 	}
-	if len(e.reg.Tools()) != 19 {
-		t.Fatalf("expected 19 tools, got %d", len(e.reg.Tools()))
+	if len(e.reg.Tools()) != 20 {
+		t.Fatalf("expected 20 tools, got %d", len(e.reg.Tools()))
 	}
 }

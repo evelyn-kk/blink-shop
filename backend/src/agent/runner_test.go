@@ -196,9 +196,9 @@ func TestNavigationAndNonGuideUseNoTools(t *testing.T) {
 	if r.block(BlockProductList) != nil || !strings.Contains(r.text.String(), "我暂时没有理解") {
 		t.Fatalf("fallback miss: %v %q", r.blockTypes(), r.text.String())
 	}
-	// 图片附件：如实说明，不调用工具
+	// 图片附件走图搜；没有配置图片搜索时如实说明（图搜的完整用例见 image_search_test.go）
 	r = e.run(t, seed.User2ID, sid, "看看这张图", domain.Attachment{FileID: "f1", MimeType: "image/png"})
-	if len(r.toolCalls()) != 0 || !strings.Contains(r.text.String(), "还在接入中") {
+	if calls := r.toolCalls(); len(calls) != 1 || calls[0] != ToolSearchImage || !strings.Contains(r.text.String(), "图片搜索暂时不可用") {
 		t.Fatalf("image: %v %q", r.toolCalls(), r.text.String())
 	}
 }

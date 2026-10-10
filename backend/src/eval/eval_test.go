@@ -53,3 +53,19 @@ func TestWriteReport(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestImageSuite(t *testing.T) {
+	rep, err := RunImages(context.Background(), ImageOptions{Cases: "../../../quality/data/eval/image_search.jsonl", Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("images: %d/%d %v", rep.Passed, rep.Total, rep.Metrics)
+	for _, f := range rep.Failures {
+		t.Logf("failure %s %s: %v got %v", f.ID, f.Query, f.Problems, f.Got)
+	}
+	// 本地特征的门槛：同款在前 3 的比例、held-out、无关图片不返回、不泄漏不可售商品、标为同款的都对。
+	m := rep.Metrics
+	if m["recall_at_3"] < 0.98 || m["held_out_recall_at_3"] < 0.98 || m["no_match_accuracy"] < 1 || m["inactive_leaks"] != 0 || m["match_precision"] < 0.98 {
+		t.Fatalf("image metrics below threshold: %v", m)
+	}
+}

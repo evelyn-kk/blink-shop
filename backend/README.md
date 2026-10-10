@@ -194,6 +194,32 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
   不会把下架、删除、风控的商品或分块返回出去。Milvus 或 Embedding 出错时降级关键词并记 `vector_error`。
 - 本地 Milvus 集成测试：`BLINK_TEST_MILVUS_ADDR=127.0.0.1:19530 go test ./src/vector`（用带随机后缀的临时集合，结束删除；CI 没有 Milvus，自动跳过）。
 
+### 图片搜索
+
+按图找商品：`POST /api/v1/search/image`（`{file_id, top_k}`，先用 `POST /files` 上传）和导购的 `search_image_products` 工具共用 `src/imagesearch`。
+配置了 `MILVUS_ADDR` 就启用（`ImageSearchEnabled`），否则接口 503 `image_search_unavailable`、导购如实说明并在有文字条件时改按文字搜。
+
+- **图片向量**（`src/imagevector`）：默认 `local`——不调外部服务的本地特征：先找出画面主体（与四周背景色差别明显的区域，扩成正方形），
+  再取色相 / 饱和度直方图（接近背景的像素降权）、Sobel 边缘布局（反色不变）和边缘方向直方图，拼成 160 维。它比较的是外形和配色，
+  不理解语义：同款经裁剪、缩放、亮度、压缩、翻转、加边框后仍能排在前面，但外形相近的不同商品（几款手机）分数会重叠，
+  所以“同款”（match）门槛 0.80 定得偏高，0.58–0.80 只当“外观相近”（similar）参考，低于 0.58 不返回；纯色、几乎空白的图片没有主体，
+  直接不返回。可换成 `dashscope`（多模态 Embedding，`IMAGE_EMBEDDING_*`；图片先在本地解码校验、缩到 1024 并转 JPEG data URI，
+  不发原始字节、链接或 EXIF），阈值要先用图片评测重新标定。
+- **解码校验**：JPG / PNG / WebP / GIF / BMP，单张 ≤ 10 MiB、边长 8–8000、像素 ≤ 4000 万（先读文件头再解码，挡住解压炸弹）。
+- **商品图索引**：Milvus 集合 `MILVUS_IMAGE_COLLECTION`（id=`<product_id>#<序号>`，带 product_id / merchant_id / image_url），每个商品
+  主图在前、最多 4 张，按商品整体替换。商品图只读两类地址：`/api/v1/assets/...`（内嵌资源）和 `IMAGE_FETCH_ALLOWED_HOSTS` 白名单域名的
+  https 链接（主机名精确匹配、只允许 443、不跟随重定向、连接前拒绝回环 / 内网 / 链路本地 / 100.64/10 地址、10 秒超时、10 MiB 上限、
+  响应必须是 image/*）；其他地址跳过（计入 `skipped`），用户上传的私有文件不会被当作商品图读取。写入时机与文本向量相同：
+  非生产启动时全量一次、`cmd/vectorindex`（`-only images` 只建商品图）、商品增改删和管理员上下架后异步同步。
+- **检索**：只能用本人上传的图片（别人的文件和不存在的同样 404）；文件必须是图片类型。图片向量取前 `k×4+8` 张图，按商品取最相似的一张，
+  命中回 Store 按可见性取回（下架、风控、删除、店铺停业的丢弃，计入 `dropped`）。返回 `status`（matched / similar / no_match）、
+  每件的 `score`、`level`、`matched_image_url` 和 `embedder`。
+- **导购**：附图时优先图搜（规则和模型都一样：模型把带图的商品需求判成 product_search / guide / compare 时改回 image_search；
+  加购、订单等其他操作照常）。文字里的价格、品牌、排除词直接过滤，品类等检索词加分，图片像但文字条件对不上的（图是鼠标、说要耳机）
+  只当相近参考；`file_id` 必须是本轮消息的图片附件（`ToolContext.Images`，接口层已校验归属），模型不能拿别的文件；
+  说“拍照找同款”但没带图时请用户上传，附件不是图片 / 图片损坏时说明原因。按图找到的商品进入可信集，可以“把第一个加入购物车”。
+  轨迹 `retrieval.images` 记 Embedder、候选数、过期丢弃数、过滤数和每件的相似度与等级。
+
 ## 购物车与优惠券
 
 接口（仅普通用户，商家和管理员 403）：`GET /cart`、`GET /cart/discount-preview`、`POST /cart/items`、`PATCH,DELETE /cart/items/{id}`、`GET /coupons/available`、`GET /coupons/mine`、`POST /coupons/{id}:claim`。购物车的写操作返回整个购物车（与上游一致），金额全部由服务端计算。
@@ -423,7 +449,7 @@ curl -s -X POST $API/agent/runs/<run_id>:cancel -H "Authorization: Bearer $TOKEN
 | `coupon` | 有什么优惠券 / 帮我领券 / 有什么活动 | list_coupons、list_user_coupons、claim_coupon、list_promotions、get_cart、preview_discount |
 | `review` | Nova 12 的评价怎么样 / 给鼠标打五星，评价：很好用 | list_reviews、create_review、list_orders、get_order、search_products |
 | `navigation` | 打开购物车页面 | （无，只返回 action 块） |
-| `image_search` | 带图片 / 拍照找同款 | （无，如实说明图搜还在接入） |
+| `image_search` | 带图片问“找同款 / 这样的耳机 / 500 以内”；没带图说“拍照找同款”时请用户上传 | search_image_products、search_products |
 | `non_guide` | 天气 / 写代码 / 笑话 | （无） |
 
 预算：`3000 以内`、`预算三千`、`两千五左右`（左右放宽 15%）、`1k`；区间：`1000 到 3000`、`1000-3000`、`3000 以上`、`不低于 1000`；
@@ -485,7 +511,7 @@ boolean / array，required、additionalProperties=false、enum、minimum/maximum
 ### 轨迹与脱敏
 
 一次运行的轨迹依次是：`run.start` → `risk.check` → `planner.model`（如有）→ `memory.retrieval`（新会话为 skipped）→ `planner.rule` →
-`react.step.N` / `tool.<name>` → `retrieval.products|knowledge`（召回来源与数量、向量降级、chunk_ids）→ `rerank.products` →
+`react.step.N` / `tool.<name>` → `retrieval.products|knowledge|images`（召回来源与数量、向量降级、chunk_ids、图片相似度）→ `rerank.products` →
 `followup.rule|model` → `answer.model|rule` → `memory.summary` → `run.end`；风险词拦截时只有 `run.start` → `risk.check` →
 `followup.rule` → `answer.rule` → `run.end`。写入轨迹和日志的字符串先经 `agent.RedactPII`
 把手机号、邮箱、身份证号、银行卡号换成占位符；会话摘要同样脱敏；业务数据（评价、地址）本身不改。
@@ -525,7 +551,7 @@ boolean / array，required、additionalProperties=false、enum、minimum/maximum
   `removed_product_ids`），丢弃含内部规则标记或以 `system:`/`可用工具：` 等开头的行，限制 4000 字。卡片只由工具观察生成：
   商品卡按 ID 去重累加，购物车 / 订单 / 券只留最新一次，加购后附“去购物车”、下单后附“去我的订单”。模型给的追问最多 3 条、每条 40 字内。
 - **白名单可配置**（`agent.tool_policy`）：JSON 对象，键是意图、值是工具名数组；没写的意图沿用内置默认，未知意图和未知工具忽略，
-  导航 / 非导购 / 图搜永远没有工具，`guide` 不能获得写工具；JSON 不合法时整体退回默认并记日志。规则处理器和模型共用同一份白名单。
+  导航 / 非导购永远没有工具，`guide` 和 `image_search` 不能获得写工具；JSON 不合法时整体退回默认并记日志。规则处理器和模型共用同一份白名单。
 - **轨迹**：`planner.model`、`react.step.N`（动作、工具、轮次）、`react.fallback`、`answer.model` 都带 `model`、token 用量、耗时、
   提示字数和提示摘要（hash，不记原文）；错误只记分类，不记带地址或密钥的原始错误。事件的 `model` 字段由 metadata 里的 `model` 填充。
 - 提示模板内置在 `src/agent/prompts.go`（`agent.planner` / `agent.react`，版本 1），9.1 接入 Prompt 生命周期管理后由配置中心下发。
@@ -544,14 +570,21 @@ boolean / array，required、additionalProperties=false、enum、minimum/maximum
 - `rag.jsonl`（38 条）：recall@3、MRR、held-out recall、无结果正确率；每条 citation 的 chunk_id 都要能回查。
 - `product_search.jsonl`（28 条）：经导购运行器端到端执行（每条一个新会话，可带 `history` 做多轮）：top1、推荐卡包含 / 不包含、
   不推荐（无结果、相近、冲突）、负向约束（预算、区间、品牌、排除、冲突、下架 / 风控商品）和追问继承。
+- `image_search.jsonl`（231 条）：从 6 件在售商品的 12 张图按变换生成查询图（裁剪、缩放、亮度、对比度、JPEG、翻转、加边框、噪声及组合），
+  另有下架 / 风控 / 删除商品的图和纯色、噪声、棋盘格等无关图片：recall@1、recall@3、MRR、held-out recall@3（标 `held_out` 的变换没参与
+  阈值标定，`held_out_v2` 是阈值定下后才加入、只跑过一次的）、无关图片不返回率、同款（match 级）准确率、不可售商品泄漏数。
 
 ```bash
 go run ./cmd/eval                                         # 关键词 / 规则；报告写到 ../quality/reports/eval-<时间>/
 MILVUS_ADDR=127.0.0.1:19530 go run ./cmd/eval -vector=hash  # 本地演示向量链路（散列向量 + 临时集合，跑完删除）
 go run ./cmd/eval -vector=env                             # 用 MILVUS_ADDR + EMBEDDING_* 的真实向量
+go run ./cmd/eval -suite=images -image-index=milvus       # 商品图写进 Milvus 临时集合（MILVUS_ADDR，跑完删除）
+go run ./cmd/eval -suite=images -image-embedder=env       # 用 IMAGE_EMBEDDING_* 配置的图片 Embedder（如 dashscope）
 ```
 
-`TestRAGSuite` / `TestProductSuite`（`go test ./src/eval`）在 CI 里要求两套全部通过。
+`TestRAGSuite` / `TestProductSuite`（`go test ./src/eval`）在 CI 里要求两套全部通过；`TestImageSuite` 要求 recall@3 与 held-out recall@3
+≥ 0.98、无关图片全部不返回、不可售商品零泄漏、标为同款的准确率 ≥ 0.98（本地特征下当前 230/231，唯一失败是浅色背景的台灯图裁到 70% 后
+相似度低于 0.58，被当作没有相似商品）。`cmd/eval` 的图片评测通过率下限默认 0.98（`-image-min-pass`）。
 
 ## 认证与权限
 
@@ -622,7 +655,7 @@ go run ./cmd/eval -vector=env                             # 用 MILVUS_ADDR + EM
 | `APP_ENV` | — | `development` | `development` / `test` / `production`（`prod`） |
 | `API_ADDR` | — | `:8080` | 监听地址 |
 | `RUN_MIGRATIONS` | — | 非生产 `true`，生产 `false` | 启动时在后台执行数据库迁移 |
-| `BOOTSTRAP_VECTOR_INDEX` | — | 非生产 `true`，生产 `false` | 启动时初始化向量索引（8.x 实现） |
+| `BOOTSTRAP_VECTOR_INDEX` | — | 非生产 `true`，生产 `false` | 启动时把知识、商品文本和商品图写入向量索引（生产用 `cmd/vectorindex`） |
 | `MYSQL_DSN` | — | 与 Compose 开发库一致 | 密钥类，日志中整体掩码。连接时强制 UTC 时区、`parseTime`、utf8mb4 |
 | `CORS_ALLOWED_ORIGINS` | `http.cors.allowed_origins` | `*` | 逗号分隔；生产环境始终忽略 `*` |
 | `TRUSTED_PROXY_CIDRS` | `http.trusted_proxy_cidrs` | 空 | 逗号分隔的 CIDR 或 IP |
@@ -657,6 +690,11 @@ go run ./cmd/eval -vector=env                             # 用 MILVUS_ADDR + EM
 | `MILVUS_TEXT_COLLECTION` / `MILVUS_PRODUCT_COLLECTION` | — | `blink_shop_text_chunks` / `blink_shop_products` | 向量集合名 |
 | `EMBEDDING_API_KEY` | — | 空 | 密钥类；和 `MILVUS_ADDR` 都配置了才启用向量检索 |
 | `EMBEDDING_BASE_URL` / `EMBEDDING_MODEL` / `EMBEDDING_DIM` | — | DashScope 兼容地址 / `text-embedding-v3` / `1024` | OpenAI 兼容 Embedding 服务；换模型或维度要重建集合 |
+| `MILVUS_IMAGE_COLLECTION` | — | `blink_shop_product_images` | 商品图向量集合名；配置了 `MILVUS_ADDR` 就启用图片搜索 |
+| `IMAGE_EMBEDDING_PROVIDER` | — | `local` | `local`（本地特征，不调外部服务）或 `dashscope`（需要 `IMAGE_EMBEDDING_API_KEY`） |
+| `IMAGE_EMBEDDING_API_KEY` | — | 空 | 密钥类；dashscope 时必填，非空的示例值在生产被拒 |
+| `IMAGE_EMBEDDING_BASE_URL` / `IMAGE_EMBEDDING_MODEL` / `IMAGE_EMBEDDING_DIM` | — | `https://dashscope.aliyuncs.com` / `qwen3-vl-embedding` / `512` | dashscope 多模态 Embedding（local 固定 160 维，不看这三项）；换模型或维度要重建集合 |
+| `IMAGE_FETCH_ALLOWED_HOSTS` | — | 空 | 服务端可以下载商品图的 https 域名（逗号分隔，只写主机名，不接受 IP）；为空只读平台内图片 |
 | `RISK_BLOCKED_WORDS` | `risk.blocked_words` | `违法,违禁,假货,绕过风控` | 导购对话的风险词，逗号分隔（最多 200 个、每个 20 字内） |
 
 ### 生产危险配置

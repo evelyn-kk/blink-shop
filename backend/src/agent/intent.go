@@ -48,10 +48,14 @@ type Plan struct {
 }
 
 var (
-	greetings       = []string{"你好", "您好", "嗨", "哈喽", "哈罗", "hello", "hi", "hey", "在吗", "在不在", "你是谁", "你是什么", "你能做什么", "你会什么", "能帮我什么", "可以帮我什么", "帮助", "help", "谢谢", "谢谢你", "感谢", "多谢", "好的", "ok", "好", "嗯", "早上好", "晚上好", "下午好"}
-	navVerbs        = []string{"打开", "跳转", "跳到", "进入", "带我去", "切到", "切换到", "转到", "去到"}
-	navPages        = map[string]string{"购物车": "cart", "订单": "orders", "我的订单": "orders", "首页": "products", "商品列表": "products", "商品页": "products", "列表页": "products", "优惠券": "coupons", "券包": "coupons", "我的券": "coupons", "会话": "sessions", "历史": "sessions", "聊天记录": "sessions", "设置": "settings"}
-	imageWords      = []string{"拍照找", "拍照搜", "找同款", "图片找", "识图", "这张图", "图里", "图片里", "照片里", "看图", "以图搜"}
+	greetings  = []string{"你好", "您好", "嗨", "哈喽", "哈罗", "hello", "hi", "hey", "在吗", "在不在", "你是谁", "你是什么", "你能做什么", "你会什么", "能帮我什么", "可以帮我什么", "帮助", "help", "谢谢", "谢谢你", "感谢", "多谢", "好的", "ok", "好", "嗯", "早上好", "晚上好", "下午好"}
+	navVerbs   = []string{"打开", "跳转", "跳到", "进入", "带我去", "切到", "切换到", "转到", "去到"}
+	navPages   = map[string]string{"购物车": "cart", "订单": "orders", "我的订单": "orders", "首页": "products", "商品列表": "products", "商品页": "products", "列表页": "products", "优惠券": "coupons", "券包": "coupons", "我的券": "coupons", "会话": "sessions", "历史": "sessions", "聊天记录": "sessions", "设置": "settings"}
+	imageWords = []string{"拍照找", "拍照搜", "找同款", "图片找", "识图", "这张图", "图里", "图片里", "照片里", "看图", "以图搜"}
+	// imageFillers 是图搜句子里不代表商品条件的词（“帮我找一下同款”“图上这个是什么”）。
+	imageFillers = []string{"这张图片里", "这张照片里", "这张图片", "这张照片", "这个图片", "图片里", "照片里", "这张", "图片", "照片", "图上", "图中", "图里",
+		"同款", "一样的", "类似的", "相似的", "差不多的", "同样的", "长这样", "这样的", "这个", "这是什么", "是什么", "什么牌子", "哪款", "哪个",
+		"有没有", "找一下", "找找", "搜一下", "搜搜", "帮我", "看看", "一下", "里的"}
 	cartAddWords    = []string{"加入购物车", "加到购物车", "放进购物车", "放入购物车", "添加到购物车", "加进购物车", "加购物车", "加购", "加车", "放到车里", "加到车里", "放进车里"}
 	cartRemoveWords = []string{"删掉", "删除", "移除", "去掉", "拿掉", "移出", "不要了", "清空", "去除"}
 	cartQtyWords    = []string{"改成", "改为", "换成", "调成", "变成", "改到", "数量", "减到", "加到"}
@@ -101,9 +105,22 @@ func Classify(content string, hasImage bool) Plan {
 		return Plan{Intent: IntentGuide, Action: "greeting", Rule: "empty"}
 	}
 
-	// 2. 图片找货：带图或明确说识图。
+	// 2. 图片找货：带图或明确说识图。带图时文字里的品类、预算、品牌、排除词作为图搜的附加条件；
+	// 说了“拍照找 / 找同款”但没带图，Action=ask_upload（请用户上传）。
 	if hasImage || containsAny(lower, imageWords...) {
-		return Plan{Intent: IntentImageSearch, Query: strings.Join(QueryTerms(text), " "), Rule: "image"}
+		p := Plan{Intent: IntentImageSearch, Rule: "image", Budget: ParseBudget(text), Exclude: ParseExclusions(text)}
+		if lo, hi := ParsePriceRange(text); lo > 0 {
+			p.MinPrice = lo
+			if hi > 0 {
+				p.Budget = hi
+			}
+		}
+		// 先去掉排除、预算短语（“不要 Nova”里的型号不是检索词），再去掉图搜口头语（长的在前）
+		p.Query = productQuery(stripWords(stripExclusions(stripBudget(stripPriceRange(lower))), imageFillers, imageWords))
+		if !hasImage {
+			p.Action = "ask_upload"
+		}
+		return p
 	}
 
 	// 3. 页面跳转：导航动词 + 页面名，且没有别的操作动词。

@@ -25,6 +25,7 @@ public class ChatControllerTest {
     static final class FakeBackend implements ChatBackend {
         final List<String> calls = new ArrayList<>();
         final List<String> streamed = new ArrayList<>(); // sessionId|clientId|content
+        final List<List<String>> attachments = new ArrayList<>();
         final List<String> cancelled = new ArrayList<>();
         SseClient.Listener listener;
         FakeStream stream;
@@ -52,8 +53,9 @@ public class ChatControllerTest {
         }
 
         @Override
-        public SseClient.Stream stream(String sessionId, String clientMessageId, String content, SseClient.Listener l) {
+        public SseClient.Stream stream(String sessionId, String clientMessageId, String content, List<String> files, SseClient.Listener l) {
             streamed.add(sessionId + "|" + clientMessageId + "|" + content);
+            attachments.add(files);
             listener = l;
             stream = new FakeStream();
             return stream.asStream();
@@ -62,6 +64,11 @@ public class ChatControllerTest {
         @Override
         public void cancelRun(String runId) {
             cancelled.add(runId);
+        }
+
+        @Override
+        public String uploadImage(byte[] jpeg) {
+            throw new UnsupportedOperationException();
         }
 
         void event(String name, String json) {
@@ -388,5 +395,38 @@ public class ChatControllerTest {
         assertFalse(c.isStreaming());
         backend.listener.onEvent(new SseParser.Event("text_delta", "{\"delta\":\"迟到\"}", ""));
         assertEquals("", c.turns().get(0).text());
+    }
+
+    @Test
+    public void attachmentsTravelWithTheTurnAndRetries() throws Exception {
+        assertFalse("没有文字也没有图片不发送", c.send("", java.util.Collections.emptyList()));
+        assertTrue(c.send("", Arrays.asList("file_a")));
+        assertEquals("s_1|cm-1|" + ChatController.IMAGE_ONLY_PROMPT, backend.streamed.get(0));
+        assertEquals(Arrays.asList("file_a"), backend.attachments.get(0));
+        assertEquals(1, last().imageCount());
+        // 服务端明确失败后重试：新的 client_message_id，图片照样带上
+        backend.start("r1");
+        backend.event("error", "{\"code\":\"internal_error\",\"message\":\"出错了\"}");
+        backend.listener.onClosed();
+        assertEquals(ChatTurn.Status.ERROR, last().status());
+        assertTrue(c.retry(last()));
+        assertEquals("s_1|cm-2|" + ChatController.IMAGE_ONLY_PROMPT, backend.streamed.get(1));
+        assertEquals(Arrays.asList("file_a"), backend.attachments.get(1));
+        // 普通消息不带附件
+        backend.start("r2");
+        backend.done("r2");
+        backend.listener.onClosed();
+        assertTrue(c.send("你好"));
+        assertTrue(backend.attachments.get(2).isEmpty());
+    }
+
+    @Test
+    public void historyRestoresAttachments() throws Exception {
+        backend.detail = new JSONObject("{\"session_id\":\"s_9\",\"messages\":[{\"client_message_id\":\"cm-x\",\"content\":\"找同款\","
+                + "\"created_at\":\"2026-10-01T08:00:00Z\",\"attachments\":[{\"file_id\":\"file_1\",\"mime_type\":\"image/jpeg\"}],"
+                + "\"run\":{\"run_id\":\"r9\",\"status\":\"completed\",\"content\":\"按图片找到了\",\"blocks\":[],\"followups\":[]}}]}");
+        c.loadSession("s_9");
+        assertEquals(1, c.turns().size());
+        assertEquals(Arrays.asList("file_1"), c.turns().get(0).attachments);
     }
 }

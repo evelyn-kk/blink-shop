@@ -17,7 +17,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 | `ui` | 页面基类、后台调用、图片加载、加载/空/出错占位 |
 | `catalog` / `account` / `settings` | 商品列表与详情、登录注册与账户、设置与帮助、调试版接口设置 |
 | `cart` / `order` / `coupon` | 购物车与确认订单、支付/订单列表/详情/评价、领券与我的券 |
-| `chat` | AI 导购：`ChatController`（纯 Java 的发送/接收/停止/重试/恢复流程）、`ChatTurn`（一轮的状态）、`MarkdownLite`（Markdown 子集解析，纯 Java）、`MarkdownView`、`BlockViews`（结构化块卡片）、`ChatAdapter`、`ChatHistoryAdapter`、`ChatActivity` |
+| `chat` | AI 导购：`ChatController`（纯 Java 的发送/接收/停止/重试/恢复流程）、`ChatTurn`（一轮的状态）、`AttachmentController`（附图上传状态，纯 Java）、`ChatImage`（附图压缩）、`MarkdownLite`（Markdown 子集解析，纯 Java）、`MarkdownView`、`BlockViews`（结构化块卡片）、`ChatAdapter`、`ChatHistoryAdapter`、`ChatActivity` |
 
 单测里的 `ShopApiContractTest`、`TradeContractTest`、`ChatApiContractTest`、`AgentStreamContractTest` 直接读取 `backend/fixtures/http` 的接口样例：检查 App 发出的请求与样例一致、样例响应能正确解析。
 
@@ -33,7 +33,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 | `INTERNET` | 访问接口和图片 |
 | `ACCESS_NETWORK_STATE` | 判断是否断网：断网时直接提示“网络未连接”，不发请求；网络恢复后列表自动重试 |
 
-更换头像用系统图片选择器（`ACTION_GET_CONTENT`），不需要存储权限。相机、录音权限在聊天和语音功能（7.x/8.x）里再申请。
+更换头像用系统图片选择器（`ACTION_GET_CONTENT`），不需要存储权限。聊天附图从相册选择同样不需要存储权限；拍照时才申请相机权限（见“AI 导购聊天 → 图片附件”）。录音权限在语音功能里再申请。
 
 ## 网络错误怎么提示
 
@@ -74,6 +74,12 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - **停止**：按钮在生成中变为“停止”：断开连接、本地标为“已停止生成”，并调用 `POST /agent/runs/{id}:cancel`；已生成的内容保留，可“重新提问”。
 - **失败与重试**：断网、连不上、连接中断、提前关闭按传输错误处理，“重试”复用同一个 `client_message_id`（服务端幂等：已有结果就重放，还在跑就等它结束），重放前清空本地已收到的半截内容；服务端 `error` 事件（超时、重启中断）则“重试”用新的 ID 重新提问。
 - **后台与恢复**：进入后台只停止刷新界面，流继续接收，回到前台一次补齐。进程被系统回收后按保存的会话 ID 读取会话详情重建每一轮（含卡片和追问）；最后一轮还在运行时用同一个 `client_message_id` 重新连接等服务端重放，不会重复发送。
+- **图片附件**（`AttachmentController` 纯 Java + `ChatImage`）：输入框左侧的图片按钮 →“从相册选择”（`ACTION_GET_CONTENT`，不需要存储权限）或“拍照”
+  （系统相机应用写入 `FileProvider` 暴露的缓存目录 `camera/`；需要相机权限：拒绝时可改用相册，勾了“不再询问”时提示去系统设置并提供入口；
+  没有相机应用时提示改用相册）。选好的图片在后台按 EXIF 方向转正、长边缩到 1600px、重新编码成 JPEG（去掉拍摄地点等 EXIF），立即用
+  `POST /files` 上传；输入框上方显示缩略图和状态（上传中 / 已就绪 / 失败原因），可以重试或移除，换图或移除后旧的上传结果丢弃。
+  上传完成才能发送；只附图不写字时发“帮我找找图片里的同款”。附件随这一轮保存（重试、重新提问照样带上，历史回放显示“附带 1 张图片”）。
+  按钮、缩略图、移除都有内容描述，触控区域 48dp，状态文字用 `accessibilityLiveRegion` 朗读。
 - **历史抽屉**：列表（置顶在前）、搜索、置顶/取消、重命名、删除、新对话；没有消息的会话不会出现在列表里，服务端会话等第一条消息发送时才创建。
 - 端到端脚本 `e2e/chat_flow.py`（见 `e2e/README.md`）。
 

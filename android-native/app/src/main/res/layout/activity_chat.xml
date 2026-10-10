@@ -86,6 +86,65 @@
             <include layout="@layout/view_state" />
         </FrameLayout>
 
+        <!-- 待发送的图片：缩略图、上传状态、重试 / 移除 -->
+        <LinearLayout
+            android:id="@+id/attachment_bar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@color/card_bg"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="12dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="8dp"
+            android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/attachment_preview"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:background="@drawable/bg_image"
+                android:contentDescription="待发送的图片"
+                android:scaleType="centerCrop" />
+
+            <TextView
+                android:id="@+id/attachment_status"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:accessibilityLiveRegion="polite"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/attachment_retry"
+                android:layout_width="wrap_content"
+                android:layout_height="@dimen/touch_target"
+                android:gravity="center"
+                android:minWidth="@dimen/touch_target"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:text="重试"
+                android:textColor="@color/brand"
+                android:textSize="14sp"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/attachment_remove"
+                android:layout_width="wrap_content"
+                android:layout_height="@dimen/touch_target"
+                android:contentDescription="移除图片"
+                android:gravity="center"
+                android:minWidth="@dimen/touch_target"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:text="移除"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp" />
+        </LinearLayout>
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -93,10 +152,19 @@
             android:elevation="8dp"
             android:gravity="bottom"
             android:orientation="horizontal"
-            android:paddingStart="12dp"
+            android:paddingStart="4dp"
             android:paddingTop="8dp"
             android:paddingEnd="8dp"
             android:paddingBottom="8dp">
+
+            <ImageView
+                android:id="@+id/attach_button"
+                android:layout_width="@dimen/touch_target"
+                android:layout_height="@dimen/touch_target"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="添加图片：从相册选择或拍照"
+                android:padding="12dp"
+                android:src="@drawable/ic_image" />
 
             <EditText
                 android:id="@+id/input"

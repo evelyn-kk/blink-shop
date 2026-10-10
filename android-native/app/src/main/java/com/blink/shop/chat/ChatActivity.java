@@ -1,9 +1,16 @@
 package com.blink.shop.chat;
 
+import android.Manifest;
 import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.net.Uri;
 import android.os.Bundle;
+import android.provider.MediaStore;
+import android.provider.Settings;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -11,12 +18,16 @@ import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.Executor;
 
+import androidx.core.content.FileProvider;
 import androidx.core.view.GravityCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -45,11 +56,15 @@ import com.blink.shop.ui.StateView;
  * 状态都在 ChatController 里；页面只负责渲染和把用户操作转给控制器。进程被回收后按会话 ID 从服务端恢复，不重复发送。
  */
 public final class ChatActivity extends BaseActivity implements ChatController.Listener, ChatAdapter.Listener, BlockViews.Actions,
-        ChatHistoryAdapter.Listener {
+        ChatHistoryAdapter.Listener, AttachmentController.Listener {
 
     private static final String EXTRA_PROMPT = "prompt";
     private static final String STATE_SESSION = "session_id";
     private static final String STATE_DRAFT = "draft";
+    private static final String STATE_CAMERA_FILE = "camera_file";
+    private static final int REQUEST_GALLERY = 41;
+    private static final int REQUEST_CAMERA = 42;
+    private static final int REQUEST_CAMERA_PERMISSION = 43;
 
     /** 打开聊天页；prompt 非空时预填到输入框（例如从商品页“问导购”进来）。 */
     public static Intent intent(Context c, String prompt) {
@@ -57,6 +72,13 @@ public final class ChatActivity extends BaseActivity implements ChatController.L
     }
 
     private ChatController controller;
+    private AttachmentController attachment;
+    private View attachmentBar;
+    private ImageView attachmentPreview;
+    private TextView attachmentStatus;
+    private TextView attachmentRetry;
+    /** 拍照时交给相机应用写入的临时文件（页面重建后从 savedInstanceState 恢复）。 */
+    private File cameraFile;
     private ChatAdapter adapter;
     private ChatHistoryAdapter historyAdapter;
     private DrawerLayout drawer;
@@ -107,7 +129,17 @@ public final class ChatActivity extends BaseActivity implements ChatController.L
             public void onError(ApiException e) {
             }
         });
-        controller = new ChatController(ChatBackend.of(app.api()), io, main);
+        ChatBackend backend = ChatBackend.of(app.api());
+        controller = new ChatController(backend, io, main);
+        attachment = new AttachmentController(backend::uploadImage, io, main);
+        attachment.setListener(this);
+        attachmentBar = findViewById(R.id.attachment_bar);
+        attachmentPreview = findViewById(R.id.attachment_preview);
+        attachmentStatus = findViewById(R.id.attachment_status);
+        attachmentRetry = findViewById(R.id.attachment_retry);
+        findViewById(R.id.attach_button).setOnClickListener(v -> chooseImageSource());
+        findViewById(R.id.attachment_remove).setOnClickListener(v -> attachment.clear());
+        attachmentRetry.setOnClickListener(v -> attachment.retry());
 
         adapter = new ChatAdapter(new BlockViews(this, app.images(), this), this);
         LinearLayoutManager lm = new LinearLayoutManager(this);
@@ -167,6 +199,10 @@ public final class ChatActivity extends BaseActivity implements ChatController.L
         String prompt = getIntent().getStringExtra(EXTRA_PROMPT);
         if (saved != null) {
             input.setText(saved.getString(STATE_DRAFT, ""));
+            String camera = saved.getString(STATE_CAMERA_FILE, "");
+            if (!camera.isEmpty()) {
+                cameraFile = new File(camera);
+            }
             String sid = saved.getString(STATE_SESSION, "");
             if (!sid.isEmpty()) {
                 controller.loadSession(sid);
@@ -183,6 +219,7 @@ public final class ChatActivity extends BaseActivity implements ChatController.L
         super.onSaveInstanceState(out);
         out.putString(STATE_SESSION, controller.sessionId());
         out.putString(STATE_DRAFT, input.getText().toString());
+        out.putString(STATE_CAMERA_FILE, cameraFile == null ? "" : cameraFile.getAbsolutePath());
     }
 
     @Override
@@ -226,26 +263,193 @@ public final class ChatActivity extends BaseActivity implements ChatController.L
             return;
         }
         String text = input.getText().toString().trim();
-        if (text.isEmpty()) {
+        if (attachment.isUploading()) {
+            toast("图片还在上传，请稍候");
+            return;
+        }
+        if (attachment.state() == AttachmentController.State.FAILED) {
+            toast("图片没有上传成功，可以重试或移除");
+            return;
+        }
+        List<String> files = attachment.readyIds();
+        if (text.isEmpty() && files.isEmpty()) {
             toast("先说说想买什么");
             return;
         }
-        if (sendText(text)) {
+        if (sendText(text, files)) {
             input.setText("");
+            attachment.consumed();
         }
     }
 
     private boolean sendText(String text) {
+        return sendText(text, java.util.Collections.emptyList());
+    }
+
+    private boolean sendText(String text, List<String> files) {
         if (controller.isBusy()) {
             toast("正在回答，请稍候或先停止");
             return false;
         }
-        if (!controller.send(text)) {
+        if (!controller.send(text, files)) {
             return false;
         }
         stickToBottom = true;
         hideKeyboard();
         return true;
+    }
+
+    // ---------- 图片附件 ----------
+
+    private void chooseImageSource() {
+        if (attachment.isUploading()) {
+            toast("图片还在上传，请稍候");
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("按图片找商品")
+                .setItems(new String[]{"从相册选择", "拍照"}, (d, which) -> {
+                    if (which == 0) {
+                        pickFromGallery();
+                    } else {
+                        takePhoto();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void pickFromGallery() {
+        Intent pick = new Intent(Intent.ACTION_GET_CONTENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE);
+        try {
+            startActivityForResult(Intent.createChooser(pick, "选择图片"), REQUEST_GALLERY);
+        } catch (ActivityNotFoundException e) {
+            toast("没有可以选择图片的应用");
+        }
+    }
+
+    private void takePhoto() {
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.CAMERA}, REQUEST_CAMERA_PERMISSION);
+            return;
+        }
+        File dir = new File(getCacheDir(), "camera");
+        if (!dir.isDirectory() && !dir.mkdirs()) {
+            toast("无法准备拍照，请从相册选择");
+            return;
+        }
+        cameraFile = new File(dir, "photo_" + System.currentTimeMillis() + ".jpg");
+        Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".files", cameraFile);
+        Intent capture = new Intent(MediaStore.ACTION_IMAGE_CAPTURE).putExtra(MediaStore.EXTRA_OUTPUT, uri)
+                .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivityForResult(capture, REQUEST_CAMERA);
+        } catch (ActivityNotFoundException e) {
+            cameraFile = null;
+            toast("没有可用的相机应用，可以从相册选择");
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode != REQUEST_CAMERA_PERMISSION) {
+            return;
+        }
+        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+            takePhoto();
+            return;
+        }
+        // 拒绝了：可以改用相册；勾了“不再询问”时只能去系统设置里打开
+        boolean blocked = !shouldShowRequestPermissionRationale(Manifest.permission.CAMERA);
+        AlertDialog.Builder b = new AlertDialog.Builder(this)
+                .setTitle("没有相机权限")
+                .setMessage(blocked ? "相机权限已被关闭。可以从相册选择图片，或到系统设置里为 Blink Shop 打开相机权限。"
+                        : "拍照找同款需要相机权限。也可以从相册选择图片。")
+                .setPositiveButton("从相册选择", (d, w) -> pickFromGallery())
+                .setNegativeButton("取消", null);
+        if (blocked) {
+            b.setNeutralButton("去设置", (d, w) -> {
+                try {
+                    startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", getPackageName(), null)));
+                } catch (ActivityNotFoundException e) {
+                    toast("请到系统设置里打开相机权限");
+                }
+            });
+        }
+        b.show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_GALLERY) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                prepareAndAttach(data.getData(), null);
+            }
+            return;
+        }
+        if (requestCode == REQUEST_CAMERA) {
+            File photo = cameraFile;
+            cameraFile = null;
+            if (resultCode == RESULT_OK && photo != null && photo.length() > 0) {
+                prepareAndAttach(Uri.fromFile(photo), photo);
+            } else if (photo != null) {
+                //noinspection ResultOfMethodCallIgnored
+                photo.delete();
+            }
+        }
+    }
+
+    /** 在后台压缩图片后交给 AttachmentController 上传；拍照的临时文件处理完就删除。 */
+    private void prepareAndAttach(Uri uri, File temp) {
+        Async.run(() -> {
+            try {
+                return ChatImage.prepare(getContentResolver(), uri);
+            } catch (IOException | RuntimeException e) {
+                throw ApiException.local("这张图片打不开，请换一张", e);
+            } finally {
+                if (temp != null) {
+                    //noinspection ResultOfMethodCallIgnored
+                    temp.delete();
+                }
+            }
+        }, new Async.Callback<byte[]>() {
+            @Override
+            public void onSuccess(byte[] jpeg) {
+                attachment.attach(jpeg);
+            }
+
+            @Override
+            public void onError(ApiException e) {
+                attachment.fail(e.getMessage());
+            }
+        });
+    }
+
+    @Override
+    public void onAttachmentChanged() {
+        AttachmentController.State st = attachment.state();
+        attachmentBar.setVisibility(st == AttachmentController.State.EMPTY ? View.GONE : View.VISIBLE);
+        byte[] data = attachment.data();
+        Bitmap thumb = data == null ? null : ChatImage.thumbnail(data, dp(112));
+        attachmentPreview.setImageBitmap(thumb);
+        attachmentPreview.setVisibility(thumb == null ? View.GONE : View.VISIBLE);
+        switch (st) {
+            case UPLOADING:
+                attachmentStatus.setText("图片上传中…");
+                break;
+            case READY:
+                attachmentStatus.setText("图片已就绪，发送时一起发给导购");
+                break;
+            case FAILED:
+                attachmentStatus.setText(attachment.error());
+                break;
+            default:
+                attachmentStatus.setText("");
+        }
+        attachmentRetry.setVisibility(st == AttachmentController.State.FAILED && data != null ? View.VISIBLE : View.GONE);
+        input.setHint(st == AttachmentController.State.EMPTY ? "问问导购，比如“3000 以内拍照好的手机”" : "说说想找什么（可以不填）");
     }
 
     private void startNewSession() {

@@ -27,6 +27,7 @@ var expectedRoutes = map[string]string{
 	"GET /api/v1/uploads/avatar/{name}":             "public",
 	"GET /api/v1/assets/{path...}":                  "public",
 	"POST /api/v1/files":                            "account",
+	"POST /api/v1/search/image":                     "account",
 	"GET /api/v1/files/{id}":                        "account",
 	"GET /api/v1/categories/tree":                   "public",
 	"GET /api/v1/merchants":                         "public",

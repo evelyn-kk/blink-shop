@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +37,19 @@ type Config struct {
 	EmbeddingAPIKey         string
 	EmbeddingModel          string
 	EmbeddingDim            int
+	// 图片搜索（配置了 Milvus 就启用）
+	MilvusImageCollection  string
+	ImageEmbeddingProvider string
+	ImageEmbeddingBaseURL  string
+	ImageEmbeddingAPIKey   string
+	ImageEmbeddingModel    string
+	ImageEmbeddingDim      int
+	ImageFetchAllowedHosts []string
+}
+
+// ImageSearchEnabled 表示可以做图片搜索：配置了 Milvus（本地图片特征不需要外部服务；dashscope 的密钥在 Load 时已校验）。
+func (c Config) ImageSearchEnabled() bool {
+	return c.MilvusAddr != ""
 }
 
 // VectorEnabled 表示 Milvus 和 Embedding 都配置了。
@@ -74,6 +88,13 @@ func Load(ctx context.Context, r *Resolver) (Config, error) {
 		EmbeddingBaseURL:        strings.TrimSpace(r.Get(ctx, KeyEmbeddingBaseURL)),
 		EmbeddingAPIKey:         r.Get(ctx, KeyEmbeddingAPIKey),
 		EmbeddingModel:          strings.TrimSpace(r.Get(ctx, KeyEmbeddingModel)),
+
+		MilvusImageCollection:  strings.TrimSpace(r.Get(ctx, KeyMilvusImageCollection)),
+		ImageEmbeddingProvider: strings.ToLower(strings.TrimSpace(r.Get(ctx, KeyImageEmbeddingProvider))),
+		ImageEmbeddingBaseURL:  strings.TrimSpace(r.Get(ctx, KeyImageEmbeddingBaseURL)),
+		ImageEmbeddingAPIKey:   r.Get(ctx, KeyImageEmbeddingAPIKey),
+		ImageEmbeddingModel:    strings.TrimSpace(r.Get(ctx, KeyImageEmbeddingModel)),
+		ImageFetchAllowedHosts: splitHosts(r.Get(ctx, KeyImageFetchAllowedHosts)),
 	}
 	switch cfg.AppEnv {
 	case "development", "test", "production", "prod":
@@ -108,13 +129,37 @@ func Load(ctx context.Context, r *Resolver) (Config, error) {
 	for _, name := range []struct {
 		key Key
 		v   string
-	}{{KeyMilvusTextCollection, cfg.MilvusTextCollection}, {KeyMilvusProductCollection, cfg.MilvusProductCollection}} {
+	}{{KeyMilvusTextCollection, cfg.MilvusTextCollection}, {KeyMilvusProductCollection, cfg.MilvusProductCollection}, {KeyMilvusImageCollection, cfg.MilvusImageCollection}} {
 		if !validCollectionName(name.v) {
 			errs = append(errs, fmt.Errorf("%s: %q 不是合法的集合名（字母开头，字母、数字、下划线，最多 255 位）", name.key.Env, name.v))
 		}
 	}
 	if !strings.HasPrefix(cfg.EmbeddingBaseURL, "http://") && !strings.HasPrefix(cfg.EmbeddingBaseURL, "https://") {
 		errs = append(errs, fmt.Errorf("%s: %q 必须是 http(s) 地址", KeyEmbeddingBaseURL.Env, cfg.EmbeddingBaseURL))
+	}
+	cfg.ImageEmbeddingDim = int(collect(&errs, KeyImageEmbeddingDim, func() (int64, error) {
+		n, err := strconv.ParseInt(strings.TrimSpace(r.Get(ctx, KeyImageEmbeddingDim)), 10, 64)
+		if err != nil || n < 8 || n > 8192 {
+			return 0, errors.New("必须是 8 到 8192 的整数")
+		}
+		return n, nil
+	}))
+	switch cfg.ImageEmbeddingProvider {
+	case "local":
+	case "dashscope":
+		if strings.TrimSpace(cfg.ImageEmbeddingAPIKey) == "" {
+			errs = append(errs, fmt.Errorf("%s=dashscope 时必须配置 %s", KeyImageEmbeddingProvider.Env, KeyImageEmbeddingAPIKey.Env))
+		}
+		if !strings.HasPrefix(cfg.ImageEmbeddingBaseURL, "https://") && !strings.HasPrefix(cfg.ImageEmbeddingBaseURL, "http://") {
+			errs = append(errs, fmt.Errorf("%s: %q 必须是 http(s) 地址", KeyImageEmbeddingBaseURL.Env, cfg.ImageEmbeddingBaseURL))
+		}
+	default:
+		errs = append(errs, fmt.Errorf("%s: %q 无效，可选 local / dashscope", KeyImageEmbeddingProvider.Env, cfg.ImageEmbeddingProvider))
+	}
+	for _, h := range cfg.ImageFetchAllowedHosts {
+		if !validHost(h) {
+			errs = append(errs, fmt.Errorf("%s: %q 不是合法的域名（只写主机名，不带协议、端口或路径）", KeyImageFetchAllowedHosts.Env, h))
+		}
 	}
 	if !strings.HasPrefix(cfg.AIBaseURL, "http://") && !strings.HasPrefix(cfg.AIBaseURL, "https://") {
 		errs = append(errs, fmt.Errorf("%s: %q 必须是 http(s) 地址", KeyAIBaseURL.Env, cfg.AIBaseURL))
@@ -250,6 +295,9 @@ func ValidateProduction(ctx context.Context, cfg Config, r *Resolver) error {
 	}
 	if key := strings.ToLower(strings.TrimSpace(cfg.EmbeddingAPIKey)); key != "" && contains(devAIKeys, key) {
 		errs = append(errs, errors.New("EMBEDDING_API_KEY 不能使用示例值"))
+	}
+	if key := strings.ToLower(strings.TrimSpace(cfg.ImageEmbeddingAPIKey)); key != "" && contains(devAIKeys, key) {
+		errs = append(errs, errors.New("IMAGE_EMBEDDING_API_KEY 不能使用示例值"))
 	}
 	if key := strings.ToLower(strings.TrimSpace(cfg.AIAPIKey)); key != "" && contains(devAIKeys, key) {
 		errs = append(errs, errors.New("AI_API_KEY 不能使用示例值（为空表示不接模型，导购走规则）"))
@@ -445,6 +493,24 @@ func without(list []string, v string) []string {
 // RiskBlockedWords 返回当前生效的风险词表（环境变量 > 动态配置 > 默认值）。
 func RiskBlockedWords(ctx context.Context, r *Resolver) []string {
 	return splitList(r.Get(ctx, KeyRiskBlockedWords))
+}
+
+// splitHosts 按逗号拆分域名列表，去空白、转小写、去掉空项。
+func splitHosts(raw string) []string {
+	var out []string
+	for _, h := range strings.Split(raw, ",") {
+		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+var hostPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
+
+// validHost：只允许域名（至少两段），不接受 IP、端口、协议或路径——IP 白名单绕过了“不连内网”的意图。
+func validHost(h string) bool {
+	return len(h) <= 253 && hostPattern.MatchString(h) && net.ParseIP(h) == nil && !strings.HasSuffix(h, ".localhost")
 }
 
 // validCollectionName 是 Milvus 集合名规则：字母或下划线开头，只含字母、数字、下划线，最多 255 位。
