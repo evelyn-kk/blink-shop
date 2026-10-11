@@ -21,6 +21,7 @@ export type Route =
   | { name: 'admin_platform'; query: URLSearchParams }
   | { name: 'admin_risk' }
   | { name: 'admin_configs' }
+  | { name: 'admin_prompts'; query: URLSearchParams }
   | { name: 'admin_audit'; query: URLSearchParams }
   | { name: 'orders'; scope: OrderScope; query: URLSearchParams }
   | { name: 'order'; scope: OrderScope; id: string }
@@ -67,6 +68,7 @@ export function parseRoute(hash: string): Route {
     if (parts[1] === 'platform') return { name: 'admin_platform', query: new URLSearchParams(search) };
     if (parts[1] === 'risk') return { name: 'admin_risk' };
     if (parts[1] === 'configs') return { name: 'admin_configs' };
+    if (parts[1] === 'prompts') return { name: 'admin_prompts', query: new URLSearchParams(search) };
     if (parts[1] === 'audit') return { name: 'admin_audit', query: new URLSearchParams(search) };
   }
   if ((parts[0] === 'merchant' || parts[0] === 'admin') && parts[1] === 'orders') {
@@ -209,6 +211,10 @@ function withQuery(base: string, params: Record<string, string | number | undefi
 
 export function platformHref(params: { tab?: string; status?: string; keyword?: string; page?: number } = {}): string {
   return withQuery('#/admin/platform', params);
+}
+
+export function promptsHref(key?: string): string {
+  return withQuery('#/admin/prompts', { key });
 }
 
 export function auditHref(params: { target_type?: string; target_id?: string; page?: number } = {}): string {

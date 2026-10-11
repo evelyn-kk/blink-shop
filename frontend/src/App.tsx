@@ -3,10 +3,11 @@ import { logout } from './api/auth';
 import { NoticeHost } from './components/NoticeHost';
 import { Empty } from './components/StateView';
 import { RequireRole } from './components/RequireRole';
-import { auditHref, documentsHref, loginHref, merchantProductsHref, navigate, ordersHref, platformHref, productsHref, promotionsHref, reviewsHref, useRoute } from './lib/router';
+import { auditHref, documentsHref, loginHref, merchantProductsHref, navigate, ordersHref, platformHref, productsHref, promptsHref, promotionsHref, reviewsHref, useRoute } from './lib/router';
 import { clearSession, useSession } from './lib/session';
 import { AdminAuditPage } from './pages/AdminAuditPage';
 import { AdminConfigsPage } from './pages/AdminConfigsPage';
+import { AdminPromptsPage } from './pages/AdminPromptsPage';
 import { AdminPlatformPage } from './pages/AdminPlatformPage';
 import { AdminRiskPage } from './pages/AdminRiskPage';
 import { DocumentDetailPage } from './pages/DocumentDetailPage';
@@ -81,6 +82,11 @@ export default function App() {
         {route.name === 'admin_configs' && (
           <RequireRole role="admin">
             <AdminConfigsPage />
+          </RequireRole>
+        )}
+        {route.name === 'admin_prompts' && (
+          <RequireRole role="admin">
+            <AdminPromptsPage query={route.query} />
           </RequireRole>
         )}
         {route.name === 'admin_audit' && (
@@ -164,6 +170,7 @@ function TopBar() {
             <a href={ordersHref('admin')}>订单管理</a>
             <a href="#/admin/risk">风控</a>
             <a href="#/admin/configs">配置</a>
+            <a href={promptsHref()}>Prompt</a>
             <a href={auditHref()}>操作审计</a>
             <a href={documentsHref('admin')}>知识资料</a>
           </>

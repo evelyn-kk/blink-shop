@@ -1,0 +1,30 @@
+{
+  "description": "发布时 expected_active_version 不是当前生效版本（别人先发布或回滚了）：409 prompt_active_changed，不做任何修改",
+  "setup_requests": [
+    {
+      "as": "blink_admin",
+      "method": "PATCH",
+      "path": "/api/v1/admin/prompts/agent.planner",
+      "body": {
+        "content": "规划 v1"
+      }
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/prompts/agent.planner/publish",
+    "as": "blink_admin",
+    "body": {
+      "version": 1,
+      "expected_active_version": 2
+    }
+  },
+  "response": {
+    "status": 409,
+    "body": {
+      "code": "prompt_active_changed",
+      "message": "生效版本已被其他人修改，请刷新后确认再操作",
+      "request_id": "<request_id>"
+    }
+  }
+}

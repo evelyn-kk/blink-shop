@@ -1,0 +1,28 @@
+{
+  "description": "保存草稿：每个 Prompt 同时只有一个草稿（已有就覆盖，否则新建下一个版本号）；草稿不影响运行，发布后才生效。没给 title 时用 Prompt 的默认标题",
+  "request": {
+    "method": "PATCH",
+    "path": "/api/v1/admin/prompts/agent.planner",
+    "as": "blink_admin",
+    "body": {
+      "content": "你是 Blink 商城导购的意图规划器（测试版）。只输出 JSON。",
+      "description": "收紧输出格式"
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "prompt_id": "<pattern:prompt_[0-9a-f]{24}>",
+      "version": 1,
+      "status": "draft",
+      "title": "意图规划",
+      "description": "收紧输出格式",
+      "content": "你是 Blink 商城导购的意图规划器（测试版）。只输出 JSON。",
+      "runes": 34,
+      "created_by": "acct_seed_admin",
+      "created_at": "<timestamp>",
+      "updated_at": "<timestamp>",
+      "published_at": null
+    }
+  }
+}

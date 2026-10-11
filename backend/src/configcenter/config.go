@@ -46,6 +46,13 @@ type Config struct {
 	ImageEmbeddingDim      int
 	ImageFetchAllowedHosts []string
 	Speech                 SpeechConfig
+	Nacos                  NacosConfig
+}
+
+// NacosConfig 是动态配置中心的连接配置（Addr 为空表示不用 Nacos）。
+type NacosConfig struct {
+	Addr, Namespace, Group, Username, Password, DataIDPrefix string
+	Refresh                                                  time.Duration
 }
 
 // SpeechConfig 是语音识别与合成的供应商配置（Provider 为 off 表示不提供）。
@@ -123,6 +130,9 @@ func Load(ctx context.Context, r *Resolver) (Config, error) {
 		ImageEmbeddingAPIKey:   r.Get(ctx, KeyImageEmbeddingAPIKey),
 		ImageEmbeddingModel:    strings.TrimSpace(r.Get(ctx, KeyImageEmbeddingModel)),
 		ImageFetchAllowedHosts: splitHosts(r.Get(ctx, KeyImageFetchAllowedHosts)),
+		Nacos: NacosConfig{Addr: strings.TrimSpace(r.Get(ctx, KeyNacosAddr)), Namespace: strings.TrimSpace(r.Get(ctx, KeyNacosNamespace)),
+			Group: strings.TrimSpace(r.Get(ctx, KeyNacosGroup)), Username: strings.TrimSpace(r.Get(ctx, KeyNacosUsername)),
+			Password: r.Get(ctx, KeyNacosPassword), DataIDPrefix: strings.TrimSpace(r.Get(ctx, KeyNacosDataIDPrefix))},
 		Speech: SpeechConfig{
 			STTProvider: strings.ToLower(strings.TrimSpace(r.Get(ctx, KeySTTProvider))), STTAppID: strings.TrimSpace(r.Get(ctx, KeySTTAppID)),
 			STTAPIKey: strings.TrimSpace(r.Get(ctx, KeySTTAPIKey)), STTAPISecret: strings.TrimSpace(r.Get(ctx, KeySTTAPISecret)),
@@ -194,6 +204,16 @@ func Load(ctx context.Context, r *Resolver) (Config, error) {
 		errs = append(errs, fmt.Errorf("%s: %q 无效，可选 local / dashscope", KeyImageEmbeddingProvider.Env, cfg.ImageEmbeddingProvider))
 	}
 	errs = append(errs, loadSpeech(ctx, r, &cfg.Speech)...)
+	cfg.Nacos.Refresh = time.Duration(collect(&errs, KeyNacosRefreshSeconds, func() (int64, error) {
+		n, err := strconv.ParseInt(strings.TrimSpace(r.Get(ctx, KeyNacosRefreshSeconds)), 10, 64)
+		if err != nil || n < 1 || n > 15 {
+			return 0, errors.New("必须是 1 到 15 的整数（docs/04：动态配置 15 秒以内刷新）")
+		}
+		return n, nil
+	})) * time.Second
+	if cfg.Nacos.Addr != "" && (cfg.Nacos.Group == "" || !dataIDPattern.MatchString(cfg.Nacos.DataIDPrefix)) {
+		errs = append(errs, fmt.Errorf("%s / %s：分组不能为空，dataId 前缀只能包含字母、数字、点、下划线和短横线", KeyNacosGroup.Env, KeyNacosDataIDPrefix.Env))
+	}
 	for _, h := range cfg.ImageFetchAllowedHosts {
 		if !validHost(h) {
 			errs = append(errs, fmt.Errorf("%s: %q 不是合法的域名（只写主机名，不带协议、端口或路径）", KeyImageFetchAllowedHosts.Env, h))
@@ -340,6 +360,10 @@ func ValidateProduction(ctx context.Context, cfg Config, r *Resolver) error {
 	// 语音：mock 只用于演示和测试；凭据不能是示例值
 	if cfg.Speech.STTProvider == "mock" || cfg.Speech.TTSProvider == "mock" {
 		errs = append(errs, errors.New("STT_PROVIDER / TTS_PROVIDER 不能是 mock（生产环境请配置真实供应商或 off）"))
+	}
+	// 配置中心：生产环境的 Nacos 必须开鉴权（compose 里的开发实例没有）
+	if cfg.Nacos.Addr != "" && (cfg.Nacos.Username == "" || cfg.Nacos.Password == "" || contains(devAIKeys, strings.ToLower(cfg.Nacos.Password)) || cfg.Nacos.Password == "nacos") {
+		errs = append(errs, errors.New("NACOS_USERNAME / NACOS_PASSWORD 在生产环境必须配置且不能是默认值（Nacos 需要开启鉴权）"))
 	}
 	// 真实语音供应商只能走 TLS：讯飞的 AppID、API Key、签名和实时音频，豆包的 token（头和请求体里都有）在明文链路上会被窃听。
 	// 开发 / 测试环境仍允许 ws:// 和 http://（本地假服务）。
@@ -617,6 +641,8 @@ func loadSpeech(ctx context.Context, r *Resolver, sp *SpeechConfig) []error {
 	}
 	return errs
 }
+
+var dataIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
 
 // voicePattern 是音色名的格式（也用于校验客户端传来的 voice）。
 var voicePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)

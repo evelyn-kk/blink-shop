@@ -1,0 +1,58 @@
+{
+  "description": "Prompt 列表（管理员）：导购的 4 个可管理 Prompt，active_version 为当前生效版本（0 = 内置默认），draft 为待发布的草稿（没有为 null），publish_records 为最近的发布 / 回滚记录。Prompt 不含任何密钥",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/admin/prompts",
+    "as": "blink_admin"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "items": [
+        {
+          "prompt_key": "agent.planner",
+          "title": "意图规划",
+          "description": "小模型把一句话分到一个意图并抽取槽位，只输出 JSON",
+          "placeholders": [],
+          "active_version": 0,
+          "active_source": "builtin",
+          "draft": null,
+          "version_count": 0
+        },
+        {
+          "prompt_key": "agent.react",
+          "title": "工具循环",
+          "description": "大模型在工具循环里选择工具、给出最终回答；{{TOOLS}} 替换为当前意图允许的工具和参数",
+          "placeholders": [
+            "{{TOOLS}}"
+          ],
+          "active_version": 0,
+          "active_source": "builtin",
+          "draft": null,
+          "version_count": 0
+        },
+        {
+          "prompt_key": "agent.rerank",
+          "title": "商品重排",
+          "description": "小模型在规则候选里调整商品顺序（ai.rerank_enabled 开启时）",
+          "placeholders": [],
+          "active_version": 0,
+          "active_source": "builtin",
+          "draft": null,
+          "version_count": 0
+        },
+        {
+          "prompt_key": "agent.summary",
+          "title": "会话摘要",
+          "description": "小模型一句话概括会话（ai.summary_enabled 开启时）",
+          "placeholders": [],
+          "active_version": 0,
+          "active_source": "builtin",
+          "draft": null,
+          "version_count": 0
+        }
+      ],
+      "publish_records": []
+    }
+  }
+}

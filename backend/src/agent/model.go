@@ -69,8 +69,9 @@ func (r *RuleRunner) plan(ctx context.Context, in Input, st ModelSettings, out O
 		return rule
 	}
 	start := r.deps.Now()
-	meta := map[string]any{"model": st.PlannerModel, "prompt": PromptPlanner, "prompt_version": PromptVersion}
-	modelPlan, usage, err := r.modelPlan(ctx, in, st, history)
+	system, version := r.deps.prompt(ctx, PromptPlanner)
+	meta := map[string]any{"model": st.PlannerModel, "prompt": PromptPlanner, "prompt_version": version}
+	modelPlan, usage, err := r.modelPlan(ctx, in, st, history, system)
 	meta["prompt_tokens"], meta["completion_tokens"] = usage.PromptTokens, usage.CompletionTokens
 	if err != nil {
 		meta["error"] = errorClass(err)
@@ -85,7 +86,7 @@ func (r *RuleRunner) plan(ctx context.Context, in Input, st ModelSettings, out O
 	return merged
 }
 
-func (r *RuleRunner) modelPlan(ctx context.Context, in Input, st ModelSettings, history history) (Plan, llm.Usage, error) {
+func (r *RuleRunner) modelPlan(ctx context.Context, in Input, st ModelSettings, history history, system string) (Plan, llm.Usage, error) {
 	ctx, cancel := context.WithTimeout(ctx, st.Timeout)
 	defer cancel()
 	user := in.Content
@@ -99,7 +100,7 @@ func (r *RuleRunner) modelPlan(ctx context.Context, in Input, st ModelSettings, 
 		user += "\n\n（用户附带了图片）"
 	}
 	resp, err := r.deps.LLM.Complete(ctx, llm.Request{Model: st.PlannerModel, Temperature: plannerTemp, MaxTokens: plannerMaxTokens, JSON: true,
-		Messages: []llm.Message{{Role: "system", Content: plannerSystemPrompt}, {Role: "user", Content: user}}})
+		Messages: []llm.Message{{Role: "system", Content: system}, {Role: "user", Content: user}}})
 	if err != nil {
 		return Plan{}, llm.Usage{}, err
 	}
@@ -250,7 +251,8 @@ func (s *session) answerWithModel(ctx context.Context, st ModelSettings) bool {
 	for _, id := range ParseProductIDs(s.in.Content) {
 		s.tc.Evidence[id] = true // 用户明确写出的商品 ID
 	}
-	system := strings.Replace(reactSystemPrompt, "{{TOOLS}}", renderTools(allowed), 1)
+	reactPrompt, reactVersion := s.r.deps.prompt(ctx, PromptReact)
+	system := strings.Replace(reactPrompt, "{{TOOLS}}", renderTools(allowed), 1)
 	messages := []llm.Message{{Role: "system", Content: system}, {Role: "user", Content: s.reactUserPrompt()}}
 	parseFailures := 0
 	var lastUsage llm.Usage
@@ -271,7 +273,7 @@ func (s *session) answerWithModel(ctx context.Context, st ModelSettings) bool {
 		resp, err := r.deps.LLM.Complete(callCtx, llm.Request{Model: st.AgentModel, Messages: messages, Temperature: reactTemp, MaxTokens: reactMaxTokens, JSON: true})
 		cancel()
 		s.out.Thinking(Step{ID: stepID, Title: "思考下一步", Status: StepDone})
-		meta := map[string]any{"model": st.AgentModel, "prompt": PromptReact, "prompt_version": PromptVersion, "round": round,
+		meta := map[string]any{"model": st.AgentModel, "prompt": PromptReact, "prompt_version": reactVersion, "round": round,
 			"prompt_chars": promptChars(messages), "prompt_hash": promptHash(messages), "prompt_tokens": resp.Usage.PromptTokens, "completion_tokens": resp.Usage.CompletionTokens}
 		if err != nil {
 			if ctx.Err() != nil {

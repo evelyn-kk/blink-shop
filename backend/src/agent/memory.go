@@ -291,10 +291,11 @@ func (r *RuleRunner) modelSummary(ctx context.Context, st ModelSettings, h histo
 		b.WriteString("用户：" + truncate(t.UserText, 120) + "\n回答：" + truncate(t.Answer, 160) + "\n")
 	}
 	b.WriteString("用户：" + truncate(content, 120) + "\n回答：" + truncate(answer, 160))
+	system, _ := r.deps.prompt(ctx, PromptSummary)
 	cctx, cancel := context.WithTimeout(ctx, st.Timeout)
 	defer cancel()
 	resp, err := r.deps.LLM.Complete(cctx, llm.Request{Model: st.PlannerModel, JSON: true, Temperature: 0, MaxTokens: 200,
-		Messages: []llm.Message{{Role: "system", Content: summaryPromptText}, {Role: "user", Content: b.String()}}})
+		Messages: []llm.Message{{Role: "system", Content: system}, {Role: "user", Content: b.String()}}})
 	if err != nil {
 		return "", err
 	}

@@ -33,6 +33,8 @@ type Deps struct {
 	Retriever *rag.Retriever
 	// ProductIndex 是商品向量索引；nil 表示商品只用关键词召回。
 	ProductIndex rag.ProductIndex
+	// Prompts 是已发布的 Prompt（管理端发布 / 回滚）；nil 表示全部用内置默认。
+	Prompts PromptSource
 	// ImageSearch 是图片找商品；nil 表示图搜不可用，search_image_products 返回 image_search_unavailable。
 	ImageSearch ImageSearcher
 	// Risk 在规划前检查用户输入；nil 表示不检查。

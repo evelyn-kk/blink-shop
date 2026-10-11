@@ -45,6 +45,10 @@ type Options struct {
 	ProductIndex rag.ProductIndex
 	// ImageSearch 是图片找商品；nil 表示图搜不可用（接口返回 503，导购如实说明）。商品图随商品变更异步重建。
 	ImageSearch *imagesearch.Service
+	// PromptTTL 是已发布 Prompt 的缓存时间（其他实例的发布最迟这么久后生效）；0 用 10 秒。
+	PromptTTL time.Duration
+	// PromptMirror 把发布后的 Prompt 推送到配置中心；nil 表示不推送。
+	PromptMirror PromptMirror
 	// Speech 是语音识别与合成；字段为 nil 表示未配置（接口返回 *_not_enabled）。
 	Speech SpeechOptions
 	// Fetcher 抓取知识采集的 URL；nil 时使用带 SSRF 防护的默认实现。测试可替换。
@@ -90,6 +94,8 @@ type Server struct {
 	vectorSync     sync.WaitGroup
 	syncs          productSyncs
 	speech         SpeechOptions
+	prompts        *agent.PromptCache
+	promptMirror   PromptMirror
 	speechSessions speechSessions
 	runTimeout     time.Duration
 	heartbeat      time.Duration
@@ -119,6 +125,7 @@ func NewServer(opts Options) *Server {
 		productIndex:   opts.ProductIndex,
 		imageSearch:    opts.ImageSearch,
 		speech:         opts.Speech,
+		promptMirror:   opts.PromptMirror,
 		runTimeout:     opts.AgentRunTimeout,
 		heartbeat:      opts.SSEHeartbeat,
 		runs:           newRunRegistry(),
@@ -138,13 +145,14 @@ func NewServer(opts Options) *Server {
 	if s.logger == nil {
 		s.logger = slog.New(slog.DiscardHandler)
 	}
+	s.prompts = agent.NewPromptCache(s.store, opts.PromptTTL, s.logger)
 	if s.runner == nil {
 		words := opts.RiskWords
 		if words == nil {
 			words = func(context.Context) []string { return risk.Split(configcenter.KeyRiskBlockedWords.Default) }
 		}
 		s.runner = agent.NewRuleRunner(agent.Deps{LLM: opts.LLM, Settings: opts.AgentSettings, Store: s.store, Shop: s.shop(), ProductIndex: opts.ProductIndex,
-			ImageSearch: serverImageSearch{s}, Retriever: rag.NewRetriever(s.store, opts.VectorIndex, s.logger), Risk: risk.WordList{Words: words}, Logger: s.logger,
+			ImageSearch: serverImageSearch{s}, Prompts: s.prompts, Retriever: rag.NewRetriever(s.store, opts.VectorIndex, s.logger), Risk: risk.WordList{Words: words}, Logger: s.logger,
 			Now: func() time.Time { return s.now() }})
 	}
 	if s.runTimeout <= 0 {
@@ -273,6 +281,11 @@ func (s *Server) routes() {
 	s.handle("PATCH /api/v1/admin/reviews/{id}", accessAdmin, s.handleUpdateAdminReview)
 	s.handle("GET /api/v1/admin/configs", accessAdmin, s.handleListAdminConfigs)
 	s.handle("PATCH /api/v1/admin/configs/{key}", accessAdmin, s.handleUpdateAdminConfig)
+	s.handle("GET /api/v1/admin/prompts", accessAdmin, s.handleListAdminPrompts)
+	s.handle("GET /api/v1/admin/prompts/{key}", accessAdmin, s.handleGetAdminPrompt)
+	s.handle("PATCH /api/v1/admin/prompts/{key}", accessAdmin, s.handleSavePromptDraft)
+	s.handle("POST /api/v1/admin/prompts/{key}/publish", accessAdmin, s.handlePublishPrompt)
+	s.handle("POST /api/v1/admin/prompts/{key}/rollback", accessAdmin, s.handleRollbackPrompt)
 	s.handle("GET /api/v1/admin/risk/overview", accessAdmin, s.handleRiskOverview)
 	s.handle("GET /api/v1/admin/audit-logs", accessAdmin, s.handleListAuditLogs)
 

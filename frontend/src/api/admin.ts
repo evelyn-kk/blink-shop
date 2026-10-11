@@ -4,9 +4,14 @@ import type {
   AdminProduct,
   AdminReview,
   AuditLog,
+  ConfigBackend,
   ConfigItem,
   MerchantPromotion,
   Page,
+  PromptDetail,
+  PromptPublishRecord,
+  PromptSummary,
+  PromptVersion,
   RiskOverview,
 } from '../types/api';
 import { request } from './http';
@@ -39,13 +44,37 @@ export function changeStatus<R extends AdminResource>(resource: R, id: string, s
   return request(`/admin/${resource}/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ status, reason }) });
 }
 
-export function listConfigs(): Promise<{ items: ConfigItem[] }> {
+export function listConfigs(): Promise<{ items: ConfigItem[]; backend: ConfigBackend }> {
   return request('/admin/configs');
 }
 
 /** 空值表示恢复默认值。 */
 export function updateConfig(key: string, value: string): Promise<ConfigItem> {
   return request(`/admin/configs/${encodeURIComponent(key)}`, { method: 'PATCH', body: JSON.stringify({ value }) });
+}
+
+export function listPrompts(): Promise<{ items: PromptSummary[] }> {
+  return request('/admin/prompts');
+}
+
+export function getPrompt(key: string): Promise<PromptDetail> {
+  return request(`/admin/prompts/${encodeURIComponent(key)}`);
+}
+
+export function savePromptDraft(key: string, content: string): Promise<PromptVersion> {
+  return request(`/admin/prompts/${encodeURIComponent(key)}`, { method: 'PATCH', body: JSON.stringify({ content }) });
+}
+
+/** 发布草稿（action=publish）或回滚到旧版本（action=rollback，version=0 回到内置默认）；expected 是页面上看到的生效版本。 */
+export function switchPrompt(
+  key: string,
+  action: 'publish' | 'rollback',
+  body: { version: number; expected: number; reason: string },
+): Promise<{ prompt: PromptDetail; record: PromptPublishRecord }> {
+  return request(`/admin/prompts/${encodeURIComponent(key)}/${action}`, {
+    method: 'POST',
+    body: JSON.stringify({ version: body.version, expected_active_version: body.expected, reason: body.reason }),
+  });
 }
 
 export function getRiskOverview(): Promise<RiskOverview> {

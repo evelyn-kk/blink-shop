@@ -1178,3 +1178,20 @@ td {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- Prompt 管理 ---------- */
+
+.prompt-content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.form textarea.prompt-editor {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

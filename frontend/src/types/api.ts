@@ -436,6 +436,61 @@ export interface ConfigItem {
   editable: boolean;
 }
 
+/** 动态配置存在哪里：nacos（healthy 为最近一次读写是否成功）或 memory（服务重启后丢失）。 */
+export interface ConfigBackend {
+  kind: 'nacos' | 'memory';
+  healthy: boolean;
+  checked_at: string | null;
+}
+
+export interface PromptVersion {
+  prompt_id: string;
+  version: number;
+  status: 'draft' | 'active' | 'archived';
+  title: string;
+  description: string;
+  content?: string;
+  runes: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  published_at: string | null;
+}
+
+export interface PromptSummary {
+  prompt_key: string;
+  title: string;
+  description: string;
+  placeholders: string[];
+  /** 0 表示内置默认。 */
+  active_version: number;
+  active_source: 'builtin' | 'published';
+  draft: PromptVersion | null;
+  version_count: number;
+}
+
+export interface PromptPublishRecord {
+  record_id: string;
+  prompt_key: string;
+  prompt_id: string;
+  version: number;
+  action: 'publish' | 'rollback';
+  from_version: number;
+  published_by: string;
+  reason: string;
+  target: string;
+  /** fallback：已生效，但推送配置中心失败。 */
+  result: 'pending' | 'success' | 'fallback';
+  detail: string;
+  created_at: string;
+}
+
+export interface PromptDetail extends PromptSummary {
+  builtin_content: string;
+  versions: PromptVersion[];
+  publish_records: PromptPublishRecord[];
+}
+
 export interface RiskOverview {
   accounts: Record<string, number>;
   merchants: Record<string, number>;

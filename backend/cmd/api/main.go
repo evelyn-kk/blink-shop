@@ -53,12 +53,23 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 	// MySQL 驱动默认直接往 stderr 写纯文本，这里改走统一的 JSON 脱敏日志。
 	_ = mysql.SetLogger(mysqlDriverLogger{logger})
 
-	// 动态配置暂时只有内存实现；Nacos 在 9.1 接入，不可用时同样退回这里。
-	dynamic := configcenter.NewMemorySource(nil)
+	// 先只用环境变量 / 默认值读一次，拿到 Nacos 的连接配置；再以 Nacos（没配置时是内存）为动态来源正式加载。
+	boot, err := configcenter.Load(ctx, configcenter.NewResolver(getenv, nil))
+	if err != nil {
+		return fmt.Errorf("配置不合法: %w", err)
+	}
+	dynamic := configcenter.OpenDynamic(boot.Nacos)
 	resolver := configcenter.NewResolver(getenv, dynamic)
 	cfg, err := configcenter.Load(ctx, resolver)
 	if err != nil {
 		return fmt.Errorf("配置不合法: %w", err)
+	}
+	if n, ok := dynamic.(*configcenter.NacosSource); ok {
+		at, nerr := n.Status()
+		logger.Info("dynamic config on nacos", "addr", cfg.Nacos.Addr, "group", cfg.Nacos.Group, "data_id_prefix", cfg.Nacos.DataIDPrefix,
+			"refresh", cfg.Nacos.Refresh.String(), "reachable", nerr == nil && !at.IsZero())
+	} else {
+		logger.Warn("NACOS_ADDR not set, dynamic config kept in memory (lost on restart)")
 	}
 	agentSettings, _ := configcenter.AgentSettingsOf(ctx, resolver) // Load 已校验
 	if err := configcenter.ValidateProduction(ctx, cfg, resolver); err != nil {
@@ -118,6 +129,8 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 		"tts_provider", cfg.Speech.TTSProvider, "tts_enabled", synthesizer != nil)
 
 	server := httpapi.NewServer(httpapi.Options{
+		PromptTTL:    cfg.Nacos.Refresh,
+		PromptMirror: promptMirror(cfg),
 		Speech:       httpapi.SpeechOptions{Recognizer: recognizer, Synthesizer: synthesizer, MaxSeconds: cfg.Speech.STTMaxSeconds, MaxRunes: cfg.Speech.TTSMaxRunes},
 		VectorIndex:  vec.knowledgeOpt(),
 		ProductIndex: vec.productOpt(),
@@ -322,4 +335,14 @@ func bootstrapVectorsWhenReady(ctx context.Context, st *mysqlstore.Store, vec ve
 		return
 	}
 	logger.Info("product vector bootstrap done", "products", n)
+}
+
+// promptMirror 在配置了 Nacos 时把发布的 Prompt 推送到 blink_shop.prompt.<key>（返回接口值：nil 指针不能直接赋给接口）。
+func promptMirror(cfg configcenter.Config) httpapi.PromptMirror {
+	m := configcenter.NewNacosPromptMirror(configcenter.NewNacosClient(configcenter.NacosOptions{Addr: cfg.Nacos.Addr, Namespace: cfg.Nacos.Namespace,
+		Group: cfg.Nacos.Group, Username: cfg.Nacos.Username, Password: cfg.Nacos.Password}), "blink_shop.prompt.")
+	if m == nil {
+		return nil
+	}
+	return m
 }

@@ -117,3 +117,14 @@ var (
 	KeyTTSCluster      = Key{Name: "speech.tts.cluster", Env: "TTS_CLUSTER", Default: "volcano_tts"}
 	KeyTTSMaxRunes     = Key{Name: "speech.tts.max_runes", Env: "TTS_MAX_RUNES", Default: "800"}
 )
+
+// 动态配置中心：配置了 NACOS_ADDR 时运行中可调的配置存在 Nacos（每项一个 dataId：前缀 + 配置名），否则在进程内存。仅启动时读取。
+var (
+	KeyNacosAddr           = Key{Name: "nacos.addr", Env: "NACOS_ADDR"}
+	KeyNacosNamespace      = Key{Name: "nacos.namespace", Env: "NACOS_NAMESPACE"}
+	KeyNacosGroup          = Key{Name: "nacos.group", Env: "NACOS_GROUP", Default: "BLINK_SHOP"}
+	KeyNacosUsername       = Key{Name: "nacos.username", Env: "NACOS_USERNAME"}
+	KeyNacosPassword       = Key{Name: "nacos.password", Env: "NACOS_PASSWORD", Secret: true}
+	KeyNacosDataIDPrefix   = Key{Name: "nacos.data_id_prefix", Env: "NACOS_DATA_ID_PREFIX", Default: "blink_shop.config."}
+	KeyNacosRefreshSeconds = Key{Name: "nacos.refresh_seconds", Env: "NACOS_REFRESH_SECONDS", Default: "10"}
+)

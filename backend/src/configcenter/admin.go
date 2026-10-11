@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -165,6 +166,12 @@ var settings = []Setting{
 	{Key: KeyImageEmbeddingModel, Description: "图片 Embedding 模型名（dashscope）"},
 	{Key: KeyImageEmbeddingDim, Description: "图片向量维度（dashscope；换模型或维度要重建集合）"},
 	{Key: KeyImageFetchAllowedHosts, Description: "允许服务端下载商品图的 https 域名（逗号分隔）；为空只读平台内图片"},
+	{Key: KeyNacosAddr, Description: "Nacos 地址（如 127.0.0.1:8848）；为空表示后台设置只保存在进程内存"},
+	{Key: KeyNacosNamespace, Description: "Nacos 命名空间"},
+	{Key: KeyNacosGroup, Description: "Nacos 分组"},
+	{Key: KeyNacosUsername, Description: "Nacos 用户名（开启鉴权时）"},
+	{Key: KeyNacosDataIDPrefix, Description: "动态配置的 dataId 前缀（每项一个 dataId）"},
+	{Key: KeyNacosRefreshSeconds, Description: "动态配置缓存时间（秒，1–15）：其他实例的修改最迟这么久后生效"},
 	{Key: KeySTTProvider, Description: "语音识别：off / mock（演示）/ xunfei（讯飞实时转写）"},
 	{Key: KeySTTAppID, Description: "语音识别 AppID"},
 	{Key: KeySTTEndpoint, Description: "语音识别 WebSocket 地址"},
@@ -187,6 +194,7 @@ var settings = []Setting{
 	{Key: KeyAIAPIKey, Description: "模型服务 API Key"},
 	{Key: KeyEmbeddingAPIKey, Description: "Embedding 服务 API Key"},
 	{Key: KeyImageEmbeddingAPIKey, Description: "图片 Embedding 服务 API Key（dashscope）"},
+	{Key: KeyNacosPassword, Description: "Nacos 密码"},
 	{Key: KeySTTAPIKey, Description: "语音识别 API Key"},
 	{Key: KeySTTAPISecret, Description: "语音识别 API Secret"},
 	{Key: KeyTTSAPIKey, Description: "语音合成 API Key（豆包为 token）"},
@@ -211,14 +219,29 @@ var (
 	ErrOverriddenByEnv = errors.New("该配置由环境变量指定，动态修改不会生效")
 )
 
-// Admin 读取全部配置的当前值，并把运行中可调的配置写入动态配置（目前是内存，9.1 接入 Nacos）。
+// Admin 读取全部配置的当前值，并把运行中可调的配置写入动态配置（Nacos；没配置 Nacos 时是进程内存）。
 type Admin struct {
 	resolver *Resolver
-	dynamic  *MemorySource
+	dynamic  Writable
 }
 
-func NewAdmin(r *Resolver, dynamic *MemorySource) *Admin {
+func NewAdmin(r *Resolver, dynamic Writable) *Admin {
 	return &Admin{resolver: r, dynamic: dynamic}
+}
+
+// Backend 是动态配置的存放位置：nacos 或 memory；Nacos 时附带最近一次拉取的时间和错误。
+type Backend struct {
+	Kind      string
+	CheckedAt time.Time
+	Err       error
+}
+
+func (a *Admin) Backend() Backend {
+	if n, ok := a.dynamic.(*NacosSource); ok {
+		at, err := n.Status()
+		return Backend{Kind: "nacos", CheckedAt: at, Err: err}
+	}
+	return Backend{Kind: "memory"}
 }
 
 func (a *Admin) entry(ctx context.Context, s Setting) Entry {
@@ -258,6 +281,8 @@ func (a *Admin) Set(ctx context.Context, name, value string) (before, after Entr
 	if err := before.Validate(value); err != nil {
 		return Entry{}, Entry{}, err
 	}
-	a.dynamic.Set(name, value)
+	if err := a.dynamic.Write(ctx, name, value); err != nil {
+		return Entry{}, Entry{}, err
+	}
 	return before, a.entry(ctx, before.Setting), nil
 }

@@ -379,7 +379,7 @@ sequenceDiagram
 - **状态修改**：请求体 `{status, reason}`。改为非正常状态（停用、风控、隐藏）必须写原因（≤200 字）。修改必须符合状态机：账号、店铺 active / inactive / risk 互转；商品可以上架、下架、风控，删除由商家操作，已删除是终态；促销只能停用/启用（不能改规则）；评价只有 visible / hidden。已经是目标状态 409 `status_unchanged`，状态机不允许 409 `invalid_status_transition`。管理员不能改自己的账号（409 `cannot_change_self`），因此至少总有一个可用的管理员。
 - **影响**：账号状态在每个请求时检查，已登录的 token 立即受影响（停用只能看会话和退出，风控只读）；店铺非正常状态时它的商品、促销、店铺券、知识资料都不再对外可见；商品非上架、评价隐藏后公开接口看不到。这些都由已有查询的可见性条件保证，不需要级联写。
 - **审计**：每次修改在同一个事务里写 `admin_audit_logs`（操作人 ID 和当时的显示名、动作、对象、前后值、原因、请求 ID），修改失败不留记录；按写入顺序（自增 `seq`）倒序查询，可按对象或操作人筛选。配置不在数据库里，先改配置再写审计，审计写入失败时把配置改回去。
-- **配置**：`configcenter.Settings()` 是管理端可见的全部配置（说明、能否运行中修改、校验）。列表返回当前值和来源（env / dynamic / default），密钥只返回掩码 `******`（未设置为空串），任何接口都不返回明文。只有运行中可调、不是密钥、没有被环境变量指定的配置可以改，按类型校验后写入动态配置并立即生效（例如限流、超时、风险词）；空值恢复默认值。动态配置目前是内存实现，重启后丢失，9.1 接入 Nacos。
+- **配置**：`configcenter.Settings()` 是管理端可见的全部配置（说明、能否运行中修改、校验）。列表返回当前值和来源（env / dynamic / default），密钥只返回掩码 `******`（未设置为空串），任何接口都不返回明文。只有运行中可调、不是密钥、没有被环境变量指定的配置可以改，按类型校验后写入动态配置并立即生效（例如限流、超时、风险词）；空值恢复默认值。动态配置存在 Nacos（配置了 `NACOS_ADDR`）或内存（重启后丢失），列表的 `backend` 字段说明存在哪里、配置中心是否正常；Nacos 写入失败时返回 503 `config_center_unavailable`，修改不生效、不写审计。见“配置 → 动态配置中心”。
 - **风控概览**：账号（不含已注销）、店铺、商品（不含已删除）按状态的数量，以及当前风险词。
 
 与上游的差异：上游列表没有任何筛选；状态可以随意改（不查状态机、没有确认、管理员可以停用自己）；没有审计；配置可以新建任意键、不校验类型，密钥掩码同样是 `******`；评价有 deleted 状态；改为相同状态返回 404。
@@ -583,7 +583,25 @@ boolean / array，required、additionalProperties=false、enum、minimum/maximum
   导航 / 非导购永远没有工具，`guide` 和 `image_search` 不能获得写工具；JSON 不合法时整体退回默认并记日志。规则处理器和模型共用同一份白名单。
 - **轨迹**：`planner.model`、`react.step.N`（动作、工具、轮次）、`react.fallback`、`answer.model` 都带 `model`、token 用量、耗时、
   提示字数和提示摘要（hash，不记原文）；错误只记分类，不记带地址或密钥的原始错误。事件的 `model` 字段由 metadata 里的 `model` 填充。
-- 提示模板内置在 `src/agent/prompts.go`（`agent.planner` / `agent.react`，版本 1），9.1 接入 Prompt 生命周期管理后由配置中心下发。
+- 提示模板的内置默认在 `src/agent/prompts.go`，运行时按“Prompt 生命周期”取当前生效版本（见下一节）。
+
+### Prompt 生命周期
+
+可管理的 Prompt 有 4 个（`agent.PromptSpecs`）：`agent.planner`（规划）、`agent.react`（工具循环与回答，必须且只能含一次 `{{TOOLS}}`）、
+`agent.rerank`（商品重排）、`agent.summary`（会话摘要）。数据存在 `agent_prompts`（每个版本一行，状态 draft / active / archived）和
+`agent_prompt_publish_records`（迁移 0007 增加动作、来源版本、原因、推送结果和自增序号）。
+
+- **草稿**：`PATCH /admin/prompts/{key}` 保存草稿，每个 Prompt 同时只有一个草稿（已有就覆盖，否则新建下一个版本号）；内容非空、最多 20000 字、
+  占位符恰好一次。草稿不影响运行。
+- **发布 / 回滚**：`POST /admin/prompts/{key}/publish`（`version` 必须是草稿）和 `.../rollback`（`version` 必须是历史版本，`0` 表示回到内置默认，原因必填）。
+  请求必须带 `expected_active_version`（页面上看到的生效版本，内置为 0）：别人先发布了返回 409 `prompt_active_changed`，不会互相覆盖。
+  切换生效版本、写发布记录和审计在同一个事务里（MySQL 锁住该 key 的所有版本行），并发发布只有一个成功。
+- **生效**：运行时以数据库为准。`agent.PromptCache` 按 key 缓存当前生效版本（TTL = `NACOS_REFRESH_SECONDS`，默认 10 秒）；
+  本实例发布后立即失效缓存，其他实例最多一个 TTL 后生效。没有发布过的用内置默认（版本 0）；读数据库失败时沿用缓存，从没读到过则用内置默认。
+- **推送配置中心**：配置了 Nacos 时，发布 / 回滚提交后把新的生效内容推送到 dataId `blink_shop.prompt.<key>`（JSON：`prompt_key`、`version`、`content`），
+  供配置中心查看。推送失败不影响生效，发布记录的 `result` 记为 `fallback`（成功为 `success`），日志记 warn。
+- **轨迹**：`planner.model`、`react.step.N`，以及用模型时的 `rerank.products`、`memory.summary` 的 metadata 带 `prompt` 和 `prompt_version`（内置为 0），
+  可以对照发布记录看一次回答用的是哪个版本。
 
 ### 无模型闭环
 
@@ -662,7 +680,7 @@ go run ./cmd/eval -suite=images -image-embedder=env       # 用 IMAGE_EMBEDDING_
 | `GET /admin/documents`、`GET /admin/documents/{id}`、`POST /admin/unstructured-ingestions` | admin |
 | `GET /admin/orders`、`GET,PATCH /admin/orders/{id}` | admin |
 | `GET /admin/accounts`、`PATCH /admin/accounts/{id}`、`GET /admin/merchants`、`PATCH /admin/merchants/{id}`、`GET /admin/products`、`PATCH /admin/products/{id}`、`GET /admin/promotions`、`PATCH /admin/promotions/{id}`、`GET /admin/reviews`、`PATCH /admin/reviews/{id}` | admin（不能修改自己的账号） |
-| `GET /admin/configs`、`PATCH /admin/configs/{key}`、`GET /admin/risk/overview`、`GET /admin/audit-logs` | admin |
+| `GET /admin/configs`、`PATCH /admin/configs/{key}`、`GET /admin/prompts`、`GET,PATCH /admin/prompts/{key}`、`POST /admin/prompts/{key}/publish`、`POST /admin/prompts/{key}/rollback`、`GET /admin/risk/overview`、`GET /admin/audit-logs` | admin |
 
 后续节点按前缀约定（`TestRoutePrefixRoles` 检查）：`/admin/*` → admin；`/merchant/*` → merchant；`/cart`、`/orders`、`/coupons/*`、`/agent/*`、`/speech/*` → user；`/files` → account；分类/商家/商品读取 → public。
 
@@ -677,7 +695,7 @@ go run ./cmd/eval -suite=images -image-embedder=env       # 用 IMAGE_EMBEDDING_
 
 ## 配置
 
-读取优先级：**环境变量 → 动态配置（Nacos/内存）→ 内置默认值**，空字符串视为未设置。动态配置目前只有内存实现，Nacos 在 9.1 接入。HTTP 配置每个请求重新读取，所以运行中修改动态配置会立即生效；动态配置写成非法值时，该项退回内置默认值，不会停服。
+读取优先级：**环境变量 → 动态配置（Nacos/内存）→ 内置默认值**，空字符串视为未设置。HTTP 配置每个请求重新读取，所以运行中修改动态配置会立即生效；动态配置写成非法值时，该项退回内置默认值，不会停服。
 
 | 环境变量 | 动态配置键 | 默认值 | 说明 |
 | --- | --- | --- | --- |
@@ -729,7 +747,25 @@ go run ./cmd/eval -suite=images -image-embedder=env       # 用 IMAGE_EMBEDDING_
 | `TTS_APP_ID` / `TTS_API_KEY` / `TTS_API_SECRET` | — | 空 | 合成凭据：讯飞三项都要；豆包为 appid + token（`TTS_API_KEY`） |
 | `TTS_ENDPOINT` / `TTS_DEFAULT_VOICE` / `TTS_CLUSTER` / `TTS_MAX_RUNES` | — | 按供应商默认 / 按供应商默认 / `volcano_tts` / `800` | 合成地址（生产讯飞只允许 `wss://`、豆包只允许 `https://`；默认地址都是 TLS）和默认音色（为空用供应商默认）、豆包集群、单次朗读最多字数（1–2000） |
 | `IMAGE_FETCH_ALLOWED_HOSTS` | — | 空 | 服务端可以下载商品图的 https 域名（逗号分隔，只写主机名，不接受 IP）；为空只读平台内图片 |
+| `NACOS_ADDR` | — | 空 | Nacos 地址（如 `127.0.0.1:8848`）；为空时动态配置存在内存 |
+| `NACOS_NAMESPACE` / `NACOS_GROUP` | — | 空 / `BLINK_SHOP` | 命名空间和分组 |
+| `NACOS_USERNAME` / `NACOS_PASSWORD` | — | 空 | Nacos 开鉴权时的账号（密码是密钥类）；生产必须配置 |
+| `NACOS_DATA_ID_PREFIX` | — | `blink_shop.config.` | 动态配置的 dataId 前缀，每个配置项一个 dataId（前缀 + 配置键） |
+| `NACOS_REFRESH_SECONDS` | — | `10` | 动态配置和 Prompt 缓存的刷新间隔（1–15 秒） |
 | `RISK_BLOCKED_WORDS` | `risk.blocked_words` | `违法,违禁,假货,绕过风控` | 导购对话的风险词，逗号分隔（最多 200 个、每个 20 字内） |
+
+### 动态配置中心
+
+配置了 `NACOS_ADDR` 时动态配置存在 Nacos（`configcenter.NacosSource`，调 v1 Open API），否则存在进程内存。
+
+- **存放**：每个配置项一个 dataId（`NACOS_DATA_ID_PREFIX` + 配置键，内容就是值），不放在一个 JSON 合集里——Nacos 的 HTTP 接口不支持 casMd5，
+  合集的“读-改-写”在多实例同时修改不同配置时会互相覆盖；分开存放后不同配置互不影响，同一配置并发修改以最后一次写入为准。
+- **读取**：按配置项缓存，超过 `NACOS_REFRESH_SECONDS` 才重新拉；Nacos 不可用时沿用最后一次读到的值（从没读到过则用环境变量 / 默认值），
+  下一个刷新间隔再试，服务照常启动和运行。Nacos 的读是最终一致的（写入后约 1 秒内其他实例可见）。
+- **写入**：管理端修改只写这一项（恢复默认 = 删除该 dataId）；写成功才在本实例生效并写审计，写失败返回 503 `config_center_unavailable`，不生效。
+- **状态**：`GET /admin/configs` 的 `backend`（`kind` = nacos / memory，`healthy` = 最近一次读写是否成功，`checked_at`），Web 配置页据此提示。
+- 启动时先只用环境变量读出 Nacos 连接配置，再用它创建动态配置来源；Nacos 自身的连接配置不能放在 Nacos 里。
+- 集成测试 `TestNacosIntegration` 需要 `BLINK_TEST_NACOS_ADDR`（如 `127.0.0.1:8848`），用分组 `BLINK_SHOP_TEST` 和随机前缀，测完删除。
 
 ### 生产危险配置
 
@@ -744,6 +780,7 @@ go run ./cmd/eval -suite=images -image-embedder=env       # 用 IMAGE_EMBEDDING_
 - 启用了真实语音供应商但地址不是 TLS：讯飞（`STT_ENDPOINT`、`TTS_ENDPOINT`）不是 `wss://`、豆包（`TTS_ENDPOINT`）不是 `https://`——
   否则讯飞的 AppID、API Key、签名和实时音频，豆包的 token（请求头和请求体里都有）会走明文链路；开发 / 测试环境仍可用 `ws://`、`http://` 接本地假服务；
 - `AI_API_KEY` 非空但是示例值（`changeme`、`your-api-key`、`sk-xxx`）；为空允许，表示不接模型，导购只走规则；
+- 配置了 `NACOS_ADDR` 但 `NACOS_USERNAME` / `NACOS_PASSWORD` 为空或是默认值（`nacos` 等）——生产的 Nacos 必须开鉴权；
 - `TRUST_ALL_PROXIES` 开启。
 
 错误信息只列出配置名，不回显配置值。

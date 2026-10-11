@@ -80,7 +80,12 @@ func (r *RuleRunner) Run(ctx context.Context, in Input, out Output) error {
 	defer func() {
 		if ctx.Err() == nil {
 			if summary, mode := r.updateSummary(ctx, st, in, s.plan, hist, s.answer.String()); summary != "" {
-				out.Trace("memory", "summary", "ok", 0, map[string]any{"mode": mode, "runes": utf8.RuneCountInString(summary)})
+				meta := map[string]any{"mode": mode, "runes": utf8.RuneCountInString(summary)}
+				if mode == "model" {
+					meta["prompt"] = PromptSummary
+					_, meta["prompt_version"] = r.deps.prompt(ctx, PromptSummary)
+				}
+				out.Trace("memory", "summary", "ok", 0, meta)
 			}
 		}
 	}()
@@ -328,6 +333,9 @@ func (s *session) traceRetrieval(data any) {
 		s.out.Trace("retrieval", "products", "ok", 0, map[string]any{"keyword": d.Recall.Keyword, "vector": d.Recall.Vector,
 			"vector_error": d.Recall.VectorError, "filtered": d.Filtered, "relevance": d.Relevance, "conflicts": len(d.Conflicts)})
 		meta := map[string]any{"mode": d.Rerank.Mode, "scores": d.Rerank.Scores}
+		if d.Rerank.Mode == "model" || d.Rerank.Error != "" {
+			meta["prompt"], meta["prompt_version"] = PromptRerank, d.Rerank.PromptVersion
+		}
 		status := "ok"
 		if d.Rerank.Error != "" {
 			meta["error"], meta["fallback"], status = d.Rerank.Error, "rule", "error"

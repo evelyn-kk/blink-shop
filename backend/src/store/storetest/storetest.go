@@ -73,6 +73,7 @@ func Run(t *testing.T, newStore Factory) {
 	cases = append(cases, merchantOpsCases()...)
 	cases = append(cases, adminCases()...)
 	cases = append(cases, agentCases()...)
+	cases = append(cases, promptCases()...)
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) { c.fn(t, newStore(t)) })
 	}

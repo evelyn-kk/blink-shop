@@ -433,16 +433,31 @@ type AgentPrompt struct {
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
+// AgentPromptPublishRecord 是一次发布或回滚。Version 为切换后的 active 版本（0 表示内置默认），FromVersion 为切换前的。
+// Result：pending（推送配置中心中）、success、fallback（配置中心推送失败，运行时以数据库为准）。
 type AgentPromptPublishRecord struct {
 	RecordID    string    `json:"record_id"`
 	PromptKey   string    `json:"prompt_key"`
 	PromptID    string    `json:"prompt_id"`
 	Version     int       `json:"version"`
+	Action      string    `json:"action"`
+	FromVersion int       `json:"from_version"`
 	PublishedBy string    `json:"published_by"`
+	Reason      string    `json:"reason"`
 	Target      string    `json:"target"`
 	Result      string    `json:"result"`
+	Detail      string    `json:"detail"`
 	CreatedAt   time.Time `json:"created_at"`
 }
+
+// Prompt 发布动作与推送结果。
+const (
+	PromptActionPublish  = "publish"
+	PromptActionRollback = "rollback"
+	PublishPending       = "pending"
+	PublishSuccess       = "success"
+	PublishFallback      = "fallback"
+)
 
 // AppConfig 是动态配置项；Secret 为 true 时 Value 在列表/日志/trace 中永远是掩码。
 type AppConfig struct {

@@ -3,9 +3,10 @@ import { listConfigs, updateConfig } from '../api/admin';
 import { ApiError } from '../api/http';
 import { ErrorState, Loading } from '../components/StateView';
 import { StatusBadge } from '../components/StatusBadge';
+import { formatDateTime } from '../lib/format';
 import { notify } from '../lib/notice';
 import { useRequest } from '../lib/useRequest';
-import type { ConfigItem } from '../types/api';
+import type { ConfigBackend, ConfigItem } from '../types/api';
 
 const sourceLabel: Record<ConfigItem['source'], string> = { env: '环境变量', dynamic: '后台设置', default: '默认值' };
 
@@ -20,9 +21,10 @@ export function AdminConfigsPage() {
           刷新
         </button>
       </div>
-      <p className="muted small">优先级：环境变量 → 后台设置 → 默认值。后台设置目前保存在内存里，服务重启后恢复。</p>
+      <p className="muted small">优先级：环境变量 → 后台设置 → 默认值。</p>
       {result.status === 'loading' && <Loading />}
       {result.status === 'error' && <ErrorState message={result.message} onRetry={reload} />}
+      {result.status === 'ok' && <BackendNote backend={result.data.backend} />}
       {result.status === 'ok' && (
         <ul className="doc-list">
           {result.data.items.map((c) => (
@@ -33,6 +35,32 @@ export function AdminConfigsPage() {
         </ul>
       )}
     </section>
+  );
+}
+
+function BackendNote({ backend }: { backend?: ConfigBackend }) {
+  if (!backend) return null;
+  if (backend.kind === 'memory') {
+    return (
+      <p className="tag-row">
+        <StatusBadge tone="muted">后台设置存在内存</StatusBadge>
+        <span className="muted small">没有配置 Nacos，服务重启后恢复，多个实例之间不同步。</span>
+      </p>
+    );
+  }
+  const checked = backend.checked_at ? `（${formatDateTime(backend.checked_at)} 检查）` : '';
+  return (
+    <p className="tag-row">
+      <StatusBadge tone="info">后台设置存在 Nacos</StatusBadge>
+      {backend.healthy ? (
+        <span className="muted small">配置中心正常{checked}，修改后其他实例在缓存刷新后生效。</span>
+      ) : (
+        <span role="status">
+          <StatusBadge tone="warn">配置中心不可用</StatusBadge>
+          <span className="muted small"> 正在沿用最后一次读取的值{checked}，此时修改不会生效。</span>
+        </span>
+      )}
+    </p>
   );
 }
 

@@ -49,6 +49,9 @@ type state struct {
 	traces      map[string]domain.AgentTraceEvent
 	traceSeq    map[string]int64 // 轨迹的写入顺序
 	messageSeq  map[string]int64 // 用户消息的写入顺序
+	prompts     map[string]domain.AgentPrompt
+	publishes   map[string]domain.AgentPromptPublishRecord
+	publishSeq  map[string]int64 // 发布记录的写入顺序
 }
 
 func newState() state {
@@ -62,6 +65,7 @@ func newState() state {
 		audits: map[string]store.AuditLog{}, auditSeq: map[string]int64{},
 		sessions: map[string]domain.ChatSession{}, messages: map[string]domain.UserMessage{}, runs: map[string]domain.AgentRun{},
 		traces: map[string]domain.AgentTraceEvent{}, traceSeq: map[string]int64{}, messageSeq: map[string]int64{},
+		prompts: map[string]domain.AgentPrompt{}, publishes: map[string]domain.AgentPromptPublishRecord{}, publishSeq: map[string]int64{},
 	}
 }
 
@@ -77,6 +81,7 @@ func (s state) clone() state {
 		audits: maps.Clone(s.audits), auditSeq: maps.Clone(s.auditSeq),
 		sessions: maps.Clone(s.sessions), messages: maps.Clone(s.messages), runs: maps.Clone(s.runs),
 		traces: maps.Clone(s.traces), traceSeq: maps.Clone(s.traceSeq), messageSeq: maps.Clone(s.messageSeq),
+		prompts: maps.Clone(s.prompts), publishes: maps.Clone(s.publishes), publishSeq: maps.Clone(s.publishSeq),
 	}
 }
 

@@ -18,6 +18,7 @@ const targetTypes: { value: string; label: string }[] = [
   { value: 'promotion', label: '促销' },
   { value: 'review', label: '评价' },
   { value: 'config', label: '配置' },
+  { value: 'prompt', label: 'Prompt' },
 ];
 
 // 操作审计：管理员的状态修改和配置修改，按时间倒序，可按对象类型和 ID 筛选（列表里的“记录”按钮直接带上筛选条件）。

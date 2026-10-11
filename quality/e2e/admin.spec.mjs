@@ -137,12 +137,59 @@ test('商家和普通用户打不开管理页面，也调不了管理接口', as
   for (const username of ['blink_merchant', 'blink_user']) {
     const session = await apiLogin(request, username);
     await signedIn(page, session);
-    for (const path of ['/#/admin/platform', '/#/admin/risk', '/#/admin/configs', '/#/admin/audit']) {
+    for (const path of ['/#/admin/platform', '/#/admin/risk', '/#/admin/configs', '/#/admin/prompts', '/#/admin/audit']) {
       await page.goto(path);
       await page.reload();
       await expect(page.getByText('当前账号不是管理员，无权访问平台管理')).toBeVisible();
     }
     const res = await request.get('/api/v1/admin/configs', { headers: { Authorization: `Bearer ${session.token}` } });
     expect(res.status()).toBe(403);
+  }
+});
+
+test('Prompt：保存草稿 → 发布（立即生效，有发布记录）→ 恢复内置默认（原因必填）', async ({ page, request }, testInfo) => {
+  const admin = await apiLogin(request, 'blink_admin');
+  const auth = { Authorization: `Bearer ${admin.token}` };
+  const key = 'agent.summary';
+  const detail = async () => (await request.get(`/api/v1/admin/prompts/${key}`, { headers: auth })).json();
+  const text = `E2E 摘要 ${testInfo.project.name} ${Date.now()}：用一两句话概括用户的需求和已推荐的商品。`;
+  await signedIn(page, admin);
+  try {
+    await page.goto(`/#/admin/prompts?key=${key}`);
+    await expect(page.getByRole('heading', { name: 'Prompt 管理' })).toBeVisible();
+    await expect(page.getByRole('link', { name: /会话摘要/ })).toHaveAttribute('aria-current', 'page');
+    const editor = page.getByRole('textbox', { name: /草稿/ });
+    await editor.fill(text);
+    await page.getByRole('button', { name: '保存草稿' }).click();
+    await expect(page.locator('.toast').last()).toContainText('已保存草稿');
+    const draft = (await detail()).versions.find((v) => v.status === 'draft');
+    expect(draft.content).toBe(text);
+    // 重新打开页面，编辑框里是草稿内容
+    await page.reload();
+    await expect(page.getByRole('textbox', { name: `编辑草稿 v${draft.version}` })).toHaveValue(text);
+
+    await page.getByRole('button', { name: `发布草稿 v${draft.version}` }).click();
+    await page.getByRole('dialog').getByRole('button', { name: '确认发布' }).click();
+    await expect(page.getByText(`生效：v${draft.version}`)).toBeVisible();
+    const published = await detail();
+    expect(published.active_version).toBe(draft.version);
+    expect(published.publish_records[0]).toMatchObject({ action: 'publish', version: draft.version });
+    await page.screenshot({ path: shots(testInfo, 'prompts'), fullPage: true });
+
+    await page.getByRole('button', { name: '恢复内置默认' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', { name: '确认回滚' }).click();
+    await expect(dialog.getByText('请填写原因')).toBeVisible();
+    await dialog.getByLabel(/原因/).fill('E2E 恢复');
+    await dialog.getByRole('button', { name: '确认回滚' }).click();
+    await expect(page.getByText('生效：内置默认')).toBeVisible();
+    const audit = await (await request.get('/api/v1/admin/audit-logs?target_type=prompt&target_id=agent.summary', { headers: auth })).json();
+    expect(audit.items[0]).toMatchObject({ action: 'prompt.rolled_back', reason: 'E2E 恢复' });
+  } finally {
+    // 不管中途哪里失败，都回到内置默认，不影响其他用例
+    const d = await detail();
+    if (d.active_version !== 0) {
+      await request.post(`/api/v1/admin/prompts/${key}/rollback`, { headers: auth, data: { version: 0, expected_active_version: d.active_version, reason: 'E2E 清理' } });
+    }
   }
 });

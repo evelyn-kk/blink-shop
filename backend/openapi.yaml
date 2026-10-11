@@ -1508,12 +1508,304 @@ paths:
                 message: 评价不存在
         "409":
           $ref: "#/components/responses/StatusChangeConflict"
+  /admin/prompts:
+    get:
+      tags: [admin]
+      operationId: listAdminPrompts
+      summary: Prompt 列表
+      description: |
+        导购的 4 个可管理 Prompt（规划、工具循环、商品重排、会话摘要）：当前生效版本（0 = 内置默认）、草稿、版本数，以及最近 20 条发布记录。
+        Prompt 里不含任何密钥；发布后本实例立即生效，其他实例最迟 NACOS_REFRESH_SECONDS 秒后生效；运行轨迹记录实际用到的 prompt 和 prompt_version。
+      responses:
+        "200":
+          description: Prompt 列表
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, publish_records]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PromptSummary"
+                  publish_records:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PromptPublishRecord"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /admin/prompts/{key}:
+    get:
+      tags: [admin]
+      operationId: getAdminPrompt
+      summary: Prompt 详情
+      description: 全部版本（含内容）、内置默认内容、最近 50 条发布记录。
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [agent.planner, agent.react, agent.rerank, agent.summary]
+      responses:
+        "200":
+          description: Prompt 详情
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromptDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`prompt_not_found`"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: prompt_not_found
+                message: 没有这个 Prompt
+    patch:
+      tags: [admin]
+      operationId: savePromptDraft
+      summary: 保存草稿
+      description: |
+        每个 Prompt 同时只有一个草稿：已有草稿时覆盖，否则新建下一个版本号。草稿不影响运行，发布后才生效。
+        内容去空白后 1–20000 字，必须保留该 Prompt 的占位符（工具循环为 `{{TOOLS}}`，恰好一次）。写操作审计。
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [agent.planner, agent.react, agent.rerank, agent.summary]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                title:
+                  type: string
+                  maxLength: 64
+                description:
+                  type: string
+                  maxLength: 500
+      responses:
+        "200":
+          description: 草稿
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromptVersion"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`prompt_not_found`"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: prompt_not_found
+                message: 没有这个 Prompt
+  /admin/prompts/{key}/publish:
+    post:
+      tags: [admin]
+      operationId: publishPrompt
+      summary: 发布草稿
+      description: |
+        把草稿设为生效版本（原生效版本归档），与发布记录、操作审计在一个事务里提交；随后推送配置中心（Nacos dataId `blink_shop.prompt.<key>`），
+        推送失败时记录 result=fallback（运行时以数据库为准，不影响生效）。之前运行的轨迹保留它们当时的版本。
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [agent.planner, agent.react, agent.rerank, agent.summary]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, expected_active_version]
+              properties:
+                version:
+                  type: integer
+                  minimum: 0
+                  description: 要发布的草稿版本（≥1）
+                expected_active_version:
+                  type: integer
+                  minimum: 0
+                  description: 调用方看到的当前生效版本（内置默认为 0）；不一致时 409，防止覆盖别人的发布
+                reason:
+                  type: string
+                  maxLength: 200
+                  description: 记入发布记录和审计
+      responses:
+        "200":
+          description: 切换后的 Prompt 详情和这次的发布记录
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [prompt, record]
+                properties:
+                  prompt:
+                    $ref: "#/components/schemas/PromptDetail"
+                  record:
+                    $ref: "#/components/schemas/PromptPublishRecord"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`prompt_not_found` / `prompt_version_not_found`"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: prompt_version_not_found
+                message: 没有这个版本
+        "409":
+          description: "`prompt_active_changed`（expected_active_version 不是当前生效版本）/ `prompt_state_conflict`（目标版本不是草稿）"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: prompt_active_changed
+                message: 生效版本已被其他人修改，请刷新后确认再操作
+  /admin/prompts/{key}/rollback:
+    post:
+      tags: [admin]
+      operationId: rollbackPrompt
+      summary: 回滚
+      description: 把生效版本切回一个已归档的版本，或 version=0 回到内置默认；reason 必填。其余同发布。
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [agent.planner, agent.react, agent.rerank, agent.summary]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, expected_active_version]
+              properties:
+                version:
+                  type: integer
+                  minimum: 0
+                  description: 要回到的已归档版本；0 表示内置默认
+                expected_active_version:
+                  type: integer
+                  minimum: 0
+                  description: 调用方看到的当前生效版本（内置默认为 0）；不一致时 409，防止覆盖别人的发布
+                reason:
+                  type: string
+                  maxLength: 200
+                  description: 记入发布记录和审计
+      responses:
+        "200":
+          description: 切换后的 Prompt 详情和这次的发布记录
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [prompt, record]
+                properties:
+                  prompt:
+                    $ref: "#/components/schemas/PromptDetail"
+                  record:
+                    $ref: "#/components/schemas/PromptPublishRecord"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`prompt_not_found` / `prompt_version_not_found`"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: prompt_version_not_found
+                message: 没有这个版本
+        "409":
+          description: "`prompt_active_changed` / `prompt_state_conflict`（目标版本不是已归档版本）"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: prompt_state_conflict
+                message: 这个版本当前的状态不能执行该操作
   /admin/configs:
     get:
       tags: [admin]
       operationId: listAdminConfigs
       summary: 配置列表
-      description: 全部已注册的配置项（不分页），密钥只返回掩码。值的优先级为环境变量 → 动态配置 → 默认值。
+      description: |
+        全部已注册的配置项（不分页），密钥只返回掩码。值的优先级为环境变量 → 动态配置 → 默认值。
+        动态配置存在 Nacos（配置了 NACOS_ADDR，每项一个 dataId，读取缓存 NACOS_REFRESH_SECONDS 秒，不可用时沿用最后一次读到的值）
+        或进程内存；`backend` 说明存放位置和最近一次读写配置中心是否成功。
       responses:
         "200":
           description: 配置项
@@ -1524,12 +1816,25 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required: [items, backend]
                 properties:
                   items:
                     type: array
                     items:
                       $ref: "#/components/schemas/ConfigItem"
+                  backend:
+                    type: object
+                    required: [kind, healthy, checked_at]
+                    properties:
+                      kind:
+                        type: string
+                        enum: [nacos, memory]
+                      healthy:
+                        type: boolean
+                        description: 最近一次读写配置中心是否成功（memory 恒为 true）
+                      checked_at:
+                        type: [string, "null"]
+                        format: date-time
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1540,8 +1845,9 @@ paths:
       operationId: updateAdminConfig
       summary: 修改配置
       description: |
-        只能修改运行中可调的配置（editable=true），写入动态配置后立即生效，并写操作审计；空值表示恢复默认值。
-        密钥和只在启动时读取的配置 409 `config_read_only`；由环境变量指定的 409 `config_overridden_by_env`；值不合法 400（field=value）。
+        只能修改运行中可调的配置（editable=true），写入动态配置后本实例立即生效（其他实例最迟 NACOS_REFRESH_SECONDS 秒后），并写操作审计；
+        空值表示恢复默认值。密钥和只在启动时读取的配置 409 `config_read_only`；由环境变量指定的 409 `config_overridden_by_env`；
+        值不合法 400（field=value）；配置中心不可用 503 `config_center_unavailable`（修改没有生效、不写审计）。
         上游可以新建任意键、不校验类型；这里只接受已注册的键。
       parameters:
         - name: key
@@ -1599,6 +1905,18 @@ paths:
               example:
                 code: config_read_only
                 message: 该配置只在启动时读取，不能在运行中修改
+        "503":
+          description: "`config_center_unavailable`：配置中心不可用，修改没有生效"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: config_center_unavailable
+                message: 配置中心暂时不可用，修改没有生效，请稍后重试
   /admin/risk/overview:
     get:
       tags: [admin]
@@ -1631,7 +1949,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [account, merchant, product, promotion, review, config]
+            enum: [account, merchant, product, promotion, review, config, prompt]
         - name: target_id
           in: query
           required: false
@@ -5054,6 +5372,116 @@ components:
             updated_at:
               type: string
               format: date-time
+    PromptVersion:
+      type: object
+      required: [prompt_id, version, status, title, description, runes, created_by, created_at, updated_at, published_at]
+      properties:
+        prompt_id:
+          type: string
+        version:
+          type: integer
+        status:
+          type: string
+          enum: [draft, active, archived]
+        title:
+          type: string
+        description:
+          type: string
+        content:
+          type: string
+          description: 详情和草稿接口返回；列表里的草稿摘要不含内容
+        runes:
+          type: integer
+        created_by:
+          type: string
+          description: 最后保存草稿的管理员账户 ID
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        published_at:
+          type: [string, "null"]
+          format: date-time
+    PromptSummary:
+      type: object
+      required: [prompt_key, title, description, placeholders, active_version, active_source, draft, version_count]
+      properties:
+        prompt_key:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        placeholders:
+          type: array
+          items:
+            type: string
+          description: 内容里必须保留的占位符
+        active_version:
+          type: integer
+          description: 当前生效版本，0 表示内置默认
+        active_source:
+          type: string
+          enum: [builtin, published]
+        draft:
+          oneOf:
+            - $ref: "#/components/schemas/PromptVersion"
+            - type: "null"
+        version_count:
+          type: integer
+    PromptDetail:
+      allOf:
+        - $ref: "#/components/schemas/PromptSummary"
+        - type: object
+          required: [builtin_content, versions, publish_records]
+          properties:
+            builtin_content:
+              type: string
+            versions:
+              type: array
+              items:
+                $ref: "#/components/schemas/PromptVersion"
+            publish_records:
+              type: array
+              items:
+                $ref: "#/components/schemas/PromptPublishRecord"
+    PromptPublishRecord:
+      type: object
+      required: [record_id, prompt_key, prompt_id, version, action, from_version, published_by, reason, target, result, detail, created_at]
+      properties:
+        record_id:
+          type: string
+        prompt_key:
+          type: string
+        prompt_id:
+          type: string
+          description: 回到内置默认时为空
+        version:
+          type: integer
+          description: 切换后的生效版本（0 = 内置默认）
+        action:
+          type: string
+          enum: [publish, rollback]
+        from_version:
+          type: integer
+        published_by:
+          type: string
+        reason:
+          type: string
+        target:
+          type: string
+          description: 推送目标（Nacos dataId），没配置配置中心时为 database
+        result:
+          type: string
+          enum: [pending, success, fallback]
+          description: fallback 表示配置中心推送失败，运行时以数据库为准
+        detail:
+          type: string
+        created_at:
+          type: string
+          format: date-time
     ConfigItem:
       type: object
       required: [key, env, description, value, source, secret, editable]

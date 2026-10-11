@@ -74,3 +74,21 @@ func (m *MemorySource) Set(name, value string) {
 	defer m.mu.Unlock()
 	m.values[name] = value
 }
+
+// Write 实现 Writable（内存写入不会失败；空值表示删除）。
+func (m *MemorySource) Write(_ context.Context, name, value string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if value == "" {
+		delete(m.values, name)
+	} else {
+		m.values[name] = value
+	}
+	return nil
+}
+
+// Writable 是可写的动态配置来源（内存或 Nacos）。
+type Writable interface {
+	Source
+	Write(ctx context.Context, name, value string) error
+}

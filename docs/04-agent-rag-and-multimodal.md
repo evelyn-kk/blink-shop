@@ -21,7 +21,7 @@
 
 ## Prompt 与配置治理
 
-Prompt 由 `prompt_key + version + status` 管理；发布时创建新版本、原子设 active、写发布记录并推送 Nacos。动态配置 15 秒以内刷新，密钥字段列表只显示掩码。每次运行 trace 记录 planner、prompt version、每个工具输入（脱敏）、检索 chunk ids、模型名、耗时、错误和最终状态。
+Prompt 由 `prompt_key + version + status` 管理；发布时创建新版本、原子设 active、写发布记录并推送 Nacos。动态配置 15 秒以内刷新，密钥字段列表只显示掩码。（实现见 `backend/README.md` 的“Prompt 生命周期”和“动态配置中心”：运行时以数据库为准，Nacos 推送失败记 fallback；发布带期望生效版本防止覆盖。）每次运行 trace 记录 planner、prompt version、每个工具输入（脱敏）、检索 chunk ids、模型名、耗时、错误和最终状态。
 
 ## 向导、风控、语音
 

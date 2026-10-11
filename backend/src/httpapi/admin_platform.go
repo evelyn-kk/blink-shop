@@ -18,6 +18,23 @@ import (
 type ConfigAdmin interface {
 	List(ctx context.Context) []configcenter.Entry
 	Set(ctx context.Context, name, value string) (before, after configcenter.Entry, err error)
+	Backend() configcenter.Backend
+}
+
+// configBackendView 是动态配置的存放位置：nacos（healthy 为最近一次读写是否成功）或 memory（重启后丢失）。
+type configBackendView struct {
+	Kind      string     `json:"kind"`
+	Healthy   bool       `json:"healthy"`
+	CheckedAt *time.Time `json:"checked_at"`
+}
+
+func toBackendView(b configcenter.Backend) configBackendView {
+	v := configBackendView{Kind: b.Kind, Healthy: b.Err == nil}
+	if !b.CheckedAt.IsZero() {
+		t := b.CheckedAt
+		v.CheckedAt = &t
+	}
+	return v
 }
 
 const (
@@ -34,6 +51,7 @@ var (
 	ErrConfigReadOnly   = &APIError{Status: http.StatusConflict, Code: "config_read_only", Message: "该配置只在启动时读取，不能在运行中修改"}
 	ErrConfigByEnv      = &APIError{Status: http.StatusConflict, Code: "config_overridden_by_env", Message: "该配置由环境变量指定，动态修改不会生效"}
 	ErrConfigsDisabled  = &APIError{Status: http.StatusServiceUnavailable, Code: "config_admin_unavailable", Message: "配置管理未启用"}
+	ErrConfigCenterDown = &APIError{Status: http.StatusServiceUnavailable, Code: "config_center_unavailable", Message: "配置中心暂时不可用，修改没有生效，请稍后重试"}
 )
 
 var statusText = map[string]string{
@@ -460,7 +478,7 @@ func (s *Server) handleListAdminConfigs(w http.ResponseWriter, r *http.Request) 
 	for _, e := range s.configs.List(r.Context()) {
 		items = append(items, toConfigView(e))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "backend": toBackendView(s.configs.Backend())})
 }
 
 type configUpdate struct {
@@ -495,6 +513,10 @@ func (s *Server) handleUpdateAdminConfig(w http.ResponseWriter, r *http.Request)
 		return
 	case errors.Is(err, configcenter.ErrOverriddenByEnv):
 		writeError(w, ErrConfigByEnv)
+		return
+	case errors.Is(err, configcenter.ErrConfigCenter):
+		s.logger.WarnContext(r.Context(), "config center write failed", "request_id", requestIDFromContext(r.Context()), "key", key, "error", err)
+		writeError(w, ErrConfigCenterDown)
 		return
 	case err != nil:
 		writeError(w, fieldError("value", err.Error()))
@@ -588,7 +610,7 @@ func toAuditView(l store.AuditLog) auditView {
 
 // handleListAuditLogs 查询管理员操作审计，可按对象（类型 + ID）或操作人筛选。
 func (s *Server) handleListAuditLogs(w http.ResponseWriter, r *http.Request) {
-	targetType, err := readEnum[string](r, "target_type", "account", "merchant", "product", "promotion", "review", "config")
+	targetType, err := readEnum[string](r, "target_type", "account", "merchant", "product", "promotion", "review", "config", "prompt")
 	if err != nil {
 		writeError(w, err)
 		return

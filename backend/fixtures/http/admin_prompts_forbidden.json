@@ -1,0 +1,16 @@
+{
+  "description": "非管理员（商家、普通用户）访问 Prompt 管理：403 forbidden；修改、发布、回滚同样 403",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/admin/prompts",
+    "as": "blink_merchant"
+  },
+  "response": {
+    "status": 403,
+    "body": {
+      "code": "forbidden",
+      "message": "当前账号无权访问",
+      "request_id": "<request_id>"
+    }
+  }
+}

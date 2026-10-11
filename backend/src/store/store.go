@@ -24,6 +24,10 @@ var (
 	ErrConflict = errors.New("store: conflict")
 	// ErrInvalid 输入不满足存储层的基本约束。
 	ErrInvalid = errors.New("store: invalid input")
+	// ErrPromptActiveChanged：发布 / 回滚时 active 版本已经被别人改了（期望版本不符）。
+	ErrPromptActiveChanged = errors.New("store: prompt active version changed")
+	// ErrPromptState：目标版本的状态不允许这个动作（例如发布已归档的版本、回滚到草稿）。
+	ErrPromptState = errors.New("store: prompt version state does not allow this action")
 
 	// 领券失败的原因（ClaimCoupon）。
 	ErrCouponUnavailable  = errors.New("store: coupon not claimable") // 停用、未开始、已结束或所属店铺停业
@@ -613,6 +617,20 @@ type Store interface {
 	InsertAuditLog(ctx context.Context, l AuditLog) (AuditLog, error)
 	ListAuditLogs(ctx context.Context, q AuditQuery) ([]AuditLog, int, error)
 
+	// Prompt 生命周期。ListPrompts 返回 key 的全部版本（key 为空时全部 key），按 key 升序、版本降序。
+	ListPrompts(ctx context.Context, key string) ([]domain.AgentPrompt, error)
+	// ActivePrompt 返回 key 当前生效的版本；没有发布过（用内置默认）时返回 ErrNotFound。
+	ActivePrompt(ctx context.Context, key string) (domain.AgentPrompt, error)
+	// SavePromptDraft 保存 key 的草稿：已有草稿（最新版本是 draft）时原地更新内容，否则新建下一个版本号的草稿。
+	SavePromptDraft(ctx context.Context, p domain.AgentPrompt) (domain.AgentPrompt, error)
+	// SwitchPrompt 在一个事务里切换 key 的 active 版本并写发布记录：publish 只能发布草稿，rollback 只能回到已归档版本或
+	// Version=0（内置默认）；当前 active 版本（0 表示内置）不等于 ExpectedActive 时返回 ErrPromptActiveChanged。
+	// 返回切换后的 active（回到内置时为 nil）和发布记录（Result=pending）。
+	SwitchPrompt(ctx context.Context, sw PromptSwitch) (*domain.AgentPrompt, domain.AgentPromptPublishRecord, error)
+	// UpdatePromptPublishResult 回写发布记录的推送结果。
+	UpdatePromptPublishResult(ctx context.Context, recordID, result, detail string) error
+	ListPromptPublishRecords(ctx context.Context, key string, page Page) ([]domain.AgentPromptPublishRecord, int, error)
+
 	// 导购会话。所有方法都按 accountID 限定：别人的会话、消息和运行都按不存在处理（ErrNotFound）；软删的会话同样不存在。
 	// CreateChatSession 在 SessionID 为空时生成，计数和时间由这里填写。
 	CreateChatSession(ctx context.Context, s domain.ChatSession) (domain.ChatSession, error)
@@ -919,4 +937,15 @@ func NextRunState(from, to domain.RunStatus) error {
 		return fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	return nil
+}
+
+// PromptSwitch 是一次发布或回滚。
+type PromptSwitch struct {
+	Key            string
+	Version        int // 目标版本；回滚到内置默认时为 0
+	ExpectedActive int // 调用方看到的当前 active 版本（0 表示内置）
+	Action         string
+	By             string
+	Reason         string
+	Target         string // 推送目标（Nacos dataId，或 database）
 }

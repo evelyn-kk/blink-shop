@@ -56,7 +56,7 @@ func TestMigrateEmptyThenAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(applied, []string{"0001_init.sql", "0002_promotion_discount_rate_check.sql",
-		"0003_knowledge_document_product.sql", "0004_backfill_knowledge_document_product.sql", "0005_admin_audit_logs.sql", "0006_agent_write_order.sql"}) {
+		"0003_knowledge_document_product.sql", "0004_backfill_knowledge_document_product.sql", "0005_admin_audit_logs.sql", "0006_agent_write_order.sql", "0007_prompt_publish_actions.sql"}) {
 		t.Fatalf("first run applied %v", applied)
 	}
 	applied, err = s.Migrate(ctx, migrations.FS)
@@ -64,7 +64,7 @@ func TestMigrateEmptyThenAgain(t *testing.T) {
 		t.Fatalf("second run applied %v, err %v; want nothing", applied, err)
 	}
 	var count int
-	if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil || count != 6 {
+	if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil || count != 7 {
 		t.Fatalf("schema_migrations rows = %d, %v", count, err)
 	}
 }
@@ -79,20 +79,21 @@ var expectedTables = []string{
 
 // expectedUniqueKeys 是 docs/02 要求的唯一约束（表 -> 键名 -> 列）。
 var expectedUniqueKeys = map[string]map[string]string{
-	"accounts":            {"uk_accounts_username": "username"},
-	"admin_audit_logs":    {"uk_admin_audit_seq": "seq"},
-	"cart_items":          {"uk_cart_items_account_product_sku": "account_id,product_id,sku_id"},
-	"user_messages":       {"uk_user_messages_client_message": "account_id,session_id,client_message_id", "uk_user_messages_seq": "seq"},
-	"agent_trace_events":  {"uk_agent_trace_events_seq": "seq"},
-	"agent_runs":          {"uk_agent_runs_account_message": "account_id,message_id"},
-	"knowledge_documents": {"uk_knowledge_documents_merchant_hash": "merchant_id,content_hash"},
-	"knowledge_chunks":    {"uk_knowledge_chunks_document_index": "document_id,chunk_index"},
-	"product_reviews":     {"uk_product_reviews_order_item": "order_item_id"},
-	"agent_prompts":       {"uk_agent_prompts_key_version": "prompt_key,version"},
-	"orders":              {"uk_orders_order_no": "order_no"},
-	"product_skus":        {"uk_product_skus_product_sku": "product_id,sku_id"},
-	"checkout_requests":   {"uk_checkout_requests_account_key": "account_id,idempotency_key"},
-	"stored_files":        {"uk_stored_files_object_key": "object_key"},
+	"accounts":                     {"uk_accounts_username": "username"},
+	"admin_audit_logs":             {"uk_admin_audit_seq": "seq"},
+	"cart_items":                   {"uk_cart_items_account_product_sku": "account_id,product_id,sku_id"},
+	"user_messages":                {"uk_user_messages_client_message": "account_id,session_id,client_message_id", "uk_user_messages_seq": "seq"},
+	"agent_trace_events":           {"uk_agent_trace_events_seq": "seq"},
+	"agent_runs":                   {"uk_agent_runs_account_message": "account_id,message_id"},
+	"knowledge_documents":          {"uk_knowledge_documents_merchant_hash": "merchant_id,content_hash"},
+	"knowledge_chunks":             {"uk_knowledge_chunks_document_index": "document_id,chunk_index"},
+	"product_reviews":              {"uk_product_reviews_order_item": "order_item_id"},
+	"agent_prompts":                {"uk_agent_prompts_key_version": "prompt_key,version"},
+	"agent_prompt_publish_records": {"uk_prompt_publish_seq": "seq"},
+	"orders":                       {"uk_orders_order_no": "order_no"},
+	"product_skus":                 {"uk_product_skus_product_sku": "product_id,sku_id"},
+	"checkout_requests":            {"uk_checkout_requests_account_key": "account_id,idempotency_key"},
+	"stored_files":                 {"uk_stored_files_object_key": "object_key"},
 }
 
 func TestSchema(t *testing.T) {
@@ -412,7 +413,7 @@ func TestMigrateUpgradeFrom0001(t *testing.T) {
 	}
 	applied, err := s.Migrate(ctx, migrations.FS)
 	want := []string{"0002_promotion_discount_rate_check.sql", "0003_knowledge_document_product.sql", "0004_backfill_knowledge_document_product.sql",
-		"0005_admin_audit_logs.sql", "0006_agent_write_order.sql"}
+		"0005_admin_audit_logs.sql", "0006_agent_write_order.sql", "0007_prompt_publish_actions.sql"}
 	if err != nil || !reflect.DeepEqual(applied, want) {
 		t.Fatalf("upgrade applied %v, %v", applied, err)
 	}

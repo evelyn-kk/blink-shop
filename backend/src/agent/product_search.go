@@ -156,6 +156,7 @@ func (r *Registry) searchProducts(ctx context.Context, args map[string]any) (Pro
 
 	// 3. 可选模型重排（只能在规则候选里调整顺序，不能引入新商品）
 	if st := r.settings(ctx); st.RerankEnabled && r.deps.LLM != nil && len(cands) > 1 {
+		_, out.Rerank.PromptVersion = r.deps.prompt(ctx, PromptRerank)
 		if reordered, rerr := r.modelRerank(ctx, st, query, cands); rerr != nil {
 			if ctx.Err() != nil {
 				return out, ctx.Err()
@@ -314,8 +315,9 @@ func (r *Registry) modelRerank(ctx context.Context, st ModelSettings, query stri
 	payload, _ := json.Marshal(list)
 	cctx, cancel := context.WithTimeout(ctx, st.Timeout)
 	defer cancel()
+	system, _ := r.deps.prompt(ctx, PromptRerank)
 	resp, err := r.deps.LLM.Complete(cctx, llm.Request{Model: st.PlannerModel, JSON: true, Temperature: 0, MaxTokens: 300,
-		Messages: []llm.Message{{Role: "system", Content: rerankPrompt}, {Role: "user", Content: "用户需求：" + query + "\n候选：" + string(payload)}}})
+		Messages: []llm.Message{{Role: "system", Content: system}, {Role: "user", Content: "用户需求：" + query + "\n候选：" + string(payload)}}})
 	if err != nil {
 		return nil, err
 	}

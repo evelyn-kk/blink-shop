@@ -120,9 +120,11 @@ type SearchRecall struct {
 
 // SearchRerank 是排序方式（rule / model）和前几名的得分与原因。
 type SearchRerank struct {
-	Mode   string        `json:"mode"`
-	Error  string        `json:"error,omitempty"`
-	Scores []ScoredEntry `json:"scores"`
+	Mode  string `json:"mode"`
+	Error string `json:"error,omitempty"`
+	// PromptVersion 是模型重排用到的 Prompt 版本（尝试了模型重排时才有，0 表示内置）。
+	PromptVersion int           `json:"prompt_version,omitempty"`
+	Scores        []ScoredEntry `json:"scores"`
 }
 
 // ScoredEntry 是一件候选的得分明细。

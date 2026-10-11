@@ -5,11 +5,13 @@ import (
 	"strings"
 )
 
-// Prompt 模板。每个模板有名字和版本，写进轨迹便于回溯；9.1 接入 Prompt 生命周期管理后由配置中心下发，这里是内置默认。
+// Prompt 模板的 key。这里的常量是内置默认（版本 0）；管理端发布新版本后运行时读已发布的版本（见 PromptCache），
+// 轨迹记录实际用到的 key 和版本。
 const (
 	PromptPlanner      = "agent.planner"
 	PromptReact        = "agent.react"
-	PromptVersion      = 1
+	PromptRerank       = "agent.rerank"
+	PromptSummary      = "agent.summary"
 	internalRuleMarker = "【内部规则】"
 )
 

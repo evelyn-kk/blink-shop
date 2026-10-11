@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { signIn } from '../test/session';
 import { AdminConfigsPage } from './AdminConfigsPage';
 import { AdminPlatformPage } from './AdminPlatformPage';
+import { AdminPromptsPage } from './AdminPromptsPage';
 
 type Handler = (url: string, init: RequestInit) => [number, unknown] | undefined;
 
@@ -120,5 +121,117 @@ describe('应用配置', () => {
     await waitFor(() => expect(reset).toHaveProperty('disabled', false));
     await userEvent.click(reset);
     await waitFor(() => expect(patches).toEqual([{ value: '60s' }, { value: '' }]));
+  });
+});
+
+describe('应用配置的存放位置', () => {
+  it('Nacos 不可用时提示修改不会生效；没配 Nacos 时说明存在内存', async () => {
+    signIn('admin');
+    serve((url) => (url === '/api/v1/admin/configs' ? [200, { items: [], backend: { kind: 'nacos', healthy: false, checked_at: '2026-10-01T08:00:00Z' } }] : undefined));
+    const { unmount } = render(<AdminConfigsPage />);
+    expect(await screen.findByText('后台设置存在 Nacos')).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toContain('此时修改不会生效');
+    unmount();
+    serve((url) => (url === '/api/v1/admin/configs' ? [200, { items: [], backend: { kind: 'memory', healthy: true, checked_at: null } }] : undefined));
+    render(<AdminConfigsPage />);
+    expect(await screen.findByText('后台设置存在内存')).toBeTruthy();
+  });
+});
+
+describe('Prompt 管理', () => {
+  const at = '2026-10-01T08:00:00Z';
+  const version = (v: number, status: string, content: string) => ({
+    prompt_id: `prompt_${v}`, version: v, status, title: '回答', description: '', content, runes: [...content].length, created_by: 'acct_admin',
+    created_at: at, updated_at: at, published_at: status === 'draft' ? null : at,
+  });
+  const summary = { prompt_key: 'agent.react', title: '回答', description: '导购回答', placeholders: ['{{TOOLS}}'] };
+
+  function promptServer() {
+    let detail = {
+      ...summary, active_version: 1, active_source: 'published', version_count: 2, builtin_content: '内置 {{TOOLS}}',
+      draft: { ...version(2, 'draft', ''), content: undefined } as Partial<ReturnType<typeof version>> | null, // 和接口一致：摘要里的草稿不带内容
+      versions: [version(2, 'draft', '草稿 {{TOOLS}}'), version(1, 'active', '一号 {{TOOLS}}')],
+      publish_records: [] as unknown[],
+    };
+    const calls: { url: string; body: unknown }[] = [];
+    let conflict = false;
+    const fetch = serve((url, init) => {
+      if (url === '/api/v1/admin/prompts') return [200, { items: [{ ...detail, versions: undefined, publish_records: undefined }] }];
+      if (url === '/api/v1/admin/prompts/agent.react' && !init.method) return [200, detail];
+      const body = init.body ? JSON.parse(init.body as string) : undefined;
+      calls.push({ url, body });
+      if (url === '/api/v1/admin/prompts/agent.react' && init.method === 'PATCH') {
+        if (!body.content.includes('{{TOOLS}}')) return [400, { code: 'validation_failed', message: '必须包含 {{TOOLS}}', field: 'content' }];
+        const saved = { ...version(2, 'draft', body.content), updated_at: '2026-10-01T09:00:00Z' };
+        detail = { ...detail, draft: { ...saved, content: undefined }, versions: [saved, detail.versions[1]] };
+        return [200, saved];
+      }
+      if (url.endsWith('/publish') || url.endsWith('/rollback')) {
+        if (conflict) return [409, { code: 'prompt_active_changed', message: '生效版本已被其他人修改，请刷新后确认再操作' }];
+        const record = { record_id: `rec_${calls.length}`, version: body.version, from_version: detail.active_version, action: url.endsWith('/publish') ? 'publish' : 'rollback',
+          published_by: 'acct_admin', reason: body.reason, result: url.endsWith('/publish') ? 'fallback' : 'success', created_at: at };
+        detail = {
+          ...detail, active_version: body.version, active_source: body.version === 0 ? 'builtin' : 'published', draft: null,
+          versions: [version(2, body.version === 2 ? 'active' : 'archived', '草稿 {{TOOLS}}'), version(1, body.version === 1 ? 'active' : 'archived', '一号 {{TOOLS}}')],
+          publish_records: [record, ...detail.publish_records],
+        };
+        return [200, { prompt: detail, record }];
+      }
+      return undefined;
+    });
+    return { calls, fetch, setConflict: (v: boolean) => (conflict = v) };
+  }
+
+  it('保存草稿要包含占位符；发布带上看到的生效版本，配置中心推送失败时标出来', async () => {
+    signIn('admin');
+    const { calls } = promptServer();
+    render(<AdminPromptsPage query={new URLSearchParams()} />);
+    const editor = await screen.findByLabelText('编辑草稿 v2');
+    expect(editor).toHaveProperty('value', '草稿 {{TOOLS}}');
+    expect(screen.getByText('生效：v1')).toBeTruthy();
+    await userEvent.clear(editor);
+    await userEvent.type(editor, '没有占位符');
+    expect(screen.getByRole('button', { name: '发布草稿 v2' })).toHaveProperty('disabled', true); // 未保存不能发布
+    await userEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('必须包含 {{TOOLS}}');
+    await userEvent.clear(editor);
+    await userEvent.type(editor, '新草稿 {{{{TOOLS}}');
+    await userEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+    await waitFor(() => expect(calls.at(-1)).toEqual({ url: '/api/v1/admin/prompts/agent.react', body: { content: '新草稿 {{TOOLS}}' } }));
+    await userEvent.click(await screen.findByRole('button', { name: '发布草稿 v2' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('替换当前生效的v1');
+    await userEvent.click(within(dialog).getByRole('button', { name: '确认发布' }));
+    await waitFor(() => expect(calls.at(-1)).toEqual({ url: '/api/v1/admin/prompts/agent.react/publish', body: { version: 2, expected_active_version: 1, reason: '' } }));
+    expect(await screen.findByText('已生效，配置中心推送失败')).toBeTruthy();
+    expect(screen.getByText('生效：v2')).toBeTruthy();
+    expect(screen.getByText('v1 → v2')).toBeTruthy();
+  });
+
+  it('回滚必须写原因；别人先改了会提示刷新；可以恢复内置默认', async () => {
+    signIn('admin');
+    const { calls, setConflict } = promptServer();
+    render(<AdminPromptsPage query={new URLSearchParams('key=agent.react')} />);
+    await userEvent.click(await screen.findByRole('button', { name: '发布草稿 v2' }));
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认发布' }));
+    await userEvent.click(await screen.findByRole('button', { name: '回滚到 v1' }));
+    let dialog = screen.getByRole('dialog');
+    await userEvent.click(within(dialog).getByRole('button', { name: '确认回滚' }));
+    expect(within(dialog).getByText('请填写原因')).toBeTruthy();
+    setConflict(true);
+    await userEvent.type(within(dialog).getByLabelText(/原因/), '新版本回答变差');
+    await userEvent.click(within(dialog).getByRole('button', { name: '确认回滚' }));
+    expect((await within(dialog).findByRole('alert')).textContent).toContain('请刷新后确认再操作');
+    setConflict(false);
+    await userEvent.click(within(dialog).getByRole('button', { name: '取消' }));
+    await userEvent.click(await screen.findByRole('button', { name: '恢复内置默认' }));
+    dialog = screen.getByRole('dialog');
+    await userEvent.type(within(dialog).getByLabelText(/原因/), '回到默认');
+    await userEvent.click(within(dialog).getByRole('button', { name: '确认回滚' }));
+    await waitFor(() =>
+      expect(calls.at(-1)).toEqual({ url: '/api/v1/admin/prompts/agent.react/rollback', body: { version: 0, expected_active_version: 2, reason: '回到默认' } }),
+    );
+    expect(await screen.findByText('生效：内置默认')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '恢复内置默认' })).toBeNull();
   });
 });
