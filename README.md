@@ -6,7 +6,7 @@
 
 | 目录 | 内容 |
 | --- | --- |
-| `backend/` | Go 1.24 API（`net/http`），`openapi.yaml` 是唯一接口契约；中间件、配置和日志见 [backend/README.md](backend/README.md) |
+| `backend/` | Go 1.26 API（`net/http`），`openapi.yaml` 是唯一接口契约；中间件、配置和日志见 [backend/README.md](backend/README.md) |
 | `frontend/` | React 19 + TypeScript + Vite，商家和平台管理端 |
 | `android-native/` | Java 原生 Android（minSdk 24），用户端 |
 | `deployments/` | 本地依赖的 Docker Compose，详见 [deployments/README.md](deployments/README.md) |
@@ -14,7 +14,7 @@
 
 ## 环境要求
 
-- Go 1.24
+- Go 1.26（`backend/go.mod` 的 toolchain 为 go1.26.9，`GOTOOLCHAIN=auto` 时自动下载）
 - Node.js ≥ 22.12（CI 用 `.nvmrc` 中的版本）
 - JDK 17 + Android SDK Platform 35（`android-native/local.properties` 写 `sdk.dir=...`，或设置 `ANDROID_HOME`）
 - Docker + Compose v2

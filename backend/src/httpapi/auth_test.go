@@ -443,7 +443,7 @@ func TestDeleteAccount(t *testing.T) {
 // TestNoSecretsInResponsesOrLogs：响应和日志里不出现密码、密码哈希和 token 明文。
 func TestNoSecretsInResponsesOrLogs(t *testing.T) {
 	ts := newTestServer(t, nil, nil, nil)
-	const password = "S3cret-Passw0rd"
+	const password = "S3cret-Passw0rd" // 测试用密码，检查它不出现在响应和日志里（gitleaks:allow）
 	rec := ts.call(t, http.MethodPost, "/api/v1/auth/register", "", map[string]string{"username": "secret_user", "password": password})
 	expectStatus(t, rec, 201, "")
 	token := decodeBody[sessionResponse](t, rec).Token

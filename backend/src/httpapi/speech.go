@@ -16,6 +16,7 @@ import (
 	"golang.org/x/net/websocket"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/configcenter"
+	"github.com/evelyn-kk/blink-shop/backend/src/metrics"
 	"github.com/evelyn-kk/blink-shop/backend/src/speech"
 )
 
@@ -240,6 +241,8 @@ func (s *Server) handleSpeechRealtime(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) runSpeechSession(r *http.Request, accountID string, rec speech.Recognizer, conn *websocket.Conn) {
+	metrics.WSActive.Add(1)
+	defer metrics.WSActive.Add(-1)
 	defer conn.Close()
 	conn.MaxPayloadBytes = maxAudioFrame
 	o := s.speech

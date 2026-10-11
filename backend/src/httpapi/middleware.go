@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/configcenter"
+	"github.com/evelyn-kk/blink-shop/backend/src/metrics"
 )
 
 const headerRequestID = "X-Request-ID"
@@ -84,6 +85,7 @@ func (s *Server) withAccessLog(next http.Handler) http.Handler {
 		start := time.Now()
 		rec := &responseRecorder{ResponseWriter: w}
 		next.ServeHTTP(rec, r)
+		s.observeRequest(r, rec.Status(), start)
 
 		level := slog.LevelInfo
 		if rec.Status() >= 500 {
@@ -361,4 +363,18 @@ func headerWritten(w http.ResponseWriter) bool {
 			return false
 		}
 	}
+}
+
+// observeRequest 记录请求指标：路由模式（不是原始路径，避免 ID 让标签无限增长）、方法、状态码类别和耗时。
+// 导购 SSE 和实时语音 WebSocket 是长连接，只计数不记耗时（它们的耗时分别见运行耗时和连接数指标）。
+func (s *Server) observeRequest(r *http.Request, status int, start time.Time) {
+	route := "unmatched"
+	if _, pattern := s.mux.Handler(r); pattern != "" {
+		route = pattern
+	}
+	metrics.HTTPRequests.Inc(route, r.Method, strconv.Itoa(status/100)+"xx")
+	if strings.HasSuffix(r.URL.Path, "/messages:stream") || route == "GET /api/v1/speech/realtime" {
+		return
+	}
+	metrics.HTTPDuration.Since(start, route)
 }

@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/net/websocket"
 
+	"github.com/evelyn-kk/blink-shop/backend/src/metrics"
 	"github.com/evelyn-kk/blink-shop/backend/src/seed"
 	"github.com/evelyn-kk/blink-shop/backend/src/speech"
 )
@@ -216,11 +217,15 @@ func TestSpeechRealtime(t *testing.T) {
 	if ev := c.next(); ev.Type != "ready" || ev.SampleRate != 16000 || ev.MaxSeconds != 3 {
 		t.Fatalf("ready: %+v", ev)
 	}
+	if metrics.WSActive.Value() < 1 {
+		t.Fatal("open session not counted in blink_ws_active_connections")
+	}
 	c.audio(1)
 	c.control("end")
 	if got := strings.Join(c.events(), ","); got != "partial:降,partial:降噪,final:降噪耳机,closed" {
 		t.Fatalf("session: %s", got)
 	}
+	waitFor(t, func() bool { return metrics.WSActive.Value() == 0 }) // 会话结束后归零
 
 	// 达到时长上限：服务端结束输入，再给最终结果
 	c = mustDial(t, srv.URL, user)

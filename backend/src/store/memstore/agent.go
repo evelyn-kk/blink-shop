@@ -275,6 +275,17 @@ func (s *Store) AppendTraceEvent(ctx context.Context, e domain.AgentTraceEvent) 
 	return e, nil
 }
 
+func (s *Store) AppendTraceEvents(ctx context.Context, events []domain.AgentTraceEvent) error {
+	return s.WithTx(ctx, func(ctx context.Context) error {
+		for _, e := range events {
+			if _, err := s.AppendTraceEvent(ctx, e); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func (s *Store) ListTraceEvents(ctx context.Context, accountID, runID string) ([]domain.AgentTraceEvent, error) {
 	defer s.lock(ctx)()
 	out := []domain.AgentTraceEvent{}

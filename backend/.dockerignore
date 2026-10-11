@@ -1,0 +1,6 @@
+# 只需要 Go 源码、迁移和 go.mod / go.sum
+uploads/
+*.log
+*_test.go
+fixtures/
+**/testdata/

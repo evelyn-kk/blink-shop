@@ -376,6 +376,21 @@ func (s *Store) AppendTraceEvent(ctx context.Context, e domain.AgentTraceEvent) 
 	return e, nil
 }
 
+func (s *Store) AppendTraceEvents(ctx context.Context, events []domain.AgentTraceEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	// 同一事务里逐条插入：seq 与给定顺序一致，只提交一次（逐条自动提交时每条都要等一次落盘）
+	return s.WithTx(ctx, func(ctx context.Context) error {
+		for _, e := range events {
+			if _, err := s.AppendTraceEvent(ctx, e); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func (s *Store) ListTraceEvents(ctx context.Context, accountID, runID string) ([]domain.AgentTraceEvent, error) {
 	rows, err := s.q(ctx).QueryContext(ctx, `SELECT trace_event_id, run_id, trace_id, account_id, stage, event_type, model, status,
 		duration_ms, COALESCE(error, ''), metadata_json, created_at FROM agent_trace_events WHERE run_id = ? AND account_id = ? ORDER BY seq`,

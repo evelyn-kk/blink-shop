@@ -29,7 +29,11 @@ func OpenImageSearch(cfg configcenter.Config, st store.Store, objects objectstor
 		return nil
 	}
 	e := ImageEmbedder(cfg)
-	idx := NewImageIndex(NewMilvus(cfg.MilvusAddr, cfg.MilvusToken, 10*time.Second), e.Dim(), cfg.MilvusImageCollection)
+	m := NewMilvus(cfg.MilvusAddr, cfg.MilvusToken, 10*time.Second)
+	if m != nil {
+		m.SetBreaker(SharedMilvusBreaker())
+	}
+	idx := NewImageIndex(m, e.Dim(), cfg.MilvusImageCollection)
 	if idx == nil {
 		return nil
 	}

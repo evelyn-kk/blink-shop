@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/evelyn-kk/blink-shop/backend/src/metrics"
 )
 
 // ErrConfigCenter 表示配置中心不可用或拒绝了请求（写入未生效）。
@@ -105,6 +107,7 @@ func (c *NacosClient) params(ctx context.Context, dataID string) (url.Values, er
 
 // Get 读取配置内容；不存在时返回空串和 found=false。
 func (c *NacosClient) Get(ctx context.Context, dataID string) (content string, found bool, err error) {
+	defer metrics.Track("nacos", time.Now(), &err)
 	v, err := c.params(ctx, dataID)
 	if err != nil {
 		return "", false, err
@@ -132,7 +135,8 @@ func (c *NacosClient) Get(ctx context.Context, dataID string) (content string, f
 }
 
 // Publish 写入（覆盖）配置。
-func (c *NacosClient) Publish(ctx context.Context, dataID, content string) error {
+func (c *NacosClient) Publish(ctx context.Context, dataID, content string) (err error) {
+	defer metrics.Track("nacos", time.Now(), &err)
 	v, err := c.params(ctx, dataID)
 	if err != nil {
 		return err
@@ -157,7 +161,8 @@ func (c *NacosClient) Publish(ctx context.Context, dataID, content string) error
 }
 
 // Delete 删除配置（测试清理用）。
-func (c *NacosClient) Delete(ctx context.Context, dataID string) error {
+func (c *NacosClient) Delete(ctx context.Context, dataID string) (err error) {
+	defer metrics.Track("nacos", time.Now(), &err)
 	v, err := c.params(ctx, dataID)
 	if err != nil {
 		return err

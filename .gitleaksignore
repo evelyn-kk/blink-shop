@@ -1,0 +1,4 @@
+# gitleaks 误报：测试里故意用的假密钥（检查它们不会出现在响应、轨迹和日志里）。之后的提交在行尾用 gitleaks:allow 标注。
+f88559bda2221f6727128f18df8a74f02773f621:backend/src/httpapi/admin_configs_nacos_test.go:generic-api-key:130
+f88559bda2221f6727128f18df8a74f02773f621:backend/src/httpapi/admin_configs_nacos_test.go:generic-api-key:131
+fe93a7501dccd3ba1fc1d79c91f191a902744a9b:backend/src/httpapi/auth_test.go:generic-api-key:446

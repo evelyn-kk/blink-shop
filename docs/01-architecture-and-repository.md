@@ -2,7 +2,7 @@
 
 ## 技术决策
 
-保持上游的可执行形态：Go 1.24 + `net/http`/MySQL 8 API，React 19 + TypeScript + Vite Web，Java 原生 Android（minSdk 24），MySQL、Redis、Nacos、MinIO、Milvus 2.5 + etcd。HTTP API 前缀固定为 `/api/v1`。
+保持上游的可执行形态：Go（上游 1.24；10.1 安全复核时因 1.24 停止维护且标准库有已知漏洞，升级到 1.26.9）+ `net/http`/MySQL 8 API，React 19 + TypeScript + Vite Web，Java 原生 Android（minSdk 24），MySQL、Redis、Nacos、MinIO、Milvus 2.5 + etcd。HTTP API 前缀固定为 `/api/v1`。
 
 ```text
 Android app ─┐                 ┌─ MySQL: 交易、会话、审计

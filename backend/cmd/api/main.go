@@ -22,8 +22,10 @@ import (
 	"github.com/evelyn-kk/blink-shop/backend/src/httpapi"
 	"github.com/evelyn-kk/blink-shop/backend/src/llm"
 	"github.com/evelyn-kk/blink-shop/backend/src/logging"
+	"github.com/evelyn-kk/blink-shop/backend/src/metrics"
 	"github.com/evelyn-kk/blink-shop/backend/src/objectstore"
 	"github.com/evelyn-kk/blink-shop/backend/src/rag"
+	"github.com/evelyn-kk/blink-shop/backend/src/resilience"
 	"github.com/evelyn-kk/blink-shop/backend/src/speech"
 	"github.com/evelyn-kk/blink-shop/backend/src/store/mysqlstore"
 	"github.com/evelyn-kk/blink-shop/backend/src/vector"
@@ -96,6 +98,8 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 		return err
 	}
 	defer st.Close()
+	st.SetPool(cfg.MySQLMaxOpen, cfg.MySQLMaxIdle)
+	registerDBMetrics(st)
 	// MySQL 暂时不可用不阻止启动：/health 仍然 200，/ready 返回 503，恢复后自动变为就绪。
 	pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	if err := st.Ping(pingCtx); err != nil {
@@ -113,7 +117,7 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 	// 模型：没有 AI_API_KEY 时为 nil，导购只走规则。超时和重试取启动时的配置（运行中改动对已建客户端不生效）。
 	var provider llm.Provider
 	if client := llm.NewClient(llm.Options{BaseURL: cfg.AIBaseURL, APIKey: cfg.AIAPIKey, Timeout: agentSettings.Timeout, MaxRetries: agentSettings.MaxRetries}); client != nil {
-		provider = client
+		provider = llm.WithBreaker(client, resilience.NewBreaker("llm", vector.BreakerThreshold, vector.BreakerCooldown))
 		logger.Info("llm configured", "base_url", cfg.AIBaseURL, "planner_model", agentSettings.PlannerModel, "agent_model", agentSettings.AgentModel)
 	} else {
 		logger.Warn("AI_API_KEY not set, agent runs on rules only")
@@ -148,6 +152,7 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 		ObjectStore:   objects,
 		AvatarDir:     cfg.AvatarUploadDir,
 		EvalDataDir:   cfg.EvalDataDir,
+		Metrics:       httpapi.MetricsOptions{Token: cfg.MetricsToken, AllowLoopback: !cfg.IsProduction()},
 		EvalReportDir: cfg.EvalReportDir,
 		Configs:       configcenter.NewAdmin(resolver, dynamic),
 		// 导购风险词和模型设置跟随动态配置（管理后台可改，立即生效）。
@@ -193,7 +198,13 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 	case <-ctx.Done():
 	}
 
-	// 先停掉进行中的导购运行，让它们写完最终状态（failed: server_shutdown），再关闭 HTTP 服务。
+	// 先摘流：/ready 返回 503，等 SHUTDOWN_DRAIN 让负载均衡不再转发新请求（期间照常服务）；
+	// 再停掉进行中的导购运行，让它们写完最终状态（failed: server_shutdown），最后关闭 HTTP 服务。
+	server.BeginDrain()
+	if cfg.ShutdownDrain > 0 {
+		logger.Info("draining before shutdown", "drain", cfg.ShutdownDrain.String())
+		time.Sleep(cfg.ShutdownDrain)
+	}
 	server.StopAgentRuns(agentStopTimeout)
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancelShutdown()
@@ -276,9 +287,20 @@ func schemaReady(ctx context.Context, st *mysqlstore.Store) error {
 		return err
 	}
 	if pending > 0 {
-		return fmt.Errorf("还有 %d 个数据库迁移未执行", pending)
+		return pendingMigrations(pending)
 	}
 	return nil
+}
+
+// pendingMigrations 是“迁移没做完”的就绪失败原因，/ready 直接显示它。
+type pendingMigrations int
+
+func (p pendingMigrations) Error() string {
+	return fmt.Sprintf("还有 %d 个数据库迁移未执行", int(p))
+}
+
+func (p pendingMigrations) ReadyMessage() string {
+	return fmt.Sprintf("数据库还有 %d 个迁移未执行（发布时先运行 cmd/migrate -apply）", int(p))
 }
 
 // vectorIndexes 是启动时创建的向量索引；未配置时两个都是 nil。
@@ -310,11 +332,13 @@ func openVectorIndexes(cfg configcenter.Config, logger *slog.Logger) vectorIndex
 		return vectorIndexes{}
 	}
 	m := vector.NewMilvus(cfg.MilvusAddr, cfg.MilvusToken, 10*time.Second)
-	e := vector.NewOpenAIEmbedder(vector.EmbedOptions{BaseURL: cfg.EmbeddingBaseURL, APIKey: cfg.EmbeddingAPIKey, Model: cfg.EmbeddingModel, Dim: cfg.EmbeddingDim})
-	if m == nil || e == nil {
+	oe := vector.NewOpenAIEmbedder(vector.EmbedOptions{BaseURL: cfg.EmbeddingBaseURL, APIKey: cfg.EmbeddingAPIKey, Model: cfg.EmbeddingModel, Dim: cfg.EmbeddingDim})
+	if m == nil || oe == nil {
 		logger.Warn("vector search not configured, using keyword retrieval only")
 		return vectorIndexes{}
 	}
+	m.SetBreaker(vector.SharedMilvusBreaker())
+	e := vector.WithBreaker(oe, resilience.NewBreaker("embedding", vector.BreakerThreshold, vector.BreakerCooldown))
 	logger.Info("vector search configured", "milvus_addr", cfg.MilvusAddr, "embedding_model", cfg.EmbeddingModel, "embedding_dim", cfg.EmbeddingDim,
 		"text_collection", cfg.MilvusTextCollection, "product_collection", cfg.MilvusProductCollection)
 	return vectorIndexes{knowledge: vector.NewKnowledgeIndex(m, e, cfg.MilvusTextCollection), products: vector.NewProductIndex(m, e, cfg.MilvusProductCollection)}
@@ -354,4 +378,13 @@ func promptMirror(cfg configcenter.Config) httpapi.PromptMirror {
 		return nil
 	}
 	return m
+}
+
+// registerDBMetrics 把连接池状态作为指标输出：打开 / 使用中的连接数，以及累计等待连接的次数和时长（持续增长说明池子太小或有慢查询）。
+func registerDBMetrics(st *mysqlstore.Store) {
+	db := st.DB()
+	metrics.Default.GaugeFunc("blink_db_open_connections", "数据库连接池当前打开的连接数", func() float64 { return float64(db.Stats().OpenConnections) })
+	metrics.Default.GaugeFunc("blink_db_in_use_connections", "数据库连接池当前使用中的连接数", func() float64 { return float64(db.Stats().InUse) })
+	metrics.Default.GaugeFunc("blink_db_wait_count", "累计等待空闲连接的次数", func() float64 { return float64(db.Stats().WaitCount) })
+	metrics.Default.GaugeFunc("blink_db_wait_seconds", "累计等待空闲连接的秒数", func() float64 { return db.Stats().WaitDuration.Seconds() })
 }

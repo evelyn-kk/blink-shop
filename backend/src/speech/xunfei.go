@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"golang.org/x/net/websocket"
+
+	"github.com/evelyn-kk/blink-shop/backend/src/metrics"
 )
 
 const dialTimeout = 10 * time.Second
@@ -82,7 +84,8 @@ func (x *XunfeiRecognizer) SignedURL(uuid string) (string, error) {
 	return base.String(), nil
 }
 
-func (x *XunfeiRecognizer) Start(ctx context.Context, requestID string) (Stream, error) {
+func (x *XunfeiRecognizer) Start(ctx context.Context, requestID string) (_ Stream, err error) {
+	defer metrics.Track("stt", time.Now(), &err)
 	u, err := x.SignedURL(requestID)
 	if err != nil {
 		return nil, err
@@ -279,7 +282,8 @@ func (x *XunfeiSynthesizer) SignedURL() (string, error) {
 	return base.String(), nil
 }
 
-func (x *XunfeiSynthesizer) Synthesize(ctx context.Context, text, voice string) (Audio, error) {
+func (x *XunfeiSynthesizer) Synthesize(ctx context.Context, text, voice string) (_ Audio, err error) {
+	defer metrics.Track("tts", time.Now(), &err)
 	if voice == "" {
 		voice = x.DefaultVoice
 	}

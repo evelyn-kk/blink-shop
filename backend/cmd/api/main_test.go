@@ -101,6 +101,40 @@ func TestRunWithMySQLDown(t *testing.T) {
 	}
 }
 
+// 摘流：收到退出信号后 /ready 立刻 503、/health 照常，等满 SHUTDOWN_DRAIN 才关闭监听。
+func TestRunDrainsBeforeShutdown(t *testing.T) {
+	addr := freeAddr(t)
+	env := map[string]string{"API_ADDR": addr, "MYSQL_DSN": "blink:pw@tcp(" + freeAddr(t) + ")/blink_shop?timeout=200ms", "SHUTDOWN_DRAIN": "600ms"}
+	ctx, cancel := context.WithCancel(context.Background())
+	logs := &syncBuffer{}
+	done := make(chan error, 1)
+	go func() { done <- run(ctx, envOf(env), logs) }()
+	base := "http://" + addr + "/api/v1"
+	waitUntilUp(t, base+"/health")
+	cancel()
+	deadline := time.Now().Add(2 * time.Second)
+	for get(t, base+"/ready") != http.StatusServiceUnavailable || !strings.Contains(logs.String(), "draining before shutdown") {
+		if time.Now().After(deadline) {
+			t.Fatal("ready never reported draining")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if code := get(t, base+"/health"); code != http.StatusOK {
+		t.Fatalf("/health during drain = %d", code)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("run returned %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not shut down after drain")
+	}
+	if !strings.Contains(logs.String(), "api shutdown completed") {
+		t.Fatalf("missing shutdown log: %s", logs)
+	}
+}
+
 // Nacos 黑洞（请求一直不回）时照常启动：读配置受启动总预算限制，不按配置项累加超时；
 // 动态配置退回环境变量 / 默认值，日志标出 Nacos 不可达。
 func TestRunWithNacosBlackholed(t *testing.T) {
@@ -177,6 +211,17 @@ func TestReadyWaitsForMigrations(t *testing.T) {
 			}
 			if tc.runMigrations == "false" && !strings.Contains(logs.String(), "数据库迁移未执行") {
 				t.Fatalf("readiness log should mention pending migrations: %s", logs)
+			}
+			if tc.runMigrations == "false" {
+				resp, err := http.Get(base + "/ready")
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, _ := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				if !strings.Contains(string(body), "迁移未执行（发布时先运行 cmd/migrate -apply）") {
+					t.Fatalf("/ready should say migrations are pending: %s", body)
+				}
 			}
 		})
 	}

@@ -1,0 +1,88 @@
+# 发布前复核：性能、韧性与安全（10.1）
+
+本文件记录 10.1 的实测结果、演练记录、扫描结果、风险清单和发布检查清单。监控与告警定义见
+[`deployments/monitoring/README.md`](../deployments/monitoring/README.md)，操作步骤见 [`deployments/RUNBOOK.md`](../deployments/RUNBOOK.md)。
+
+## 1. 性能目标与实测
+
+**环境**：单个 API 实例（Apple M4 10 核 / 16GB，本机），MySQL 8.4.11（Docker，同一台机器），开发种子数据，规则模式（不接模型）。
+压测工具 `backend/cmd/loadtest`，命令 `go run ./cmd/loadtest -duration 30s -concurrency 32 -sse 200 -checkout 50 -contention 20`，
+目标环境限流放宽（每分钟 100 万）。数字只代表这台机器上的相对水平，生产要在预发环境按真实拓扑重测（10.2）。
+
+| 场景 | 目标 | 实测（最终一轮） |
+| --- | --- | --- |
+| 商品目录（列表 / 搜索 / 详情 / SKU / 评价 / 分类树，32 并发） | P95 < 300ms，错误率 < 0.1% | P50 6.9ms，**P95 14.2ms**，P99 19.5ms，0 错误，约 4390 次/秒 |
+| 普通接口（购物车 / 订单 / 会话 / 当前账号，32 并发） | P95 < 500ms，错误率 < 0.1% | P50 7.3ms，**P95 20.4ms**，P99 26.9ms，0 错误，约 3550 次/秒 |
+| 导购首个进展事件（200 条 SSE 同时发起） | P95 < 1.5s（规则模式），全部成功 | 单独跑三次 **P95 388–506ms**；紧接 60 秒高负载之后 P95 1249ms；200/200 成功 |
+| 结算（50 人同时买同一件库存充足的商品） | 成功率 ≥ 99%，P95 < 1s | **50/50 成功**，P95 728ms |
+| 抢购（20 人抢库存 5 件） | 恰好 5 单成功，其余 409，库存不为负 | 5 单成功、15 个 409 `item_unavailable`、库存 5 → 0 |
+| 重复提交（同一购物车两个幂等键同时结算） | 每个购物车只成功一次 | 10/10 |
+
+### 压测中发现并修复的问题
+
+| 问题 | 证据 | 修复 | 修复后 |
+| --- | --- | --- | --- |
+| 数据库连接池太小（固定 20） | `blink_db_wait_count` 29.8 万次、累计等待 558 秒；100 条 SSE 整段 P95 3.65s，结算 P95 971ms | 连接池可配置 `MYSQL_MAX_OPEN_CONNS` / `MYSQL_MAX_IDLE_CONNS`，默认 50 / 25 | 等待 2 千次；SSE 整段 P95 1.23s；结算 P95 644ms |
+| 轨迹同步写库拖慢首个事件 | 300 条 SSE 首个事件 P95 1544ms（超标）；每次运行约 11 条轨迹、每条单独提交约 20ms | 每次运行一个后台顺序写入器，排队的轨迹合并成一个事务写入；推送结束事件前写完 | 300 条 SSE 首个事件 P95 581–628ms |
+| 商品列表 N+1 | 慢日志：SKU 查询 8.3 万次 ≈ 商品查询的 2 倍（每页每个商品查一次） | 一页商品的 SKU 一次 `IN` 查询 | 每个列表请求 1 次 SKU 查询；目录 P95 23ms → 14ms |
+
+慢查询分析方法：本机 MySQL 临时开 `long_query_time=0` 的慢日志跑一轮压测，按规范化 SQL 统计次数、耗时、扫描行数 / 返回行数（只在本地做，用完关闭）。
+剩下最慢的是结算时对热点商品行的 `FOR UPDATE`（同一商品的结算串行，见风险清单 R1）。
+
+### 慢模型与熔断
+
+假模型服务（请求一直不回）+ `AI_TIMEOUT=3s`：第一批 20 个并发导购各等一次超时后退回规则回答（整段约 3.2s），模型熔断打开；
+第二批 20 个不再请求模型（模型服务收到的请求数不变），整段 156ms，40 个运行全部 completed。
+
+## 2. 韧性演练
+
+| 演练 | 方法 | 结果 |
+| --- | --- | --- |
+| Nacos / MinIO / Milvus 同时不可达 | API 指向不可达地址启动（不停共享的 Milvus 和其他容器） | 启动 0.23s；浏览、加购、下单、导购正常（导购 123ms）；上传 503 `object_storage_unavailable`；改配置 503 `config_center_unavailable`；配置页显示 Nacos 不健康；向量状态 `unreachable` |
+| MySQL 重启（数据库重连） | API 运行中 `docker restart blink_shop-mysql-1`，每 0.5 秒探测 | 不可用 35 秒，全部是 MySQL 自己的关闭（约 5s）和启动（22s）；MySQL 报 ready 的同一秒 API 恢复，没有重启 API |
+| Nacos 黑洞 | 单测 + `cmd/api` 启动测试 | 启动约 2s（启动预算），只发 1 个请求（REV-023） |
+| 摘流关闭 | `SHUTDOWN_DRAIN=600ms` 的启动测试 | 收到信号后 `/ready` 立即 503、`/health` 200，等满后关闭 |
+| 空库部署 | 新库 `cmd/migrate -apply` 后启动 | 8 个迁移 436ms，`/ready` 200 |
+| 升级部署 | 8.4 版本（5b164b1）建库并下单 → 新版本 | 迁移前新版本 `/ready` 503“数据库还有 2 个迁移未执行”；迁移 27ms；8 张核心表行数不变；下单、导购、Prompt 管理、调试观测正常 |
+| 回滚部署 | 升级后的库上运行 8.4 版本 | `/ready` 200，下单、导购正常；开着 `RUN_MIGRATIONS` 时旧版本拒绝迁移并反复记日志（服务不受影响）；再前滚到新版本正常 |
+| 备份恢复 | `mysqldump --single-transaction` → 恢复到新库 | 26 张表 `CHECKSUM TABLE` 全部一致；新版本在恢复库上 `/ready` 200、能下单 |
+
+## 3. 安全扫描与复核
+
+| 项目 | 工具 | 结果 |
+| --- | --- | --- |
+| Go 依赖与标准库 | govulncheck v1.1.4 | 初扫：Go 1.24.13 标准库和 x/net、x/image 共 **35 个代码可达的漏洞**（部分只在 Go 1.26.9 修复）。升级 toolchain 到 go1.26.9、x/net v0.61.0、x/image v0.47.0、x/crypto v0.58.0、klauspost/compress v1.18.7 后 **0 个**；剩一条模块级提示（x/crypto 的 openpgp 包停止维护，代码未使用，无修复版本） |
+| npm（frontend、quality） | npm audit | 0 |
+| Android（26 个运行时依赖，含传递） | OSV 批量查询 | 0 |
+| 密钥 | gitleaks v8.28.0（全部 56 个提交 + 工作区） | 历史里 4 条命中，都是测试里故意用的假密钥（检查它们不出现在输出里），已加 `.gitleaksignore` 和 `gitleaks:allow` 标注；工作区只剩本地 `.env`（被 `.gitignore` 忽略，从未提交） |
+| API 镜像 | trivy 0.67.2（HIGH / CRITICAL） | 0（distroless static、非 root uid 65532、无 shell，约 30MB） |
+| 本地开发 Compose 镜像 | trivy | 有大量 HIGH / CRITICAL（见风险 R3），只用于本地 |
+| SQL 注入 | 代码复核 | 全部参数化；拼接的只有代码里的列名、`?` 占位符和固定排序 |
+| 路径穿越 | 代码复核 + 测试 | 头像用 `os.Root` + 文件名白名单；评测报告读取改用 `os.Root`（新增符号链接逃逸测试）；私有文件对象键由服务端生成 |
+| SSRF | 已有实现与测试（3.2、8.3） | 知识采集只允许公网地址、限制重定向和大小；商品图只读平台内文件和白名单 https 域名 |
+| 权限 | RBAC 矩阵测试 | 每条路由都有访问规则；新增的调试、评测、`/metrics` 都在矩阵里 |
+| 生产配置 | `ValidateProduction` | 新增 `METRICS_TOKEN` 长度校验；不配置时生产不开放 `/metrics` |
+
+CI 新增 “Security & Monitoring” 任务：govulncheck、gitleaks（全部历史）、promtool 校验 + 告警规则单测、构建 API 镜像并用 trivy 扫描（有可修复的 HIGH / CRITICAL 即失败）。
+
+## 4. 风险清单
+
+| 编号 | 风险 | 影响 | 现状 / 缓解 | 建议 |
+| --- | --- | --- | --- | --- |
+| R1 | 同一商品的结算串行（行锁 `FOR UPDATE`） | 爆款抢购时同一 SKU 的吞吐约受单个事务时长限制（本机约每秒几十单），排队请求变慢 | 正确性有保证（不超卖、不重复下单）；50 人同时买 P95 728ms | 大促前压测目标 SKU；需要更高吞吐时引入库存预扣 / 排队，不在本期 |
+| R2 | 商品关键词搜索用 `LIKE '%词%'` | 商品量上万后列表搜索变慢 | 当前规模 P95 16ms；配置向量检索后由向量召回补充 | 商品量大时换全文索引或搜索引擎 |
+| R3 | 本地 Compose 镜像有已知漏洞（MinIO 33 个 CRITICAL / 356 个 HIGH，Nacos 14 / 60，etcd 6 / 142，Milvus 3 / 67，Redis 4 / 56，MySQL 1 / 34）；`bitnamilegacy/minio` 已不再维护 | 只影响本地开发 | Compose 端口只绑 127.0.0.1，文档写明不用于生产 | 生产用托管服务或厂商最新补丁镜像；Compose 换官方 MinIO 镜像（需要迁移数据卷，共享的 Milvus 不在本期动） |
+| R4 | 单实例进程内状态：商品向量同步计数、熔断状态按实例 | 多实例时每个实例各自熔断、各自统计 | 指标按实例抓取后汇总 | 无需处理 |
+| R5 | 轨迹异步写入 | 进程崩溃时最后几条轨迹可能丢失 | 正常结束前一定写完；运行状态和回答单独同步写入 | 可接受（轨迹是观测数据） |
+| R6 | Go 1.26 支持期到 1.28 发布（约 2027-02） | 之后不再有安全补丁 | CI 的 govulncheck 会在新漏洞公布后失败 | 跟随 Go 小版本升级 |
+| R7 | 压测在单机进行 | 数字不代表生产 | 方法和脚本可复用 | 10.2 在预发拓扑重测 |
+
+## 5. 发布检查清单
+
+- [ ] CI 全绿（Backend、Web、Android、Web E2E、OpenAPI & Compose、Security & Monitoring）
+- [ ] 生产配置：`APP_ENV=production`、强数据库密码、明确的 `CORS_ALLOWED_ORIGINS`、非默认对象存储凭据、`METRICS_TOKEN`（≥ 24 字符）、`SHUTDOWN_DRAIN=5s`、`RUN_MIGRATIONS=false`、按实例数设置 `MYSQL_MAX_OPEN_CONNS`
+- [ ] Prometheus 已加载 `alerts.yml`，能抓到每个实例的 `/metrics`；告警能送达值班
+- [ ] 发布前 MySQL 全量备份，并在临时库验证过（`CHECKSUM TABLE`）
+- [ ] `/migrate` 列出待执行迁移并人工确认，再 `/migrate -apply`
+- [ ] 滚动发布，发布后 15 分钟观察 5xx、P95、结算成功率、导购失败率、熔断
+- [ ] 回滚预案：上一个版本的镜像标签、`RUN_MIGRATIONS=false`

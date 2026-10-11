@@ -12,6 +12,7 @@ type Key struct {
 var (
 	KeyAppEnv               = Key{Name: "app.env", Env: "APP_ENV", Default: "development"}
 	KeyAPIAddr              = Key{Name: "http.addr", Env: "API_ADDR", Default: ":8080"}
+	KeyShutdownDrain        = Key{Name: "app.shutdown_drain", Env: "SHUTDOWN_DRAIN", Default: "0s"}  // 仅启动时读取
 	KeyRunMigrations        = Key{Name: "app.run_migrations", Env: "RUN_MIGRATIONS"}                 // 默认值随环境决定
 	KeyBootstrapVectorIndex = Key{Name: "app.bootstrap_vector_index", Env: "BOOTSTRAP_VECTOR_INDEX"} // 默认值随环境决定
 )
@@ -48,7 +49,10 @@ var (
 // 外部依赖连接与凭据。
 var (
 	KeyMySQLDSN       = Key{Name: "mysql.dsn", Env: "MYSQL_DSN", Default: "blink:blink_dev_password@tcp(127.0.0.1:3306)/blink_shop?parseTime=true&loc=Local&charset=utf8mb4", Secret: true}
+	KeyMySQLMaxOpen   = Key{Name: "mysql.max_open_conns", Env: "MYSQL_MAX_OPEN_CONNS", Default: "50"}
+	KeyMySQLMaxIdle   = Key{Name: "mysql.max_idle_conns", Env: "MYSQL_MAX_IDLE_CONNS", Default: "25"}
 	KeyMinIOAccessKey = Key{Name: "minio.access_key", Env: "MINIO_ACCESS_KEY", Default: "minioadmin", Secret: true}
+	KeyMetricsToken   = Key{Name: "metrics.token", Env: "METRICS_TOKEN", Secret: true}
 	KeyMinIOSecretKey = Key{Name: "minio.secret_key", Env: "MINIO_SECRET_KEY", Default: "minioadmin", Secret: true}
 	KeyMilvusToken    = Key{Name: "milvus.token", Env: "MILVUS_TOKEN", Secret: true}
 	KeyAIAPIKey       = Key{Name: "ai.api_key", Env: "AI_API_KEY", Secret: true}

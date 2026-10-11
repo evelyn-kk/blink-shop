@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"golang.org/x/image/draw"
+
+	"github.com/evelyn-kk/blink-shop/backend/src/metrics"
 )
 
 // DashScopeOptions 是 DashScope 多模态 Embedding（POST {base}/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding）的配置。
@@ -68,7 +70,8 @@ func (d *DashScope) Name() string {
 }
 func (d *DashScope) Thresholds() (float64, float64) { return d.opts.Match, d.opts.Weak }
 
-func (d *DashScope) Embed(ctx context.Context, data []byte) ([]float32, error) {
+func (d *DashScope) Embed(ctx context.Context, data []byte) (_ []float32, err error) {
+	defer metrics.Track("image_embedding", time.Now(), &err)
 	img, _, err := Decode(data)
 	if err != nil {
 		return nil, err

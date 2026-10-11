@@ -7,9 +7,12 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+
+	"github.com/evelyn-kk/blink-shop/backend/src/metrics"
 )
 
 // MinIOConfig 是连接参数；Endpoint 形如 127.0.0.1:9000（不带协议）。
@@ -66,7 +69,8 @@ func (m *MinIO) ensureBucket(ctx context.Context) error {
 	return nil
 }
 
-func (m *MinIO) Put(ctx context.Context, key string, r io.Reader, size int64, contentType string) error {
+func (m *MinIO) Put(ctx context.Context, key string, r io.Reader, size int64, contentType string) (err error) {
+	defer metrics.Track("minio", time.Now(), &err)
 	if err := m.ensureBucket(ctx); err != nil {
 		return err
 	}
@@ -77,7 +81,8 @@ func (m *MinIO) Put(ctx context.Context, key string, r io.Reader, size int64, co
 	return nil
 }
 
-func (m *MinIO) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+func (m *MinIO) Get(ctx context.Context, key string) (_ io.ReadCloser, err error) {
+	defer metrics.Track("minio", time.Now(), &err)
 	obj, err := m.client.GetObject(ctx, m.bucket, key, minio.GetObjectOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("%w: 读取对象失败: %v", ErrUnavailable, err)
@@ -93,7 +98,8 @@ func (m *MinIO) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 	return obj, nil
 }
 
-func (m *MinIO) Delete(ctx context.Context, key string) error {
+func (m *MinIO) Delete(ctx context.Context, key string) (err error) {
+	defer metrics.Track("minio", time.Now(), &err)
 	if err := m.client.RemoveObject(ctx, m.bucket, key, minio.RemoveObjectOptions{}); err != nil && !isNotFound(err) {
 		return fmt.Errorf("%w: 删除对象失败: %v", ErrUnavailable, err)
 	}

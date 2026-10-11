@@ -651,6 +651,8 @@ type Store interface {
 	UpdateAgentRun(ctx context.Context, accountID, runID string, fn func(r *domain.AgentRun) error) (domain.AgentRun, error)
 	// AppendTraceEvent 追加一条运行轨迹（ID、时间为空时生成），ListTraceEvents 按写入顺序返回。
 	AppendTraceEvent(ctx context.Context, e domain.AgentTraceEvent) (domain.AgentTraceEvent, error)
+	// AppendTraceEvents 按顺序追加多条轨迹，在一个事务里（一次提交）；任何一条不合法时都不写入。
+	AppendTraceEvents(ctx context.Context, events []domain.AgentTraceEvent) error
 	ListTraceEvents(ctx context.Context, accountID, runID string) ([]domain.AgentTraceEvent, error)
 	// FailInterruptedRuns 把 createdBefore 之前创建、仍是 queued/running 的运行改为 failed（errorCode），返回改了几条。
 	// 服务启动时以进程启动时间调用：上一个进程里没跑完的运行不会再有人写结果；本进程已经开始的运行不受影响。

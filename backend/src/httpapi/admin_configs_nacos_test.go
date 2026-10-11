@@ -126,9 +126,10 @@ func TestAdminConfigsOnNacos(t *testing.T) {
 
 // 密钥类配置的明文不出现在配置列表、Prompt 接口、运行轨迹和日志里。
 func TestSecretsNeverExposed(t *testing.T) {
+	// 假的密钥值：用来检查它们不出现在任何输出里（gitleaks:allow）
 	secrets := map[string]string{
-		"AI_API_KEY": "sk-live-ai-9a8b7c", "EMBEDDING_API_KEY": "emb-live-6f5e4d", "MILVUS_TOKEN": "milvus:live-3c2b1a", "MINIO_SECRET_KEY": "minio-live-0z9y8x",
-		"NACOS_PASSWORD": "nacos-live-7w6v5u", "TTS_API_KEY": "tts-live-4t3s2r", "STT_API_SECRET": "stt-live-1q0p9o", "IMAGE_EMBEDDING_API_KEY": "img-live-8n7m6l",
+		"AI_API_KEY": "sk-live-ai-9a8b7c", "EMBEDDING_API_KEY": "emb-live-6f5e4d", "MILVUS_TOKEN": "milvus:live-3c2b1a", "MINIO_SECRET_KEY": "minio-live-0z9y8x", // gitleaks:allow
+		"NACOS_PASSWORD": "nacos-live-7w6v5u", "TTS_API_KEY": "tts-live-4t3s2r", "STT_API_SECRET": "stt-live-1q0p9o", "IMAGE_EMBEDDING_API_KEY": "img-live-8n7m6l", // gitleaks:allow
 	}
 	ts, _ := newNacosServer(t, secrets)
 	admin := ts.login(t, seed.AdminUsername, seed.DevPassword).Token

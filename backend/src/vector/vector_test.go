@@ -19,6 +19,7 @@ import (
 	"github.com/evelyn-kk/blink-shop/backend/src/imagesearch"
 	"github.com/evelyn-kk/blink-shop/backend/src/imagevector"
 	"github.com/evelyn-kk/blink-shop/backend/src/rag"
+	"github.com/evelyn-kk/blink-shop/backend/src/resilience"
 	"github.com/evelyn-kk/blink-shop/backend/src/store/memstore"
 	"github.com/evelyn-kk/blink-shop/backend/src/store/storetest"
 )
@@ -296,5 +297,61 @@ func TestMilvusStatus(t *testing.T) {
 	}
 	if st := NewMilvus("127.0.0.1:1", "", 300*time.Millisecond).Status(ctx, name); st.Error != "unreachable" || strings.Contains(st.Error, "127.0.0.1") {
 		t.Fatalf("unreachable: %+v", st)
+	}
+}
+
+type failingEmbedder struct{ calls int }
+
+func (f *failingEmbedder) Embed(context.Context, []string) ([][]float32, error) {
+	f.calls++
+	return nil, errors.New("embedding 503")
+}
+func (f *failingEmbedder) Dim() int     { return 8 }
+func (f *failingEmbedder) Name() string { return "failing" }
+
+// Embedding 熔断：连续失败后不再调用，直接报错（检索退回关键词）；名称和维度不变。
+func TestEmbedderBreaker(t *testing.T) {
+	f := &failingEmbedder{}
+	e := WithBreaker(f, resilience.NewBreaker("embedding_test", 3, time.Hour))
+	for range 5 {
+		_, _ = e.Embed(context.Background(), []string{"x"})
+	}
+	if f.calls != 3 || e.Name() != "failing" || e.Dim() != 8 {
+		t.Fatalf("calls=%d name=%s dim=%d", f.calls, e.Name(), e.Dim())
+	}
+	if _, err := e.Embed(context.Background(), nil); !errors.Is(err, resilience.ErrOpen) {
+		t.Fatalf("want ErrOpen, got %v", err)
+	}
+}
+
+// Milvus 熔断：连不上时连续失败达到阈值后不再发请求；Milvus 正常返回的业务错误不算失败。
+func TestMilvusBreaker(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if strings.Contains(r.URL.Path, "/has") {
+			fmt.Fprint(w, `{"code":100,"message":"collection not found"}`)
+			return
+		}
+		http.Error(w, "down", http.StatusBadGateway)
+	}))
+	defer srv.Close()
+	m := NewMilvus(srv.URL, "", time.Second)
+	m.SetBreaker(resilience.NewBreaker("milvus_test", 2, time.Hour))
+	for range 4 {
+		var has struct{}
+		_ = m.call(context.Background(), "/v2/vectordb/collections/has", map[string]any{}, &has)
+	}
+	if hits != 4 {
+		t.Fatalf("business errors should not open the breaker: hits=%d", hits)
+	}
+	for range 4 {
+		_ = m.call(context.Background(), "/v2/vectordb/entities/search", map[string]any{}, nil)
+	}
+	if hits != 6 {
+		t.Fatalf("breaker should stop after 2 transport failures: hits=%d", hits)
+	}
+	if err := m.call(context.Background(), "/v2/vectordb/collections/has", map[string]any{}, nil); !errors.Is(err, resilience.ErrOpen) {
+		t.Fatalf("want ErrOpen, got %v", err)
 	}
 }

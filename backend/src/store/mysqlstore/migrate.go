@@ -64,47 +64,59 @@ const (
 )
 
 // PendingMigrations 返回尚未应用的迁移数量；schema_migrations 不存在时视为全部未应用。
-// 供 /ready 判断数据库结构是否与代码一致。
+// 数据库里有本程序不认识的更新版本迁移（新版本已升级、旧版本回滚运行）时不计入，旧程序照常就绪。
 func (s *Store) PendingMigrations(ctx context.Context, files fs.FS) (int, error) {
+	_, pending, _, err := s.MigrationPlan(ctx, files)
+	return len(pending), err
+}
+
+// MigrationPlan 返回已应用、待执行的迁移文件名，以及数据库里有、本程序没有的版本（说明数据库比程序新，例如回滚部署）。
+func (s *Store) MigrationPlan(ctx context.Context, files fs.FS) (applied, pending []string, unknown []int, err error) {
 	migrations, err := LoadMigrations(files)
 	if err != nil {
-		return 0, err
+		return nil, nil, nil, err
 	}
 	var exists int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.TABLES
 		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'schema_migrations'`).Scan(&exists); err != nil {
-		return 0, err
+		return nil, nil, nil, err
 	}
-	if exists == 0 {
-		return len(migrations), nil
-	}
-	applied := map[int]bool{}
-	rows, err := s.db.QueryContext(ctx, "SELECT version FROM schema_migrations")
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var v int
-		if err := rows.Scan(&v); err != nil {
-			return 0, err
+	done := map[int]bool{}
+	if exists > 0 {
+		rows, err := s.db.QueryContext(ctx, "SELECT version FROM schema_migrations ORDER BY version")
+		if err != nil {
+			return nil, nil, nil, err
 		}
-		applied[v] = true
+		defer rows.Close()
+		for rows.Next() {
+			var v int
+			if err := rows.Scan(&v); err != nil {
+				return nil, nil, nil, err
+			}
+			done[v] = true
+		}
+		if err := rows.Err(); err != nil {
+			return nil, nil, nil, err
+		}
 	}
-	pending := 0
+	known := map[int]bool{}
 	for _, m := range migrations {
-		if !applied[m.Version] {
-			pending++
+		known[m.Version] = true
+		if done[m.Version] {
+			applied = append(applied, m.Name)
+		} else {
+			pending = append(pending, m.Name)
 		}
 	}
-	return pending, rows.Err()
+	for v := range done {
+		if !known[v] {
+			unknown = append(unknown, v)
+		}
+	}
+	sort.Ints(unknown)
+	return applied, pending, unknown, nil
 }
 
-// Migrate 执行尚未应用的迁移，返回本次应用的文件名。
-//   - 用 MySQL 命名锁保证多实例同时启动时只有一个在迁移；
-//   - 已应用的迁移会校验 checksum，发现被修改直接报错（迁移只追加、不修改）；
-//   - 数据库里有代码中不存在的版本时报错，防止旧代码跑在新库上。
-//
 // 不会创建数据库本身，数据库必须事先存在。
 func (s *Store) Migrate(ctx context.Context, files fs.FS) ([]string, error) {
 	migrations, err := LoadMigrations(files)

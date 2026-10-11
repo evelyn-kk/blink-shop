@@ -16,6 +16,9 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/evelyn-kk/blink-shop/backend/src/metrics"
+	"github.com/evelyn-kk/blink-shop/backend/src/resilience"
 )
 
 // Embedder 把文本转成向量。同一个 Embedder 的维度固定。
@@ -69,7 +72,8 @@ func (e *OpenAIEmbedder) WithHTTPClient(h *http.Client) *OpenAIEmbedder {
 	return e
 }
 
-func (e *OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+func (e *OpenAIEmbedder) Embed(ctx context.Context, texts []string) (_ [][]float32, err error) {
+	defer metrics.Track("embedding", time.Now(), &err)
 	out := make([][]float32, 0, len(texts))
 	for start := 0; start < len(texts); start += e.opts.BatchSize {
 		end := min(start+e.opts.BatchSize, len(texts))
@@ -217,3 +221,26 @@ func hashTokens(text string) []string {
 
 // ErrDimMismatch 表示已有集合的向量维度和当前 Embedding 不一致（换了模型），需要删掉集合重建。
 var ErrDimMismatch = errors.New("vector: collection dimension does not match embedder")
+
+// breakerEmbedder 在 Embedding 服务连续失败时熔断：打开期间直接报错，检索立即退回关键词，不再每次等满超时。
+type breakerEmbedder struct {
+	Embedder
+	b *resilience.Breaker
+}
+
+// WithBreaker 给 e 加熔断；b 为 nil 时原样返回。
+func WithBreaker(e Embedder, b *resilience.Breaker) Embedder {
+	if e == nil || b == nil {
+		return e
+	}
+	return breakerEmbedder{Embedder: e, b: b}
+}
+
+func (be breakerEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	if !be.b.Allow() {
+		return nil, resilience.ErrOpen
+	}
+	out, err := be.Embedder.Embed(ctx, texts)
+	be.b.Record(err)
+	return out, err
+}

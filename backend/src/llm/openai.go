@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/evelyn-kk/blink-shop/backend/src/metrics"
 )
 
 const (
@@ -105,7 +107,8 @@ func (c *Client) body(req Request, stream bool) ([]byte, error) {
 }
 
 // Complete 一次性返回全文。429 / 5xx / 网络错误按 MaxRetries 指数退避重试；4xx 不重试；ctx 结束立即返回。
-func (c *Client) Complete(ctx context.Context, req Request) (Response, error) {
+func (c *Client) Complete(ctx context.Context, req Request) (_ Response, err error) {
+	defer metrics.Track("llm", time.Now(), &err)
 	payload, err := c.body(req, false)
 	if err != nil {
 		return Response{}, err
@@ -142,7 +145,8 @@ func (c *Client) Complete(ctx context.Context, req Request) (Response, error) {
 }
 
 // Stream 按 SSE 读取增量；连接建立前的失败按 Complete 的规则重试，已经开始输出后不重试（避免重复文本）。
-func (c *Client) Stream(ctx context.Context, req Request, onDelta func(delta string) error) (Response, error) {
+func (c *Client) Stream(ctx context.Context, req Request, onDelta func(delta string) error) (_ Response, err error) {
+	defer metrics.Track("llm", time.Now(), &err)
 	payload, err := c.body(req, true)
 	if err != nil {
 		return Response{}, err

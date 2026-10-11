@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/evelyn-kk/blink-shop/backend/src/resilience"
 )
 
 // Message 是对话里的一条消息；Role 为 system / user / assistant。
@@ -73,4 +75,48 @@ type Options struct {
 	Timeout time.Duration
 	// MaxRetries 是 429 / 5xx / 网络错误的重试次数；0 表示不重试。
 	MaxRetries int
+}
+
+// breakerProvider 在模型服务连续失败时熔断：打开期间直接返回 resilience.ErrOpen，导购立即退回规则回答，不再每次等满超时和重试。
+type breakerProvider struct {
+	p Provider
+	b *resilience.Breaker
+}
+
+// WithBreaker 给 p 加熔断；b 为 nil 时原样返回。
+func WithBreaker(p Provider, b *resilience.Breaker) Provider {
+	if p == nil || b == nil {
+		return p
+	}
+	return breakerProvider{p: p, b: b}
+}
+
+func (bp breakerProvider) Complete(ctx context.Context, req Request) (Response, error) {
+	if !bp.b.Allow() {
+		return Response{}, resilience.ErrOpen
+	}
+	resp, err := bp.p.Complete(ctx, req)
+	bp.b.Record(err)
+	return resp, err
+}
+
+func (bp breakerProvider) Stream(ctx context.Context, req Request, onDelta func(delta string) error) (Response, error) {
+	if !bp.b.Allow() {
+		return Response{}, resilience.ErrOpen
+	}
+	// 调用方回调主动中止（如输出过滤）不是模型服务的问题，不计入失败
+	var aborted error
+	resp, err := bp.p.Stream(ctx, req, func(d string) error {
+		if e := onDelta(d); e != nil {
+			aborted = e
+			return e
+		}
+		return nil
+	})
+	if aborted != nil && errors.Is(err, aborted) {
+		bp.b.Record(nil)
+	} else {
+		bp.b.Record(err)
+	}
+	return resp, err
 }

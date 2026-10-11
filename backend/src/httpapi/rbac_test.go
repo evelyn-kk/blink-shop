@@ -100,6 +100,7 @@ var expectedRoutes = map[string]string{
 	"POST /api/v1/admin/prompts/{key}/publish":      "admin",
 	"POST /api/v1/admin/prompts/{key}/rollback":     "admin",
 	"GET /api/v1/admin/agent/runs":                  "admin",
+	"GET /metrics":                                  "public",
 	"GET /api/v1/admin/agent/runs/{id}":             "admin",
 	"GET /api/v1/admin/vector/status":               "admin",
 	"GET /api/v1/admin/evals":                       "admin",

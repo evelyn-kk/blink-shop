@@ -10,14 +10,19 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/evelyn-kk/blink-shop/backend/src/metrics"
+	"github.com/evelyn-kk/blink-shop/backend/src/resilience"
 )
 
 // Milvus 是 Milvus RESTful API v2（/v2/vectordb/...）的最小客户端：只用到建集合、写入、按条件删除、检索和删集合。
 type Milvus struct {
-	base  string
-	token string
-	http  *http.Client
+	base    string
+	token   string
+	http    *http.Client
+	breaker *resilience.Breaker
 }
 
 // NewMilvus 创建客户端；addr 为空时返回 nil（未配置）。addr 可以带或不带 http(s):// 前缀。
@@ -35,6 +40,27 @@ func NewMilvus(addr, token string, timeout time.Duration) *Milvus {
 	return &Milvus{base: strings.TrimRight(addr, "/"), token: token, http: &http.Client{Timeout: timeout}}
 }
 
+// 熔断参数：连续 5 次连不上 / 超时后打开 30 秒。
+const (
+	BreakerThreshold = 5
+	BreakerCooldown  = 30 * time.Second
+)
+
+var (
+	sharedMilvusOnce sync.Once
+	sharedMilvus     *resilience.Breaker
+)
+
+// SharedMilvusBreaker 是进程内所有 Milvus 客户端（知识、商品、图片集合在同一个 Milvus 上）共用的熔断器。
+func SharedMilvusBreaker() *resilience.Breaker {
+	sharedMilvusOnce.Do(func() { sharedMilvus = resilience.NewBreaker("milvus", BreakerThreshold, BreakerCooldown) })
+	return sharedMilvus
+}
+
+// SetBreaker 给 Milvus 调用加熔断：连不上、超时或 HTTP 非 2xx 连续达到阈值后，打开期间直接返回 resilience.ErrOpen
+// （检索退回关键词、图搜返回不可用）。Milvus 正常返回的业务错误（code≠0，如集合不存在）不算失败。
+func (m *Milvus) SetBreaker(b *resilience.Breaker) { m.breaker = b }
+
 // MilvusError 是 Milvus 返回的非 0 业务码。
 type MilvusError struct {
 	Code    int
@@ -43,7 +69,19 @@ type MilvusError struct {
 
 func (e *MilvusError) Error() string { return fmt.Sprintf("milvus: code %d: %s", e.Code, e.Message) }
 
-func (m *Milvus) call(ctx context.Context, path string, body any, out any) error {
+func (m *Milvus) call(ctx context.Context, path string, body any, out any) (err error) {
+	if !m.breaker.Allow() {
+		return resilience.ErrOpen
+	}
+	defer metrics.Track("milvus", time.Now(), &err)
+	defer func() {
+		var me *MilvusError
+		if errors.As(err, &me) {
+			m.breaker.Record(nil) // 服务正常响应了
+			return
+		}
+		m.breaker.Record(err)
+	}()
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return err

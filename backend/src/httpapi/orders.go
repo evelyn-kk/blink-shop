@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/domain"
+	"github.com/evelyn-kk/blink-shop/backend/src/metrics"
 	"github.com/evelyn-kk/blink-shop/backend/src/shop"
 	"github.com/evelyn-kk/blink-shop/backend/src/store"
 )
@@ -112,8 +113,14 @@ func (s *Server) handleCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := s.shop().Checkout(r.Context(), acc.AccountID, shop.CheckoutInput{IdempotencyKey: key, UserCouponIDs: choice, ExpectedPayAmount: in.ExpectedPayAmount})
 	if err != nil {
+		metrics.Checkouts.Inc(checkoutResult(err))
 		s.shopFailed(w, r, "checkout", err)
 		return
+	}
+	if res.Replayed {
+		metrics.Checkouts.Inc("replayed")
+	} else {
+		metrics.Checkouts.Inc("success")
 	}
 	out := checkoutResponse{CheckoutRequestID: res.RequestID, Replayed: res.Replayed, Items: res.Orders}
 	status := http.StatusCreated
@@ -407,4 +414,13 @@ func (s *Server) RunOrderCloser(ctx context.Context, interval time.Duration) {
 		case <-time.After(interval):
 		}
 	}
+}
+
+// checkoutResult 是结算失败的指标标签：业务拒绝用 shop 的错误码（有限集合，如库存不足、金额变化），其余为 internal_error。
+func checkoutResult(err error) string {
+	var se *shop.Error
+	if errors.As(err, &se) && se.Code != "" {
+		return se.Code
+	}
+	return "internal_error"
 }

@@ -1,5 +1,7 @@
 # 本地依赖（Docker Compose）
 
+> 生产部署（API 镜像 `backend/Dockerfile`、发布 / 备份 / 回滚 / 故障处理）见 [RUNBOOK.md](RUNBOOK.md)，监控与告警见 [monitoring/](monitoring/)。本目录的 Compose 镜像有已知漏洞（见 `docs/10-release-readiness.md` 风险 R3），只用于本地开发。
+
 只用于本地开发。所有端口绑定 `127.0.0.1`，凭据为开发默认值；生产环境不得使用。
 
 ## 启动与停止

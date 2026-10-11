@@ -87,14 +87,32 @@ func scanProduct(row rowScanner, extra ...any) (domain.Product, error) {
 }
 
 func (s *Store) listSKUs(ctx context.Context, productID string) ([]domain.ProductSKU, error) {
+	m, err := s.skusByProduct(ctx, []string{productID})
+	if err != nil {
+		return nil, err
+	}
+	return m[productID], nil
+}
+
+// skusByProduct 一次查出多个商品的 SKU（列表页不再每个商品查一次）。每个商品都有一项，没有 SKU 时是空切片；
+// 顺序与单个商品时相同：默认 SKU 在前，再按 sku_id。
+func (s *Store) skusByProduct(ctx context.Context, productIDs []string) (map[string][]domain.ProductSKU, error) {
+	out := make(map[string][]domain.ProductSKU, len(productIDs))
+	if len(productIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(productIDs))
+	for i, id := range productIDs {
+		args[i] = id
+		out[id] = []domain.ProductSKU{}
+	}
 	rows, err := s.q(ctx).QueryContext(ctx, `SELECT sku_id, product_id, sku_name, price, stock_quantity, stock_status,
 		specs_json, is_default, created_at, updated_at
-		FROM product_skus WHERE product_id = ? ORDER BY is_default DESC, sku_id`, productID)
+		FROM product_skus WHERE product_id IN (?`+strings.Repeat(`, ?`, len(productIDs)-1)+`) ORDER BY product_id, is_default DESC, sku_id`, args...)
 	if err != nil {
 		return nil, mapErr(err)
 	}
 	defer rows.Close()
-	out := []domain.ProductSKU{}
 	for rows.Next() {
 		var (
 			sku   domain.ProductSKU
@@ -108,7 +126,7 @@ func (s *Store) listSKUs(ctx context.Context, productID string) ([]domain.Produc
 			return nil, err
 		}
 		sku.CreatedAt, sku.UpdatedAt = sku.CreatedAt.UTC(), sku.UpdatedAt.UTC()
-		out = append(out, sku)
+		out[sku.ProductID] = append(out[sku.ProductID], sku)
 	}
 	return out, rows.Err()
 }
@@ -202,10 +220,16 @@ func (s *Store) SearchVisibleProducts(ctx context.Context, q store.ProductSearch
 		return nil, 0, err
 	}
 	rows.Close()
+	ids := make([]string, len(out))
 	for i := range out {
-		if out[i].SKUs, err = s.listSKUs(ctx, out[i].ProductID); err != nil {
-			return nil, 0, err
-		}
+		ids[i] = out[i].ProductID
+	}
+	skus, err := s.skusByProduct(ctx, ids)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range out {
+		out[i].SKUs = skus[out[i].ProductID]
 	}
 	return out, total, nil
 }

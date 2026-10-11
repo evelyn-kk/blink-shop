@@ -220,3 +220,30 @@ jobs:
             echo "$unpinned"
             exit 1
           fi
+
+  security:
+    name: Security & Monitoring
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks 扫描全部历史
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: govulncheck
+        # 代码实际调用到的漏洞（标准库 + 依赖）有一个就失败
+        working-directory: backend
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+      - name: gitleaks (git history)
+        run: docker run --rm -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.28.0 git /repo --redact --no-banner
+      - name: alert rules (promtool check + unit tests)
+        run: |
+          docker run --rm -v "$PWD/deployments/monitoring:/m" -w /m --entrypoint promtool prom/prometheus:v3.5.0 check rules /m/alerts.yml
+          docker run --rm -v "$PWD/deployments/monitoring:/m" -w /m --entrypoint promtool prom/prometheus:v3.5.0 test rules /m/alerts_test.yml
+      - name: build API image
+        run: docker build -t blink-shop-api:ci backend
+      - name: trivy (API image, HIGH/CRITICAL)
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.67.2 image --quiet --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed blink-shop-api:ci

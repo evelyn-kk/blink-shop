@@ -56,6 +56,12 @@ func Open(dsn string) (*Store, error) {
 	return &Store{db: db, cfg: cfg, now: func() time.Time { return time.Now().UTC() }}, nil
 }
 
+// SetPool 设置连接池大小（cmd/api 按 MYSQL_MAX_OPEN_CONNS / MYSQL_MAX_IDLE_CONNS 调用；默认 20 / 10）。
+func (s *Store) SetPool(maxOpen, maxIdle int) {
+	s.db.SetMaxOpenConns(maxOpen)
+	s.db.SetMaxIdleConns(maxIdle)
+}
+
 // DB 暴露连接池，供健康检查和测试使用。
 func (s *Store) DB() *sql.DB { return s.db }
 

@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/evelyn-kk/blink-shop/backend/src/resilience"
 )
 
 func newTestClient(t *testing.T, h http.HandlerFunc, retries int) (*Client, *httptest.Server) {
@@ -189,5 +191,36 @@ func TestMock(t *testing.T) {
 	}
 	if _, err := m.Complete(context.Background(), Request{}); !errors.Is(err, ErrScriptExhausted) || m.Count() != 4 || m.Last().Model != "" {
 		t.Fatalf("exhausted: %v %d", err, m.Count())
+	}
+}
+
+// 熔断：模型服务连续失败后不再发请求，直接返回 resilience.ErrOpen；调用方回调主动中止不算失败。
+func TestWithBreaker(t *testing.T) {
+	ctx := context.Background()
+	boom := errors.New("upstream 502")
+	m := (&Mock{}).Then(Fail(boom), Fail(boom), Text("ok"), Text("abc"), Text("abc"), Text("abc"))
+	p := WithBreaker(m, resilience.NewBreaker("llm_test", 2, time.Hour))
+	for range 2 {
+		if _, err := p.Complete(ctx, Request{}); !errors.Is(err, boom) {
+			t.Fatalf("want upstream error, got %v", err)
+		}
+	}
+	if _, err := p.Complete(ctx, Request{}); !errors.Is(err, resilience.ErrOpen) || m.Count() != 2 {
+		t.Fatalf("breaker should be open without calling: %v count=%d", err, m.Count())
+	}
+	if WithBreaker(m, nil) != Provider(m) {
+		t.Fatal("nil breaker should not wrap")
+	}
+
+	m2 := (&Mock{}).Then(Text("abc"), Text("abc"), Text("abc"))
+	p2 := WithBreaker(m2, resilience.NewBreaker("llm_test2", 2, time.Hour))
+	stop := errors.New("filtered")
+	for range 3 {
+		if _, err := p2.Stream(ctx, Request{}, func(string) error { return stop }); !errors.Is(err, stop) {
+			t.Fatalf("stream: %v", err)
+		}
+	}
+	if m2.Count() != 3 {
+		t.Fatalf("aborted streams should not open the breaker: count=%d", m2.Count())
 	}
 }

@@ -199,7 +199,7 @@ func listReports(dir string) ([]evalReportSummary, int) {
 			if !reportPart.MatchString(suite) {
 				continue
 			}
-			rep, err := readReport(path)
+			rep, err := readReport(dir, filepath.Join(run, filepath.Base(path)))
 			if err != nil {
 				skipped++
 				continue
@@ -218,8 +218,14 @@ func summarizeReport(id string, r eval.Report) evalReportSummary {
 
 var errReportFormat = errors.New("report format")
 
-func readReport(path string) (eval.Report, error) {
-	f, err := os.Open(path)
+// readReport 读 dir 下的 name（相对路径）；用 os.Root 打开，目录里的符号链接也不能把读取带到报告目录之外。
+func readReport(dir, name string) (eval.Report, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return eval.Report{}, err
+	}
+	defer root.Close()
+	f, err := root.Open(name)
 	if err != nil {
 		return eval.Report{}, err
 	}
@@ -246,7 +252,7 @@ func (s *Server) handleGetEvalReport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, ErrReportNotFound)
 		return
 	}
-	rep, err := readReport(filepath.Join(s.evalReportDir, run, "report-"+suite+".json"))
+	rep, err := readReport(s.evalReportDir, filepath.Join(run, "report-"+suite+".json"))
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		writeError(w, ErrReportNotFound)

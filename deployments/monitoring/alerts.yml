@@ -1,0 +1,100 @@
+# Blink Shop 告警规则（Prometheus 2.x / 3.x rule 文件）。指标定义见 backend/src/metrics/vars.go，SLO 见 deployments/monitoring/README.md。
+# 校验：docker run --rm -v "$PWD/deployments/monitoring:/m" --entrypoint promtool prom/prometheus:v3.5.0 check rules /m/alerts.yml
+#      docker run --rm -v "$PWD/deployments/monitoring:/m" --entrypoint promtool prom/prometheus:v3.5.0 test rules /m/alerts_test.yml
+groups:
+  - name: blink-shop-slo
+    rules:
+      # 记录规则：P95 和比率先算好，告警和看板复用
+      - record: blink:catalog_latency_seconds:p95_5m
+        expr: histogram_quantile(0.95, sum by (le) (rate(blink_http_request_duration_seconds_bucket{route=~"GET /api/v1/(products|products/\\{id\\}|products/\\{id\\}/skus|products/\\{id\\}/reviews|categories/tree)"}[5m])))
+      - record: blink:api_latency_seconds:p95_5m
+        expr: histogram_quantile(0.95, sum by (le) (rate(blink_http_request_duration_seconds_bucket{route!~"unmatched|GET /metrics|.*/eval/.*|POST /api/v1/files|.*/unstructured-ingestions|POST /api/v1/search/image"}[5m])))
+      - record: blink:agent_first_event_seconds:p95_10m
+        expr: histogram_quantile(0.95, sum by (le) (rate(blink_agent_first_event_seconds_bucket[10m])))
+      - record: blink:http_5xx:ratio_5m
+        expr: sum(rate(blink_http_requests_total{code="5xx"}[5m])) / clamp_min(sum(rate(blink_http_requests_total[5m])), 1e-9)
+      - record: blink:checkout_success:ratio_15m
+        # 业务拒绝（库存不足、价格变化、券不可用等 4xx）不算失败，只看服务端错误
+        expr: sum(increase(blink_checkout_total{result=~"success|replayed"}[15m])) / clamp_min(sum(increase(blink_checkout_total{result=~"success|replayed|internal_error"}[15m])), 1)
+      - record: blink:agent_failed:ratio_15m
+        expr: sum(increase(blink_agent_runs_total{status="failed"}[15m])) / clamp_min(sum(increase(blink_agent_runs_total[15m])), 1)
+      - record: blink:external_error:ratio_10m
+        expr: sum by (dependency) (increase(blink_external_calls_total{result=~"error|timeout|breaker_open"}[10m])) / clamp_min(sum by (dependency) (increase(blink_external_calls_total{result!="canceled"}[10m])), 1)
+
+      - alert: BlinkAPIDown
+        expr: up{job="blink-shop-api"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "API 实例 {{ $labels.instance }} 拉不到指标"
+          runbook: "deployments/RUNBOOK.md#api-不可用"
+      - alert: BlinkHigh5xxRatio
+        expr: blink:http_5xx:ratio_5m > 0.01
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "5xx 比例 {{ $value | humanizePercentage }} 超过 1%"
+          runbook: "deployments/RUNBOOK.md#5xx-升高"
+      - alert: BlinkCatalogSlow
+        expr: blink:catalog_latency_seconds:p95_5m > 0.3
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "商品目录 P95 {{ $value | humanizeDuration }} 超过 300ms"
+          runbook: "deployments/RUNBOOK.md#接口变慢"
+      - alert: BlinkAPISlow
+        expr: blink:api_latency_seconds:p95_5m > 0.5
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "接口 P95 {{ $value | humanizeDuration }} 超过 500ms"
+          runbook: "deployments/RUNBOOK.md#接口变慢"
+      - alert: BlinkAgentFirstEventSlow
+        expr: blink:agent_first_event_seconds:p95_10m > 3
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "导购首个进展事件 P95 {{ $value | humanizeDuration }} 超过 3s"
+          runbook: "deployments/RUNBOOK.md#导购变慢或失败"
+      - alert: BlinkCheckoutFailing
+        expr: blink:checkout_success:ratio_15m < 0.99 and sum(increase(blink_checkout_total[15m])) >= 20
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "结算成功率 {{ $value | humanizePercentage }} 低于 99%（不含业务拒绝）"
+          runbook: "deployments/RUNBOOK.md#结算失败"
+      - alert: BlinkAgentFailing
+        expr: blink:agent_failed:ratio_15m > 0.05 and sum(increase(blink_agent_runs_total[15m])) >= 20
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "导购失败率 {{ $value | humanizePercentage }} 超过 5%"
+          runbook: "deployments/RUNBOOK.md#导购变慢或失败"
+      - alert: BlinkDependencyErrors
+        expr: blink:external_error:ratio_10m > 0.1 and sum by (dependency) (increase(blink_external_calls_total[10m])) >= 10
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "外部依赖 {{ $labels.dependency }} 失败率 {{ $value | humanizePercentage }}"
+          runbook: "deployments/RUNBOOK.md#外部依赖故障"
+      - alert: BlinkBreakerOpen
+        expr: max by (dependency) (blink_breaker_open) == 1
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.dependency }} 熔断已打开 5 分钟，相关功能在降级运行"
+          runbook: "deployments/RUNBOOK.md#外部依赖故障"
+      - alert: BlinkDBPoolSaturated
+        expr: rate(blink_db_wait_seconds[5m]) > 0.5
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "数据库连接池等待 {{ $value }} 秒/秒，连接池不够或有慢查询"
+          runbook: "deployments/RUNBOOK.md#数据库"
+      - alert: BlinkVectorSyncFailing
+        expr: increase(blink_vector_sync_total{result="error"}[30m]) > 10
+        for: 0m
+        labels: {severity: info}
+        annotations:
+          summary: "30 分钟内商品向量同步失败 {{ $value }} 次（检索仍可用，召回可能过期）"
+          runbook: "deployments/RUNBOOK.md#外部依赖故障"

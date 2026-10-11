@@ -1,0 +1,57 @@
+# promtool 单元测试：构造指标序列，断言告警按预期触发 / 不触发。
+rule_files:
+  - alerts.yml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      # 每分钟 100 个请求，其中 3 个 5xx（3%）
+      - series: 'blink_http_requests_total{route="GET /api/v1/products",method="GET",code="2xx"}'
+        values: '0+97x20'
+      - series: 'blink_http_requests_total{route="GET /api/v1/products",method="GET",code="5xx"}'
+        values: '0+3x20'
+      # 结算：每分钟 10 次成功、1 次服务端错误（成功率约 91%）
+      - series: 'blink_checkout_total{result="success"}'
+        values: '0+10x30'
+      - series: 'blink_checkout_total{result="internal_error"}'
+        values: '0+1x30'
+      # 业务拒绝很多也不影响结算告警
+      - series: 'blink_checkout_total{result="insufficient_stock"}'
+        values: '0+50x30'
+      - series: 'blink_breaker_open{dependency="llm"}'
+        values: '1x10'
+      - series: 'blink_breaker_open{dependency="milvus"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: BlinkHigh5xxRatio
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "5xx 比例 3% 超过 1%"
+              runbook: "deployments/RUNBOOK.md#5xx-升高"
+      - eval_time: 25m
+        alertname: BlinkCheckoutFailing
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "结算成功率 90.91% 低于 99%（不含业务拒绝）"
+              runbook: "deployments/RUNBOOK.md#结算失败"
+      - eval_time: 7m
+        alertname: BlinkBreakerOpen
+        exp_alerts:
+          - exp_labels: {severity: warning, dependency: llm}
+            exp_annotations:
+              summary: "llm 熔断已打开 5 分钟，相关功能在降级运行"
+              runbook: "deployments/RUNBOOK.md#外部依赖故障"
+  - interval: 1m
+    input_series:
+      # 只有业务拒绝、没有服务端错误：不告警
+      - series: 'blink_checkout_total{result="success"}'
+        values: '0+10x30'
+      - series: 'blink_checkout_total{result="price_changed"}'
+        values: '0+20x30'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: BlinkCheckoutFailing
+        exp_alerts: []

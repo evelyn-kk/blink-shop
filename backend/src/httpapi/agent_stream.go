@@ -14,6 +14,7 @@ import (
 
 	"github.com/evelyn-kk/blink-shop/backend/src/agent"
 	"github.com/evelyn-kk/blink-shop/backend/src/domain"
+	"github.com/evelyn-kk/blink-shop/backend/src/metrics"
 	"github.com/evelyn-kk/blink-shop/backend/src/store"
 )
 
@@ -214,9 +215,19 @@ type runOutput struct {
 	text      strings.Builder
 	blocks    []map[string]any
 	followups []string
+	// received 是收到消息的时间，first 保证“首个进展事件耗时”只记一次。
+	received time.Time
+	first    sync.Once
+	traces   *traceWriter
+}
+
+// progressed 在推送第一个进展事件（thinking / 文本 / 块）时记录耗时。
+func (o *runOutput) progressed() {
+	o.first.Do(func() { metrics.AgentFirstEvent.Since(o.received) })
 }
 
 func (o *runOutput) Thinking(step agent.Step) {
+	o.progressed()
 	o.sse.event(EventThinking, map[string]any{"step": step})
 }
 
@@ -224,6 +235,7 @@ func (o *runOutput) Text(delta string) {
 	if delta == "" {
 		return
 	}
+	o.progressed()
 	o.mu.Lock()
 	o.text.WriteString(delta)
 	o.mu.Unlock()
@@ -231,6 +243,7 @@ func (o *runOutput) Text(delta string) {
 }
 
 func (o *runOutput) Block(b map[string]any) {
+	o.progressed()
 	o.mu.Lock()
 	o.blocks = append(o.blocks, b)
 	o.mu.Unlock()
@@ -245,17 +258,81 @@ func (o *runOutput) Followups(q []string) {
 }
 
 func (o *runOutput) Trace(stage, eventType, status string, d time.Duration, meta map[string]any) {
-	o.s.trace(o.run, stage, eventType, status, d, "", meta)
+	o.traces.add(o.s.traceEvent(o.run, stage, eventType, status, d, "", meta))
 }
 
-// trace 写一条轨迹；写失败只记日志，不影响运行。metadata 里的 model 同时写入事件的 model 字段。
-func (s *Server) trace(r domain.AgentRun, stage, eventType, status string, d time.Duration, errText string, meta map[string]any) {
+// traceWriter 在后台按顺序写一次运行的轨迹：运行不必等每条轨迹落库（高并发时连接池排队会拖慢首个事件和整段回答），
+// 顺序与写入顺序一致；close 等全部写完，运行结束（推送 message_done / error）前调用，客户端看到结束时轨迹已完整。
+type traceWriter struct {
+	s      *Server
+	ch     chan domain.AgentTraceEvent
+	done   chan struct{}
+	mu     sync.Mutex
+	closed bool
+}
+
+func (s *Server) newTraceWriter() *traceWriter {
+	w := &traceWriter{s: s, ch: make(chan domain.AgentTraceEvent, 64), done: make(chan struct{})}
+	go func() {
+		defer close(w.done)
+		for e := range w.ch {
+			// 把已经排队的一起写（一个事务一次提交）；队列为空时只写这一条，不等待凑批
+			batch := []domain.AgentTraceEvent{e}
+		drain:
+			for len(batch) < traceBatchMax {
+				select {
+				case next, ok := <-w.ch:
+					if !ok {
+						break drain
+					}
+					batch = append(batch, next)
+				default:
+					break drain
+				}
+			}
+			s.appendTraces(batch)
+		}
+	}()
+	return w
+}
+
+// traceBatchMax 是一次写入的最多轨迹条数。
+const traceBatchMax = 32
+
+// add 排队一条轨迹；运行已经结束（close 之后）还有轨迹时只记日志丢弃，不影响运行。
+func (w *traceWriter) add(e domain.AgentTraceEvent) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		w.s.logger.Warn("trace after run end dropped", "run_id", e.RunID, "stage", e.Stage)
+		return
+	}
+	w.ch <- e
+}
+
+func (w *traceWriter) close() {
+	w.mu.Lock()
+	if !w.closed {
+		w.closed = true
+		close(w.ch)
+	}
+	w.mu.Unlock()
+	<-w.done
+}
+
+// traceEvent 组装一条轨迹；metadata 里的 model 同时写入事件的 model 字段。
+func (s *Server) traceEvent(r domain.AgentRun, stage, eventType, status string, d time.Duration, errText string, meta map[string]any) domain.AgentTraceEvent {
+	model, _ := meta["model"].(string)
+	return domain.AgentTraceEvent{RunID: r.RunID, TraceID: r.TraceID, AccountID: r.AccountID, Model: model,
+		Stage: stage, EventType: eventType, Status: status, DurationMS: d.Milliseconds(), Error: errText, Metadata: meta}
+}
+
+// appendTraces 按顺序写一批轨迹；写失败只记日志，不影响运行。
+func (s *Server) appendTraces(events []domain.AgentTraceEvent) {
 	ctx, cancel := context.WithTimeout(context.Background(), runPersistTimeout)
 	defer cancel()
-	model, _ := meta["model"].(string)
-	if _, err := s.store.AppendTraceEvent(ctx, domain.AgentTraceEvent{RunID: r.RunID, TraceID: r.TraceID, AccountID: r.AccountID, Model: model,
-		Stage: stage, EventType: eventType, Status: status, DurationMS: d.Milliseconds(), Error: errText, Metadata: meta}); err != nil {
-		s.logger.Error("append trace event failed", "run_id", r.RunID, "error", err)
+	if err := s.store.AppendTraceEvents(ctx, events); err != nil {
+		s.logger.Error("append trace events failed", "run_id", events[0].RunID, "events", len(events), "error", err)
 	}
 }
 
@@ -340,7 +417,10 @@ func (s *Server) validateStreamInput(r *http.Request, acc domain.Account, sessio
 // executeRun 执行新运行并把输出推给客户端。运行的 context 与请求分离，取消原因可区分：
 // 用户取消、客户端断开、超时、服务关闭；结束后无论哪种都写回最终状态和已生成的内容。
 func (s *Server) executeRun(w http.ResponseWriter, r *http.Request, started store.StartedRun) {
+	received := time.Now()
 	run := started.Run
+	metrics.SSEActive.Add(1)
+	defer metrics.SSEActive.Add(-1)
 	base, cancel := context.WithCancelCause(context.WithoutCancel(r.Context()))
 	ctx, cancelTimeout := context.WithTimeoutCause(base, s.runTimeout, errRunTimeout)
 	defer cancelTimeout()
@@ -361,9 +441,10 @@ func (s *Server) executeRun(w http.ResponseWriter, r *http.Request, started stor
 	defer close(stopBeat)
 	sse.event(EventMessageStart, messageStartData{RunID: run.RunID, MessageID: started.Message.MessageID, SessionID: run.SessionID,
 		TraceID: run.TraceID})
-	s.trace(run, "run", "start", "ok", 0, "", map[string]any{"attachments": len(started.Message.Attachments)})
+	traces := s.newTraceWriter()
+	traces.add(s.traceEvent(run, "run", "start", "ok", 0, "", map[string]any{"attachments": len(started.Message.Attachments)}))
 
-	out := &runOutput{s: s, sse: sse, run: run}
+	out := &runOutput{s: s, sse: sse, run: run, received: received, traces: traces}
 	begin := time.Now()
 	runErr := s.runAgent(ctx, agent.Input{AccountID: run.AccountID, SessionID: run.SessionID, RunID: run.RunID, TraceID: run.TraceID,
 		Content: started.Message.Content, Attachments: started.Message.Attachments}, out)
@@ -407,8 +488,11 @@ func (s *Server) executeRun(w http.ResponseWriter, r *http.Request, started stor
 	if runErr != nil && !errors.Is(runErr, context.Canceled) && !errors.Is(runErr, context.DeadlineExceeded) {
 		errText = runErr.Error()
 	}
-	s.trace(run, "run", "end", string(final.Status), time.Since(begin), errText, map[string]any{"error_code": final.ErrorCode,
-		"content_runes": utf8.RuneCountInString(content), "blocks": len(blocks)})
+	metrics.AgentRuns.Inc(string(final.Status))
+	metrics.AgentRunDuration.Since(received, string(final.Status))
+	traces.add(s.traceEvent(run, "run", "end", string(final.Status), time.Since(begin), errText, map[string]any{"error_code": final.ErrorCode,
+		"content_runes": utf8.RuneCountInString(content), "blocks": len(blocks)}))
+	traces.close()
 	if final.Status == domain.RunCompleted {
 		sse.event(EventMessageDone, messageDoneData{RunID: run.RunID, Status: final.Status})
 	} else {
@@ -431,6 +515,8 @@ func (s *Server) runAgent(ctx context.Context, in agent.Input, out agent.Output)
 // 还在进行的（例如前一次连接断了但运行仍在当前进程里）等到结束后重放，期间保持心跳。
 func (s *Server) replayRun(w http.ResponseWriter, r *http.Request, started store.StartedRun) {
 	run := started.Run
+	metrics.SSEActive.Add(1)
+	defer metrics.SSEActive.Add(-1)
 	sse := startSSE(w)
 	stopBeat := make(chan struct{})
 	go sse.heartbeat(s.heartbeat, stopBeat)

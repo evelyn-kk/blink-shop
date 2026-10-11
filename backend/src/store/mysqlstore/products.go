@@ -43,10 +43,16 @@ func (s *Store) ListMerchantProducts(ctx context.Context, q store.MerchantProduc
 		return nil, 0, err
 	}
 	rows.Close()
+	ids := make([]string, len(out))
 	for i := range out {
-		if out[i].SKUs, err = s.listSKUs(ctx, out[i].ProductID); err != nil {
-			return nil, 0, err
-		}
+		ids[i] = out[i].ProductID
+	}
+	skus, err := s.skusByProduct(ctx, ids)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range out {
+		out[i].SKUs = skus[out[i].ProductID]
 	}
 	return out, total, nil
 }

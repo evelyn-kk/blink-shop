@@ -18,6 +18,12 @@
 - `schemas/eval-report.schema.json`：评测报告格式（门槛结论、分组、逐条结果、失败样本），管理端质量评测页按它读取。
 - 评测 runner 在后端：`cd backend && go run ./cmd/eval`（`-suite intent|rag|products|images|agent|all`，`-vector off|hash|env`，`-image-index memory|milvus`），报告写到 `reports/eval-<时间>/`（JSON + Markdown），用法和指标见 `backend/README.md`“离线评测”。
 
+### 压测
+
+`cd backend && go run ./cmd/loadtest -base http://127.0.0.1:8080`（`-scenarios catalog,api,sse,checkout`、`-duration`、`-concurrency`、`-sse`、`-checkout`、`-contention`）。
+会注册一次性账号并下单，**只对一次性的库跑**；目标 API 要放宽限流（`RATE_LIMIT_IP_PER_MINUTE` / `RATE_LIMIT_ACCOUNT_PER_MINUTE` / `LOGIN_ATTEMPTS_PER_MINUTE`）。
+报告写到 `reports/loadtest-<时间>/`（JSON + Markdown），任一场景未达标退出码 1。目标和最近一次结果见 `docs/10-release-readiness.md`。
+
 ### 评测运行手册
 
 1. **改了规划、检索、重排或导购回答后**：`cd backend && go test ./src/eval`（CI 同样跑），再 `go run ./cmd/eval -version=$(git rev-parse --short HEAD)` 生成报告。

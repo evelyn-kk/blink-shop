@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/evelyn-kk/blink-shop/backend/src/metrics"
 )
 
 // DoubaoSynthesizer 调豆包（火山引擎）语音合成 HTTP 接口：POST JSON，鉴权头 `Bearer;<token>`，返回 Base64 音频。
@@ -44,7 +46,8 @@ func NewDoubaoSynthesizer(d DoubaoSynthesizer) *DoubaoSynthesizer {
 func (d *DoubaoSynthesizer) Name() string  { return "doubao" }
 func (d *DoubaoSynthesizer) Voice() string { return d.DefaultVoice }
 
-func (d *DoubaoSynthesizer) Synthesize(ctx context.Context, text, voice string) (Audio, error) {
+func (d *DoubaoSynthesizer) Synthesize(ctx context.Context, text, voice string) (_ Audio, err error) {
+	defer metrics.Track("tts", time.Now(), &err)
 	if voice == "" {
 		voice = d.DefaultVoice
 	}

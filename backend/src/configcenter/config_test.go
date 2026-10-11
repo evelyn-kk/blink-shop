@@ -246,6 +246,9 @@ func TestValidateProduction(t *testing.T) {
 		}()},
 		{name: "mock speech in production", override: map[string]string{"STT_PROVIDER": "mock"}, wantErr: []string{"mock"}},
 		{name: "placeholder speech secret", override: map[string]string{"TTS_PROVIDER": "doubao", "TTS_APP_ID": "a", "TTS_API_KEY": "changeme"}, wantErr: []string{"TTS_API_KEY"}},
+		{name: "no metrics token: /metrics closed, allowed", override: map[string]string{"METRICS_TOKEN": ""}},
+		{name: "long metrics token allowed", override: map[string]string{"METRICS_TOKEN": "m3tr1cs-0123456789abcdefghij"}}, // gitleaks:allow
+		{name: "short metrics token", override: map[string]string{"METRICS_TOKEN": "short"}, wantErr: []string{"METRICS_TOKEN"}},
 		{name: "placeholder image embedding key", override: map[string]string{"IMAGE_EMBEDDING_PROVIDER": "dashscope", "IMAGE_EMBEDDING_API_KEY": "changeme"}, wantErr: []string{"IMAGE_EMBEDDING_API_KEY"}},
 	}
 	for _, tt := range tests {
@@ -378,5 +381,22 @@ func TestParseCIDRs(t *testing.T) {
 	}
 	if _, err := parseCIDRs("10.0.0.0/8,nope"); err == nil {
 		t.Fatal("expected error for invalid entry")
+	}
+}
+
+func TestShutdownDrain(t *testing.T) {
+	for v, ok := range map[string]bool{"": false, "0s": true, "5s": true, "60s": true, "61s": false, "-1s": false, "x": false} {
+		env := map[string]string{"SHUTDOWN_DRAIN": v}
+		if v == "" {
+			env = nil
+			ok = true // 默认 0s
+		}
+		cfg, err := Load(context.Background(), NewResolver(envOf(env), nil))
+		if (err == nil) != ok {
+			t.Errorf("SHUTDOWN_DRAIN=%q: err=%v", v, err)
+		}
+		if v == "5s" && cfg.ShutdownDrain != 5*time.Second {
+			t.Errorf("parsed %v", cfg.ShutdownDrain)
+		}
 	}
 }

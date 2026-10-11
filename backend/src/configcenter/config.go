@@ -19,6 +19,7 @@ type Config struct {
 	APIAddr              string
 	MySQLDSN             string
 	RunMigrations        bool
+	ShutdownDrain        time.Duration
 	BootstrapVectorIndex bool
 	MinIOEndpoint        string // 为空表示未配置对象存储
 	MinIOAccessKey       string
@@ -26,6 +27,9 @@ type Config struct {
 	MinIOBucket          string
 	MinIOUseSSL          bool
 	MilvusToken          string
+	MetricsToken         string
+	MySQLMaxOpen         int
+	MySQLMaxIdle         int
 	AIAPIKey             string
 	AIBaseURL            string
 	AvatarUploadDir      string
@@ -115,6 +119,7 @@ func Load(ctx context.Context, r *Resolver) (Config, error) {
 		MinIOSecretKey:  r.Get(ctx, KeyMinIOSecretKey),
 		MinIOBucket:     r.Get(ctx, KeyMinIOBucket),
 		MilvusToken:     r.Get(ctx, KeyMilvusToken),
+		MetricsToken:    strings.TrimSpace(r.Get(ctx, KeyMetricsToken)),
 		AIAPIKey:        r.Get(ctx, KeyAIAPIKey),
 		AIBaseURL:       strings.TrimSpace(r.Get(ctx, KeyAIBaseURL)),
 		AvatarUploadDir: r.Get(ctx, KeyAvatarUploadDir),
@@ -158,6 +163,13 @@ func Load(ctx context.Context, r *Resolver) (Config, error) {
 	cfg.RunMigrations = collect(&errs, KeyRunMigrations, func() (bool, error) {
 		return parseBool(r.Get(ctx, KeyRunMigrations), !cfg.IsProduction())
 	})
+	cfg.ShutdownDrain = collect(&errs, KeyShutdownDrain, func() (time.Duration, error) {
+		d, err := time.ParseDuration(strings.TrimSpace(r.Get(ctx, KeyShutdownDrain)))
+		if err != nil || d < 0 || d > time.Minute {
+			return 0, errors.New("取 0s–60s，例如 5s")
+		}
+		return d, nil
+	})
 	cfg.BootstrapVectorIndex = collect(&errs, KeyBootstrapVectorIndex, func() (bool, error) {
 		return parseBool(r.Get(ctx, KeyBootstrapVectorIndex), !cfg.IsProduction())
 	})
@@ -170,6 +182,20 @@ func Load(ctx context.Context, r *Resolver) (Config, error) {
 	if _, err := parseHTTPSettings(ctx, r); err != nil {
 		errs = append(errs, err)
 	}
+	cfg.MySQLMaxOpen = int(collect(&errs, KeyMySQLMaxOpen, func() (int64, error) {
+		n, err := strconv.ParseInt(strings.TrimSpace(r.Get(ctx, KeyMySQLMaxOpen)), 10, 64)
+		if err != nil || n < 1 || n > 500 {
+			return 0, errors.New("必须是 1 到 500 的整数")
+		}
+		return n, nil
+	}))
+	cfg.MySQLMaxIdle = int(collect(&errs, KeyMySQLMaxIdle, func() (int64, error) {
+		n, err := strconv.ParseInt(strings.TrimSpace(r.Get(ctx, KeyMySQLMaxIdle)), 10, 64)
+		if err != nil || n < 0 || (cfg.MySQLMaxOpen > 0 && n > int64(cfg.MySQLMaxOpen)) {
+			return 0, errors.New("必须是 0 到 MYSQL_MAX_OPEN_CONNS 的整数")
+		}
+		return n, nil
+	}))
 	cfg.EmbeddingDim = int(collect(&errs, KeyEmbeddingDim, func() (int64, error) {
 		n, err := strconv.ParseInt(strings.TrimSpace(r.Get(ctx, KeyEmbeddingDim)), 10, 64)
 		if err != nil || n < 8 || n > 8192 {
@@ -354,6 +380,10 @@ func ValidateProduction(ctx context.Context, cfg Config, r *Resolver) error {
 	// 向量检索是可选的：没配 MILVUS_ADDR 时不检查令牌
 	if cfg.MilvusAddr != "" && contains(devMilvusTokens, cfg.MilvusToken) {
 		errs = append(errs, errors.New("MILVUS_TOKEN 不能为空或使用默认凭证（使用 Milvus 时）"))
+	}
+	// 指标令牌：配置了就必须足够长（防猜），不配置时生产环境不开放 /metrics
+	if t := cfg.MetricsToken; t != "" && (len(t) < 24 || contains(devAIKeys, strings.ToLower(t))) {
+		errs = append(errs, errors.New("METRICS_TOKEN 至少 24 个字符且不能是示例值"))
 	}
 	if key := strings.ToLower(strings.TrimSpace(cfg.EmbeddingAPIKey)); key != "" && contains(devAIKeys, key) {
 		errs = append(errs, errors.New("EMBEDDING_API_KEY 不能使用示例值"))

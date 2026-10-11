@@ -147,13 +147,22 @@ func TestAdminEvals(t *testing.T) {
 	}
 	write(filepath.Join(reports, "legacy", "report-rag.json"), `{"suite":"rag","total":3,"passed":3,"pass_rate":1}`)
 	write(filepath.Join(reports, "broken", "report-rag.json"), `{not json`)
+	// 报告目录里指向目录外的符号链接：不能读出目录外的文件
+	outside := filepath.Join(t.TempDir(), "secret.json")
+	write(outside, `{"schema_version":"blink_shop.eval_report.v1","suite":"rag","gate":"passed"}`)
+	if err := os.MkdirAll(filepath.Join(reports, "linked"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(reports, "linked", "report-rag.json")); err != nil {
+		t.Fatal(err)
+	}
 	ts.evalDataDir, ts.evalReportDir = data, reports
 
 	v := decodeBody[evalsView](t, ts.call(t, http.MethodGet, "/api/v1/admin/evals", admin, nil))
 	if !v.Configured || len(v.Datasets) != 2 || v.Datasets[1].ID != "intent" || v.Datasets[1].CaseCount != 2 || v.Datasets[1].Suite != "intent" || v.Datasets[1].Description != "意图评测集" {
 		t.Fatalf("datasets: %+v", v.Datasets)
 	}
-	if v.ReportsTotal != 2 || v.Skipped != 2 || v.Reports[0].Version != "def456" || v.Reports[0].Gate != "failed" || v.Reports[0].FailureCount != 1 {
+	if v.ReportsTotal != 2 || v.Skipped != 3 || v.Reports[0].Version != "def456" || v.Reports[0].Gate != "failed" || v.Reports[0].FailureCount != 1 {
 		t.Fatalf("reports: %+v skipped=%d", v.Reports, v.Skipped)
 	}
 	if v.Suites[0].ID != "intent" || v.Suites[0].Latest == nil || v.Suites[0].Latest.ID != "eval-20261002-080000/intent" || v.Suites[0].CaseCount != 2 {
@@ -168,6 +177,9 @@ func TestAdminEvals(t *testing.T) {
 	}
 	expectStatus(t, ts.call(t, http.MethodGet, "/api/v1/admin/evals/reports/legacy/rag", admin, nil), http.StatusUnprocessableEntity, "report_invalid")
 	expectStatus(t, ts.call(t, http.MethodGet, "/api/v1/admin/evals/reports/broken/rag", admin, nil), http.StatusUnprocessableEntity, "report_invalid")
+	if rec := ts.call(t, http.MethodGet, "/api/v1/admin/evals/reports/linked/rag", admin, nil); rec.Code == http.StatusOK {
+		t.Fatalf("symlink escaped the report dir: %s", rec.Body)
+	}
 }
 
 // 单条试跑：意图返回规划；知识检索返回引用；商品搜索带召回和重排明细；参数按工具 schema 校验；图搜未配置 503。

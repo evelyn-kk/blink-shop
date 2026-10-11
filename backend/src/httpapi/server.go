@@ -3,9 +3,11 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/agent"
@@ -45,6 +47,8 @@ type Options struct {
 	ProductIndex rag.ProductIndex
 	// ImageSearch 是图片找商品；nil 表示图搜不可用（接口返回 503，导购如实说明）。商品图随商品变更异步重建。
 	ImageSearch *imagesearch.Service
+	// Metrics 控制 GET /metrics 的访问（见 MetricsOptions）。
+	Metrics MetricsOptions
 	// EvalDataDir / EvalReportDir 是评测数据集（*.jsonl）和 cmd/eval 报告的目录；为空表示没有配置，管理端评测页只显示空列表。
 	EvalDataDir   string
 	EvalReportDir string
@@ -95,6 +99,8 @@ type Server struct {
 	productIndex   rag.ProductIndex
 	vectorIndex    rag.VectorIndex
 	evalTools      *agent.Registry
+	metricsOpts    MetricsOptions
+	draining       atomic.Bool
 	evalDataDir    string
 	evalReportDir  string
 	imageSearch    *imagesearch.Service
@@ -132,6 +138,7 @@ func NewServer(opts Options) *Server {
 		productIndex:   opts.ProductIndex,
 		vectorIndex:    opts.VectorIndex,
 		evalDataDir:    opts.EvalDataDir,
+		metricsOpts:    opts.Metrics,
 		evalReportDir:  opts.EvalReportDir,
 		imageSearch:    opts.ImageSearch,
 		speech:         opts.Speech,
@@ -200,6 +207,7 @@ func (s *Server) shop() *shop.Service { return shop.New(s.store, s.now, s.paymen
 // routes 注册全部路由。访问规则含义见 auth.go 的 access；RBAC 矩阵见 backend/README.md。
 func (s *Server) routes() {
 	s.handle("GET /api/v1/health", accessPublic, s.handleHealth)
+	s.handle("GET /metrics", accessPublic, s.handleMetrics)
 	s.handle("GET /api/v1/ready", accessPublic, s.handleReady)
 
 	s.handle("POST /api/v1/auth/register", accessPublic, s.handleRegister)
@@ -374,6 +382,10 @@ type readyResponse struct {
 
 // handleReady 依次检查依赖（当前为 MySQL）；任一不可用返回 503。具体错误只写日志。
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	if s.draining.Load() {
+		writeError(w, &APIError{Status: http.StatusServiceUnavailable, Code: ErrNotReady.Code, Message: "实例正在下线"})
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), readinessTimeout)
 	defer cancel()
 
@@ -382,10 +394,18 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		if err := c.Check(ctx); err != nil {
 			s.logger.WarnContext(r.Context(), "readiness check failed",
 				"request_id", requestIDFromContext(r.Context()), "check", c.Name, "error", err)
-			writeError(w, &APIError{Status: http.StatusServiceUnavailable, Code: ErrNotReady.Code, Message: "依赖 " + c.Name + " 不可用"})
+			msg := "依赖 " + c.Name + " 不可用"
+			var reason interface{ ReadyMessage() string }
+			if errors.As(err, &reason) {
+				msg = reason.ReadyMessage() // 例如“数据库还有 2 个迁移未执行”，比“不可用”更好排查
+			}
+			writeError(w, &APIError{Status: http.StatusServiceUnavailable, Code: ErrNotReady.Code, Message: msg})
 			return
 		}
 		checks[c.Name] = "ok"
 	}
 	writeJSON(w, http.StatusOK, readyResponse{Status: "ready", Checks: checks})
 }
+
+// BeginDrain 让 /ready 返回 503（实例正在下线），负载均衡摘掉实例后不再有新请求；进行中的请求不受影响。
+func (s *Server) BeginDrain() { s.draining.Store(true) }

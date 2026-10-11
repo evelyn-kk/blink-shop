@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/imagesearch"
+	"github.com/evelyn-kk/blink-shop/backend/src/metrics"
 	"github.com/evelyn-kk/blink-shop/backend/src/rag"
 	"github.com/evelyn-kk/blink-shop/backend/src/store"
 )
@@ -111,6 +112,7 @@ func (s *Server) runProductSync(id string) {
 		if (err == nil && converged && !dirty) || (err != nil && !dirty) {
 			delete(s.syncs.running, id)
 			s.syncs.lastAt = s.now()
+			metrics.VectorSyncs.Inc(metrics.ResultOf(err))
 			if err != nil {
 				s.syncs.failed++
 				s.syncs.lastErrAt = s.syncs.lastAt

@@ -1,6 +1,6 @@
 # backend
 
-Go 1.24 标准库 `net/http` API。接口契约见 [openapi.yaml](openapi.yaml)，请求/响应样例见 [fixtures/http/](fixtures/http/)。
+Go 1.26 标准库 `net/http` API（toolchain go1.26.9；10.1 从 1.24 升级，见 `docs/10-release-readiness.md` 的安全扫描）。接口契约见 [openapi.yaml](openapi.yaml)，请求/响应样例见 [fixtures/http/](fixtures/http/)。
 
 ```bash
 set -a && source ../.env && set +a   # 可选：加载根目录 .env
@@ -735,6 +735,9 @@ go run ./cmd/eval -suite=images -image-embedder=env       # 用 IMAGE_EMBEDDING_
 | `RUN_MIGRATIONS` | — | 非生产 `true`，生产 `false` | 启动时在后台执行数据库迁移 |
 | `BOOTSTRAP_VECTOR_INDEX` | — | 非生产 `true`，生产 `false` | 启动时把知识、商品文本和商品图写入向量索引（生产用 `cmd/vectorindex`） |
 | `MYSQL_DSN` | — | 与 Compose 开发库一致 | 密钥类，日志中整体掩码。连接时强制 UTC 时区、`parseTime`、utf8mb4 |
+| `MYSQL_MAX_OPEN_CONNS` / `MYSQL_MAX_IDLE_CONNS` | — | `50` / `25` | 连接池大小（1–500；空闲数不超过最大数）；所有实例之和不能超过 MySQL `max_connections` |
+| `SHUTDOWN_DRAIN` | — | `0s` | 收到退出信号后先让 `/ready` 返回 503，等这么久再关闭（0–60s，生产建议 5s） |
+| `METRICS_TOKEN` | — | 空 | 密钥类。`GET /metrics` 的 Bearer 令牌（≥ 24 字符）；为空时开发环境只允许本机访问，生产环境关闭 |
 | `CORS_ALLOWED_ORIGINS` | `http.cors.allowed_origins` | `*` | 逗号分隔；生产环境始终忽略 `*` |
 | `TRUSTED_PROXY_CIDRS` | `http.trusted_proxy_cidrs` | 空 | 逗号分隔的 CIDR 或 IP |
 | `TRUST_ALL_PROXIES` | `http.trust_all_proxies` | `false` | 仅本地调试；生产始终视为 `false` |
@@ -817,9 +820,24 @@ go run ./cmd/eval -suite=images -image-embedder=env       # 用 IMAGE_EMBEDDING_
   否则讯飞的 AppID、API Key、签名和实时音频，豆包的 token（请求头和请求体里都有）会走明文链路；开发 / 测试环境仍可用 `ws://`、`http://` 接本地假服务；
 - `AI_API_KEY` 非空但是示例值（`changeme`、`your-api-key`、`sk-xxx`）；为空允许，表示不接模型，导购只走规则；
 - 配置了 `NACOS_ADDR` 但 `NACOS_USERNAME` / `NACOS_PASSWORD` 为空或是默认值（`nacos` 等）——生产的 Nacos 必须开鉴权；
+- `METRICS_TOKEN` 非空但少于 24 个字符或是示例值；
 - `TRUST_ALL_PROXIES` 开启。
 
 错误信息只列出配置名，不回显配置值。
+
+## 监控、熔断与发布
+
+- **指标**：`GET /metrics`（Prometheus 文本格式，`src/metrics`，不引入外部依赖）：按路由模式的请求数和耗时、导购运行结果 / 耗时 / 首个进展事件、
+  SSE 与 WebSocket 连接数、结算结果、外部依赖调用（llm、embedding、image_embedding、milvus、nacos、minio、stt、tts）、熔断状态、向量同步、连接池。
+  访问控制、SLO、告警规则和抓取配置见 `deployments/monitoring/README.md`。
+- **熔断**（`src/resilience`）：模型、Embedding、Milvus 连续 5 次失败后打开 30 秒，期间直接降级，冷却后单个探测请求；主动取消和 Milvus 业务错误不计。
+- **轨迹写入**：每次运行一个后台写入器，按顺序把排队的轨迹合并成一个事务写入（`Store.AppendTraceEvents`），运行结束事件前写完。
+- **关闭**：收到信号后 `/ready` 返回 503（实例正在下线）→ 等 `SHUTDOWN_DRAIN` → 停导购运行（`server_shutdown`）→ 关闭 HTTP。
+- **迁移**：生产 `RUN_MIGRATIONS` 默认关闭，发布时用 `cmd/migrate`（只列出）/ `cmd/migrate -apply`（执行；命名锁 + checksum）。
+  迁移没做完时 `/ready` 503 并说明还有几个；数据库比程序新（回滚）时旧程序照常就绪，但拒绝迁移。
+- **镜像**：`backend/Dockerfile`（静态编译、distroless、非 root，镜像里带 `/api` 和 `/migrate`）。
+- **压测**：`cmd/loadtest`（目录、普通接口、SSE、结算 / 抢购 / 重复提交），用法见 quality/README；结果、演练、扫描和风险清单见
+  `docs/10-release-readiness.md`，操作步骤见 `deployments/RUNBOOK.md`。
 
 ## 日志
 

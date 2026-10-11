@@ -3,6 +3,7 @@ package storetest
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ func agentCases() []struct {
 		{"AgentRunUpdatesFollowStateMachine", testAgentRunUpdates},
 		{"ChatMessagesInWriteOrder", testChatMessageOrder},
 		{"TraceEventsInWriteOrder", testTraceEvents},
+		{"TraceEventsBatch", testTraceEventsBatch},
 		{"FailInterruptedRuns", testFailInterruptedRuns},
 		{"AdminRunListAndDetail", testAdminRuns},
 	}
@@ -413,5 +415,44 @@ func testAdminRuns(t *testing.T, s store.Store) {
 	}
 	if _, err := s.GetRunForAdmin(ctx, "run_missing"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("missing run: %v", err)
+	}
+}
+
+// 批量写轨迹：按给定顺序（同一毫秒也一样）、和单条写入交替时顺序不乱；有一条不合法时整批都不写。
+func testTraceEventsBatch(t *testing.T, s store.Store) {
+	ctx := context.Background()
+	cs := newSession(t, s, seed.UserID, "批量轨迹")
+	run := send(t, s, seed.UserID, cs.SessionID, "b1", "你好").Run
+	ev := func(stage string) domain.AgentTraceEvent {
+		return domain.AgentTraceEvent{RunID: run.RunID, TraceID: run.TraceID, AccountID: run.AccountID, Stage: stage, EventType: "x", Status: "ok",
+			CreatedAt: time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)}
+	}
+	if _, err := s.AppendTraceEvent(ctx, ev("a")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendTraceEvents(ctx, []domain.AgentTraceEvent{ev("b"), ev("c"), ev("d")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AppendTraceEvent(ctx, ev("e")); err != nil {
+		t.Fatal(err)
+	}
+	bad := ev("f")
+	bad.Stage = ""
+	if err := s.AppendTraceEvents(ctx, []domain.AgentTraceEvent{ev("g"), bad}); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("invalid batch: %v", err)
+	}
+	if err := s.AppendTraceEvents(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ListTraceEvents(ctx, run.AccountID, run.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stages []string
+	for _, e := range got {
+		stages = append(stages, e.Stage)
+	}
+	if strings.Join(stages, "") != "abcde" {
+		t.Fatalf("order: %v", stages)
 	}
 }
