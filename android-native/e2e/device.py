@@ -66,6 +66,21 @@ class Device:
             time.sleep(0.5)
         raise AssertionError(f"没有等到界面元素 {kw}")
 
+    def deny_permission(self, timeout=15):
+        """点系统权限框的“拒绝”。按权限控制器的 resource-id 找，不依赖系统语言（英文“Don’t allow”、中文“不允许”）。"""
+        # 第二次弹框时拒绝按钮换成“拒绝且不再询问”的 id
+        ids = ("com.android.permissioncontroller:id/permission_deny_button",
+               "com.android.permissioncontroller:id/permission_deny_and_dont_ask_again_button")
+        end = time.time() + timeout
+        while time.time() < end:
+            hits = [n for n in self.nodes() if n.get("resource-id") in ids]
+            if hits:
+                x, y = self.center(hits[0])
+                self.shell(f"input tap {x} {y}")
+                return
+            time.sleep(0.5)
+        raise AssertionError("没有等到系统权限框的拒绝按钮")
+
     def gone(self, timeout=15, **kw):
         end = time.time() + timeout
         while time.time() < end:
@@ -142,12 +157,20 @@ class Device:
         subprocess.run([ADB, "shell", f"run-as {PKG} sh -c 'mkdir -p shared_prefs && cat > shared_prefs/blink_drafts.xml'"],
                        input=xml, text=True, check=True)
 
+    def wake(self):
+        """真机可能已经熄屏、锁屏：点亮屏幕并解除锁屏（只对没设密码的锁屏有效）。模拟器上无副作用。"""
+        self.shell("input keyevent KEYCODE_WAKEUP")
+        self.shell("wm dismiss-keyguard")
+        time.sleep(0.5)
+
     def start(self):
+        self.wake()
         self.shell(f"am start -W -n {PKG}/.catalog.ProductListActivity")
         time.sleep(1)
 
     def restart(self):
         """结束进程后从首页重新启动（不恢复之前的页面）。"""
+        self.wake()
         self.shell(f"am start -W -S -n {PKG}/.catalog.ProductListActivity")
         time.sleep(1)
 

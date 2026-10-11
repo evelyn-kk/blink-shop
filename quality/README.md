@@ -21,7 +21,8 @@
   - `setup.sh [端口]` / `teardown.sh`：在本地基础设施上起应用层部署（`deployments/app`，API 生产模式 + nginx），专用的库 / 账号 / 桶 / 集合，凭据随机生成，结束后全部清理；
   - `check.py`：docs/07 验收清单第 2–7 条逐条检查（并发结算、重复消息与取消、无 AI / Milvus / MinIO 降级、越权、非法输入、Prompt / 配置），
     `ACCEPT_DEGRADED_BASE` / `ACCEPT_SLOW_BASE` / `ACCEPT_MYSQL_DB` 见文件头说明；
-  - `fakellm/`：慢模型实例用的假模型服务（请求里带“验收版本”时立即返回规划 JSON，否则一直不回）。
+  - `fakellm/`：慢模型实例用的假模型服务（请求里带“验收版本”时立即返回规划 JSON，否则一直不回）；
+  - `lan_forward.py <局域网IP>:<端口> 127.0.0.1:<端口>`：真机验收时把只绑本机的部署转发到局域网地址，App 走 Wi-Fi 访问（才能测真实断网）；同一网络的设备都能访问，只在验收期间运行，用完停掉。
 - `data/eval/`：评测 JSONL 数据集：`intent.jsonl`（意图 66 条，含 16 条留出集）、`rag.jsonl`（知识检索 38 条）、`product_search.jsonl`（商品搜索 28 条，含预算、品牌、排除、冲突、无结果和多轮追问）、`image_search.jsonl`（图片搜索 231 条，商品图变换 + 不可售商品 + 无关图片）、`agent.jsonl`（端到端导购 26 条）。每个文件第一行注释说明字段。
 - `schemas/eval-report.schema.json`：评测报告格式（门槛结论、分组、逐条结果、失败样本），管理端质量评测页按它读取。
 - 评测 runner 在后端：`cd backend && go run ./cmd/eval`（`-suite intent|rag|products|images|agent|all`，`-vector off|hash|env`，`-image-index memory|milvus`），报告写到 `reports/eval-<时间>/`（JSON + Markdown），用法和指标见 `backend/README.md`“离线评测”。

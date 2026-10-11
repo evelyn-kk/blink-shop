@@ -38,7 +38,7 @@ def deny_once():
     dev.wait(text="使用语音输入")
     dev.wait(text="不保存录音和文字原文", contains=True)
     dev.tap(text="继续")
-    dev.tap(text="Don’t allow")
+    dev.deny_permission()
     dev.wait(text="没有录音权限")
     dev.wait(text="不授权也可以直接打字提问", contains=True)
     assert not dev.find(text="去设置")
@@ -49,7 +49,7 @@ def deny_once():
 def deny_blocked():
     dev.tap(rid="mic_button")
     dev.tap(text="继续")
-    dev.tap(text="Don’t allow")
+    dev.deny_permission()
     dev.wait(text="录音权限已被关闭", contains=True)
     dev.tap(text="去设置")
     time.sleep(2)

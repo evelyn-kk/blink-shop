@@ -26,8 +26,17 @@
    cd android-native
    python3 e2e/trade_flow.py                                   # 模拟器，App 访问 http://10.0.2.2:28080/api/v1
    adb reverse tcp:28080 tcp:28080 && \
-     BLINK_E2E_DEVICE_API=http://127.0.0.1:28080/api/v1 python3 e2e/trade_flow.py   # 真机经 USB
+     BLINK_E2E_DEVICE_API=http://127.0.0.1:28080/api/v1 python3 e2e/trade_flow.py   # 真机经 USB（断网步骤不真实）
    ```
+
+   真机要测真实断网（脚本关 Wi-Fi 再打开）时，App 必须走 Wi-Fi 访问服务端，不能用 `adb reverse`：手机和电脑连同一 Wi-Fi，
+   API 监听在电脑的局域网地址上（只绑本机时用 `quality/acceptance/lan_forward.py <局域网IP>:<端口> 127.0.0.1:<端口>` 转发），然后
+
+   ```bash
+   BLINK_E2E_DEVICE_API=http://<局域网IP>:<端口>/api/v1 BLINK_E2E_PING_HOST=<局域网IP> python3 e2e/trade_flow.py
+   ```
+
+   `BLINK_E2E_PING_HOST` 是恢复网络后等待连通的地址（默认模拟器的 10.0.2.2）。
 
 脚本开始时会清空 App 数据并写入服务地址，把测试商品（耳机、台灯）的库存设为固定值；每一步截图，
 报告和截图写到 `build/e2e-<时间>/`（`BLINK_E2E_OUT` 可改）。结束时打开设备网络。
@@ -35,7 +44,8 @@
 ## 注意
 
 - 只连测试库：脚本会注册 `e2e_*` 账号并产生订单、评价。
-- adb 只能输入英文，评价内容用英文；中文输入由单测覆盖。
+- adb 只能输入英文，评价内容用英文；中文输入由单测覆盖。真机上先把输入法切到英文键盘（拼音键盘会把英文当拼音组字，不上屏）。
+- 真机：脚本启动 App 前会点亮屏幕并解除锁屏（只对没设密码的锁屏有效）；测试期间建议 `adb shell svc power stayon true`，结束后改回 `false`。
 - 服务端会自动关闭 30 分钟未支付的订单并回补库存，所以“库存变化”一步以服务端当时的判断为准。
 
 ## 聊天页 `chat_flow.py`
@@ -70,8 +80,8 @@ MYSQL_DSN='root:blink_dev_root@tcp(127.0.0.1:3307)/blink_shop_e2e?parseTime=true
 cd ../android-native && python3 e2e/image_flow.py
 ```
 
-快门和确认按钮按 AOSP 相机（模拟器自带的 `com.android.camera2`）定位；真机的相机应用不同，脚本会等最多 60 秒让人手动拍照。
-权限框按英文系统的按钮文字（“Don’t allow”）点击。用完删掉临时集合（`blink_shop_e2e_images`）。
+拍照支持 AOSP 相机（模拟器自带的 `com.android.camera2`）和 Google 相机（Pixel）；其他相机应用脚本会等最多 60 秒让人手动拍照。
+权限框按系统权限控制器的控件 ID 点击，不依赖系统语言；照片选择器按中英文的照片描述找图，需要时点“完成”。用完删掉临时集合（`blink_shop_e2e_images`）。
 
 ## 语音 `voice_flow.py`
 
@@ -85,4 +95,4 @@ cd ../android-native && python3 e2e/image_flow.py
 cd android-native && python3 e2e/voice_flow.py
 ```
 
-模拟器的虚拟麦克风在 `-no-audio` 下也能出数据。权限框按英文系统的按钮文字点击。
+模拟器的虚拟麦克风在 `-no-audio` 下也能出数据；真机用手机麦克风。生产模式拒绝 mock 语音，所以对生产部署跑语音要另起开发模式的实例（见 `docs/11-acceptance-record.md` 第 7 节）。

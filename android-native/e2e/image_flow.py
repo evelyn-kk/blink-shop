@@ -98,7 +98,7 @@ def deny_once():
     dev.shell(f"pm clear-permission-flags {PKG} android.permission.CAMERA user-set user-fixed")
     dev.tap(rid="attach_button")
     dev.tap(text="拍照")
-    dev.tap(text="Don’t allow")  # 系统权限框（英文系统；中文系统为“不允许”）
+    dev.deny_permission()
     dev.wait(text="没有相机权限")
     dev.wait(text="拍照找同款需要相机权限。也可以从相册选择图片。")
     assert not dev.find(text="去设置")
@@ -109,7 +109,7 @@ def deny_once():
 def deny_blocked():
     dev.tap(rid="attach_button")
     dev.tap(text="拍照")
-    dev.tap(text="Don’t allow")  # 系统权限框（英文系统；中文系统为“不允许”）
+    dev.deny_permission()
     dev.wait(text="相机权限已被关闭", contains=True)
     dev.tap(text="去设置")
     time.sleep(2)
@@ -118,16 +118,32 @@ def deny_blocked():
     dev.wait(rid="attach_button")
 
 
+def shoot(timeout=20):
+    """在系统相机里拍一张并确认。AOSP 相机（模拟器）有单独的完成键；Google 相机（Pixel）拍完后快门键变成“完成”。"""
+    ids = {"com.android.camera2:id/shutter_button": "com.android.camera2:id/done_button",
+           "com.google.android.GoogleCamera:id/shutter_button": "com.google.android.GoogleCamera:id/shutter_button"}
+    end = time.time() + timeout
+    while time.time() < end:
+        for n in dev.nodes():
+            done = ids.get(n.get("resource-id"))
+            if done:
+                time.sleep(1)  # 等取景器就绪
+                x, y = dev.center(n)
+                dev.shell(f"input tap {x} {y}")
+                time.sleep(3)
+                tap_full_id(done, timeout=20)
+                return True
+        time.sleep(1)
+    return False
+
+
 @step("授权后拍照：系统相机拍摄 → 预览“图片已就绪”")
 def take_photo():
     dev.shell(f"pm grant {PKG} android.permission.CAMERA")
     dev.tap(rid="attach_button")
     dev.tap(text="拍照")
-    try:
-        tap_full_id("com.android.camera2:id/shutter_button", timeout=20)
-        tap_full_id("com.android.camera2:id/done_button", timeout=20)
-    except AssertionError:
-        print("    非 AOSP 相机：请在设备上手动拍照并确认")
+    if not shoot():
+        print("    不认识的相机应用：请在设备上手动拍照并确认")
     dev.wait(rid="attachment_status", text="图片已就绪，发送时一起发给导购", timeout=60)
     dev.wait(rid="attachment_preview", desc="待发送的图片")
 
@@ -166,12 +182,19 @@ def pick_lamp():
     time.sleep(3)
     # 系统照片选择器（Android 13+）或文档选择器：点最新的一张
     for n in dev.nodes():
-        if n.get("content-desc", "").startswith("Photo taken on") or "blink_lamp" in n.get("text", ""):
+        d = n.get("content-desc", "")
+        if d.startswith(("Photo taken on", "照片拍摄于")) or "blink_lamp" in n.get("text", ""):  # 英文 / 中文系统
             x, y = dev.center(n)
             dev.shell(f"input tap {x} {y}")
             break
     else:
         raise AssertionError("photo not found in picker")
+    # 新版系统照片选择器（如 Android 16 真机）选中后还要点“完成”才返回
+    time.sleep(1)
+    for label in ("完成", "Done"):
+        if dev.find(text=label):
+            dev.tap(text=label)
+            break
     dev.wait(rid="attachment_status", text="图片已就绪，发送时一起发给导购", timeout=30)
 
 
@@ -192,13 +215,22 @@ def add_first(token):
     assert [(i["product_id"], i["quantity"]) for i in cart["items"]] == [("p_seed_lamp", 1)], cart
 
 
+MEDIA_QUERY = "content query --uri content://media/external/images/media --projection _display_name"
+MEDIA_DELETE = "content delete --uri content://media/external/images/media --where \"_display_name='blink_lamp.jpg'\""
+
+
 def push_lamp():
     """把台灯商品图（缩小、转 JPEG）放进设备相册，作为“用户拍的照片”。"""
     tmp = os.path.join(OUT, "blink_lamp.jpg")
     subprocess.run(["sips", "-s", "format", "jpeg", "-Z", "320", LAMP, "--out", tmp], capture_output=True, check=True)
     subprocess.run([ADB, "push", tmp, "/sdcard/Pictures/blink_lamp.jpg"], capture_output=True, check=True)
     dev.shell("am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Pictures/blink_lamp.jpg")
-    time.sleep(2)
+    # 新系统（如 Android 16 真机）扫描是异步的：等媒体库里真有这张图，选择器才看得到
+    end = time.time() + 20
+    while "blink_lamp.jpg" not in dev.shell(MEDIA_QUERY):
+        if time.time() > end:
+            raise AssertionError("blink_lamp.jpg 没有进媒体库")
+        time.sleep(1)
 
 
 def main():
@@ -227,6 +259,8 @@ def main():
         rec.wait(timeout=30)
         time.sleep(1)
         subprocess.run([ADB, "pull", "/sdcard/image_flow.mp4", os.path.join(OUT, "image_flow.mp4")], capture_output=True)
+        # 走媒体库删除（文件和索引一起删）；只 rm 文件会留下失效的索引
+        dev.shell(MEDIA_DELETE)
         dev.shell("rm -f /sdcard/Pictures/blink_lamp.jpg")
         with open(os.path.join(OUT, "report.md"), "w") as f:
             f.write(f"# Android 聊天附图 E2E\n\n- 时间：{time.strftime('%Y-%m-%d %H:%M:%S')}\n- 账号：{username}\n"
