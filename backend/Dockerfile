@@ -1,5 +1,6 @@
 # Blink Shop API 生产镜像：静态编译，运行在 distroless（无 shell、非 root）。迁移工具 migrate 一起打进镜像，发布时先跑：
-#   docker run --rm -e MYSQL_DSN=... blink-shop-api /migrate -apply
+#   docker run --rm -e MYSQL_DSN=... --entrypoint /migrate blink-shop-api -apply
+# （ENTRYPOINT 是 /api，必须用 --entrypoint 换成 /migrate；/api 收到不认识的参数会直接报错退出，不会误启动服务）
 # 基础镜像固定到多架构 digest（更新方法见 deployments/README.md“镜像锁定”）。
 FROM golang:1.26.9-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c AS build
 WORKDIR /src

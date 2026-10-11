@@ -168,7 +168,16 @@ class Device:
         if on:
             self.shell("cmd wifi set-wifi-enabled enabled")
             self.shell("svc data enable")
+            # 打开后等设备真的能连到宿主机（10.0.2.2，真机可用 BLINK_E2E_PING_HOST 指定）再继续：
+            # 固定等几秒在宿主机负载高时不够，App 的第一次请求会超时
+            host = os.environ.get("BLINK_E2E_PING_HOST", "10.0.2.2")
+            deadline = time.time() + 30
+            while time.time() < deadline:
+                if "1 received" in self.shell(f"ping -c 1 -W 1 {host}"):
+                    break
+                time.sleep(1)
+            time.sleep(1)
         else:
             self.shell("cmd wifi set-wifi-enabled disabled")
             self.shell("svc data disable")
-        time.sleep(4)
+            time.sleep(4)

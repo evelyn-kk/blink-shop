@@ -4,5 +4,5 @@ package migrations
 
 import "embed"
 
-//go:embed *.sql
+//go:embed *.sql checksums.txt
 var FS embed.FS

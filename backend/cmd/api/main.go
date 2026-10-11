@@ -40,6 +40,16 @@ const (
 )
 
 func main() {
+	// 容器存活检查（distroless 镜像里没有 curl）：/api -healthcheck 请求本机的 /api/v1/health
+	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
+		os.Exit(healthcheck(os.Getenv("API_ADDR")))
+	}
+	// API 只从环境变量读配置；多余的参数多半是命令写错了（如 docker run <镜像> /migrate -apply 会把参数交给 /api），
+	// 直接报错退出，不要悄悄启动服务
+	if len(os.Args) > 1 {
+		fmt.Fprintf(os.Stderr, "api: 不认识的参数 %q（配置用环境变量；容器里跑迁移用 --entrypoint /migrate）\n", os.Args[1:])
+		os.Exit(2)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -387,4 +397,25 @@ func registerDBMetrics(st *mysqlstore.Store) {
 	metrics.Default.GaugeFunc("blink_db_in_use_connections", "数据库连接池当前使用中的连接数", func() float64 { return float64(db.Stats().InUse) })
 	metrics.Default.GaugeFunc("blink_db_wait_count", "累计等待空闲连接的次数", func() float64 { return float64(db.Stats().WaitCount) })
 	metrics.Default.GaugeFunc("blink_db_wait_seconds", "累计等待空闲连接的秒数", func() float64 { return db.Stats().WaitDuration.Seconds() })
+}
+
+// healthcheck 请求 http://127.0.0.1:<端口>/api/v1/health，200 返回 0，否则返回 1。addr 为空时用 :8080。
+func healthcheck(addr string) int {
+	if addr == "" {
+		addr = ":8080"
+	}
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 1
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get("http://" + net.JoinHostPort("127.0.0.1", port) + "/api/v1/health")
+	if err != nil {
+		return 1
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 1
+	}
+	return 0
 }

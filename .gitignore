@@ -23,3 +23,6 @@ quality/reports/
 
 # Python 脚本缓存（android-native/e2e）
 __pycache__/
+
+# 应用层部署的真实配置（模板是 deployments/app/app.env.example）
+deployments/app/app.env

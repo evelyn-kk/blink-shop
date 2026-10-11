@@ -14,6 +14,14 @@
   ```
 
   已有本地库若是旧版种子（图片指向外网占位图），用新库：`MYSQL_DSN=.../blink_shop_e2e?parseTime=true`。
+- 其他桌面浏览器：`npx playwright install firefox webkit` 后 `BLINK_E2E_BROWSERS=firefox,webkit npm run e2e`（CI 默认只跑 Chromium）。
+  `files.spec.mjs` 在页面里直接导入前端源码模块（`/src/api/files.ts`），只能对 Vite 开发服务器跑；对生产构建（nginx）跑其余用例时用
+  `--grep-invert` 排除这三个用例，再让 Vite 把 `/api` 代理到同一个部署单独跑它（见 `docs/11-acceptance-record.md`）。
+- `acceptance/`：发布验收工具（10.2）：
+  - `setup.sh [端口]` / `teardown.sh`：在本地基础设施上起应用层部署（`deployments/app`，API 生产模式 + nginx），专用的库 / 账号 / 桶 / 集合，凭据随机生成，结束后全部清理；
+  - `check.py`：docs/07 验收清单第 2–7 条逐条检查（并发结算、重复消息与取消、无 AI / Milvus / MinIO 降级、越权、非法输入、Prompt / 配置），
+    `ACCEPT_DEGRADED_BASE` / `ACCEPT_SLOW_BASE` / `ACCEPT_MYSQL_DB` 见文件头说明；
+  - `fakellm/`：慢模型实例用的假模型服务（请求里带“验收版本”时立即返回规划 JSON，否则一直不回）。
 - `data/eval/`：评测 JSONL 数据集：`intent.jsonl`（意图 66 条，含 16 条留出集）、`rag.jsonl`（知识检索 38 条）、`product_search.jsonl`（商品搜索 28 条，含预算、品牌、排除、冲突、无结果和多轮追问）、`image_search.jsonl`（图片搜索 231 条，商品图变换 + 不可售商品 + 无关图片）、`agent.jsonl`（端到端导购 26 条）。每个文件第一行注释说明字段。
 - `schemas/eval-report.schema.json`：评测报告格式（门槛结论、分组、逐条结果、失败样本），管理端质量评测页按它读取。
 - 评测 runner 在后端：`cd backend && go run ./cmd/eval`（`-suite intent|rag|products|images|agent|all`，`-vector off|hash|env`，`-image-index memory|milvus`），报告写到 `reports/eval-<时间>/`（JSON + Markdown），用法和指标见 `backend/README.md`“离线评测”。

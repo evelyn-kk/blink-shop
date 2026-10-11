@@ -219,6 +219,7 @@ type runOutput struct {
 	received time.Time
 	first    sync.Once
 	traces   *traceWriter
+	prompts  map[string]int
 }
 
 // progressed 在推送第一个进展事件（thinking / 文本 / 块）时记录耗时。
@@ -258,7 +259,24 @@ func (o *runOutput) Followups(q []string) {
 }
 
 func (o *runOutput) Trace(stage, eventType, status string, d time.Duration, meta map[string]any) {
+	o.notePrompt(meta)
 	o.traces.add(o.s.traceEvent(o.run, stage, eventType, status, d, "", meta))
+}
+
+// notePrompt 记下本次运行实际用到的 Prompt 和版本（来自轨迹 metadata 的 prompt / prompt_version，0 表示内置默认），
+// 运行结束时写进 agent_runs.prompt_versions_json：不用翻轨迹就能知道这次回答用的是哪个版本。
+func (o *runOutput) notePrompt(meta map[string]any) {
+	key, _ := meta["prompt"].(string)
+	version, ok := meta["prompt_version"].(int)
+	if key == "" || !ok {
+		return
+	}
+	o.mu.Lock()
+	if o.prompts == nil {
+		o.prompts = map[string]int{}
+	}
+	o.prompts[key] = version
+	o.mu.Unlock()
 }
 
 // traceWriter 在后台按顺序写一次运行的轨迹：运行不必等每条轨迹落库（高并发时连接池排队会拖慢首个事件和整段回答），
@@ -466,12 +484,12 @@ func (s *Server) executeRun(w http.ResponseWriter, r *http.Request, started stor
 	}
 
 	out.mu.Lock()
-	content, blocks, followups := out.text.String(), out.blocks, out.followups
+	content, blocks, followups, prompts := out.text.String(), out.blocks, out.followups, out.prompts
 	out.mu.Unlock()
 	pctx, pcancel := context.WithTimeout(context.Background(), runPersistTimeout)
 	defer pcancel()
 	final, err := s.store.UpdateAgentRun(pctx, run.AccountID, run.RunID, func(x *domain.AgentRun) error {
-		x.Status, x.ErrorCode, x.Content, x.Blocks, x.Followups = status, code, content, blocks, followups
+		x.Status, x.ErrorCode, x.Content, x.Blocks, x.Followups, x.PromptVersions = status, code, content, blocks, followups, prompts
 		return nil
 	})
 	if err != nil {

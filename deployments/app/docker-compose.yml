@@ -1,0 +1,52 @@
+# 应用层部署（API 镜像 + Web 静态站点 / 反向代理），用于验收和预发：接入本地基础设施 Compose 的网络 blink_shop_default。
+# API 以 APP_ENV=production 运行，所有生产配置校验都生效；连接信息和凭据从 app.env 读取（模板见 app.env.example，不提交 app.env）。
+#
+#   (cd frontend && npm ci && npm run build)            # 先构建前端，产物在 frontend/dist
+#   docker compose -f deployments/app/docker-compose.yml --env-file deployments/app/app.env up -d --build --wait
+#
+# 生产环境把基础设施换成托管服务即可，拓扑不变：浏览器 → web（nginx，静态文件 + /api 反代）→ api（多实例）→ MySQL / MinIO / Milvus / Nacos。
+name: blink_shop_app
+
+services:
+  api:
+    build: ../../backend
+    image: blink-shop-api:${BLINK_VERSION:-dev}
+    env_file: app.env
+    environment:
+      API_ADDR: ":8080"
+    volumes:
+      - api_data:/data
+    networks: [infra]
+    healthcheck:
+      # distroless 镜像没有 shell 和 curl：用 API 自带的 -healthcheck（请求本机 /api/v1/health）。就绪检查（/api/v1/ready）交给负载均衡
+      test: ["CMD", "/api", "-healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  web:
+    image: nginx:1.29.2-alpine@sha256:61e01287e546aac28a3f56839c136b31f590273f3b41187a36f46f6a03bbfe22
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - ../../frontend/dist:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "127.0.0.1:${BLINK_WEB_PORT:-18088}:80"
+    networks: [infra]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  api_data:
+
+networks:
+  infra:
+    name: blink_shop_default
+    external: true

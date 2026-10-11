@@ -835,7 +835,10 @@ go run ./cmd/eval -suite=images -image-embedder=env       # 用 IMAGE_EMBEDDING_
 - **关闭**：收到信号后 `/ready` 返回 503（实例正在下线）→ 等 `SHUTDOWN_DRAIN` → 停导购运行（`server_shutdown`）→ 关闭 HTTP。
 - **迁移**：生产 `RUN_MIGRATIONS` 默认关闭，发布时用 `cmd/migrate`（只列出）/ `cmd/migrate -apply`（执行；命名锁 + checksum）。
   迁移没做完时 `/ready` 503 并说明还有几个；数据库比程序新（回滚）时旧程序照常就绪，但拒绝迁移。
-- **镜像**：`backend/Dockerfile`（静态编译、distroless、非 root，镜像里带 `/api` 和 `/migrate`）。
+- **镜像**：`backend/Dockerfile`（静态编译、distroless、非 root，镜像里带 `/api` 和 `/migrate`）。`/api -healthcheck` 请求本机 `/api/v1/health`（容器存活检查）；
+  `/api` 只从环境变量读配置，收到其他参数直接报错退出（防止 `docker run <镜像> /migrate` 这类写错的命令悄悄启动服务）。
+- **运行记录的 Prompt 版本**：运行结束时把实际用到的 Prompt 和版本（来自轨迹的 `prompt` / `prompt_version`）写进 `agent_runs.prompt_versions_json`，调试观测直接显示。
+- **应用层部署**：`deployments/app/`（API + nginx，验收与预发用），验收工具见 `quality/acceptance/`，验收记录 `docs/11-acceptance-record.md`。
 - **压测**：`cmd/loadtest`（目录、普通接口、SSE、结算 / 抢购 / 重复提交），用法见 quality/README；结果、演练、扫描和风险清单见
   `docs/10-release-readiness.md`，操作步骤见 `deployments/RUNBOOK.md`。
 

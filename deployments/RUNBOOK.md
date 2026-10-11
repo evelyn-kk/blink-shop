@@ -10,13 +10,16 @@
 2. **备份**：按下面“备份”做一次 MySQL 全量备份，记下文件名和 sha256。
 3. **迁移**（只追加，不改不删已有列）：
    ```bash
-   docker run --rm -e MYSQL_DSN=... blink-shop-api:<版本> /migrate          # 只列出待执行的迁移
-   docker run --rm -e MYSQL_DSN=... blink-shop-api:<版本> /migrate -apply   # 执行（命名锁，多次执行安全）
+   docker run --rm -e MYSQL_DSN=... --entrypoint /migrate blink-shop-api:<版本>          # 只列出待执行的迁移
+   docker run --rm -e MYSQL_DSN=... --entrypoint /migrate blink-shop-api:<版本> -apply   # 执行（命名锁，多次执行安全）
    ```
+   镜像的 ENTRYPOINT 是 `/api`，必须用 `--entrypoint /migrate`；`/api` 收到不认识的参数会报错退出，不会误启动服务。
    迁移没做完时新版本 `/ready` 返回 503“数据库还有 N 个迁移未执行”，负载均衡不会把流量切过去。
 4. **滚动替换实例**：生产配置 `APP_ENV=production`、`RUN_MIGRATIONS=false`（默认）、`SHUTDOWN_DRAIN=5s`。
    旧实例收到 SIGTERM 后先让 `/ready` 返回 503，等 `SHUTDOWN_DRAIN` 让负载均衡摘掉，再停导购运行（标记 `server_shutdown`）、关闭 HTTP。
-   负载均衡的健康检查用 `/api/v1/ready`，存活检查用 `/api/v1/health`。
+   负载均衡的健康检查用 `/api/v1/ready`，存活检查用 `/api/v1/health`（容器里用 `/api -healthcheck`，镜像没有 curl）。
+   前面有 nginx 时用 `deployments/app/nginx.conf` 的写法：上游连接池（`keepalive`，否则高并发时本地端口耗尽）和
+   `server api:8080 resolve`（API 换 IP 后自动重新解析，不用重载 nginx）。
 5. **发布后 15 分钟**：看 5xx 比例、接口 P95、结算成功率、导购失败率、熔断状态；任何一项告警就按“回滚”处理。
 
 ## 备份
@@ -38,7 +41,7 @@ mc mirror --overwrite prod/blink-shop backup/blink-shop-$(date +%Y%m%d)
 ```bash
 mysql -h <host> -u root -p -e "CREATE DATABASE blink_shop_restore CHARACTER SET utf8mb4"
 mysql -h <host> -u root -p blink_shop_restore < blink_shop-<时间>.sql
-docker run --rm -e MYSQL_DSN=.../blink_shop_restore blink-shop-api:<版本> /migrate     # 确认迁移状态
+docker run --rm -e MYSQL_DSN=.../blink_shop_restore --entrypoint /migrate blink-shop-api:<版本>     # 确认迁移状态
 ```
 
 确认数据后切换 `MYSQL_DSN`（或改库名）并滚动重启。恢复点之后的订单、支付需要按审计日志和支付回调对账补回。

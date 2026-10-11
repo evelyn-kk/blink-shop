@@ -49,8 +49,11 @@ public final class SseClient {
         }
     }
 
-    /** 两次数据之间最长等待（服务端应在此之内发心跳）。 */
-    static final long READ_TIMEOUT_SECONDS = 120;
+    /**
+     * 两次数据之间最长等待。服务端每 15 秒发一次心跳（模型调用期间也发），取 3 个心跳间隔：
+     * 网络切换后连接已经失效、回答丢失时，45 秒内报错并给出“重试”，而不是一直显示“正在思考”（10.2 验收时观察到过一次）。
+     */
+    static final long READ_TIMEOUT_SECONDS = 45;
 
     private final ApiClient api;
     private final OkHttpClient http;

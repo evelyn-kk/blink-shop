@@ -101,6 +101,24 @@ func TestRunWithMySQLDown(t *testing.T) {
 	}
 }
 
+// 容器存活检查：服务起来后 healthcheck 返回 0，端口上没有服务时返回 1。
+func TestHealthcheck(t *testing.T) {
+	addr := freeAddr(t)
+	if code := healthcheck(addr); code != 1 {
+		t.Fatalf("no server: %d", code)
+	}
+	env := map[string]string{"API_ADDR": addr, "MYSQL_DSN": "blink:pw@tcp(" + freeAddr(t) + ")/blink_shop?timeout=200ms"}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- run(ctx, envOf(env), io.Discard) }()
+	waitUntilUp(t, "http://"+addr+"/api/v1/health")
+	if code := healthcheck(addr); code != 0 {
+		t.Fatalf("running server: %d", code)
+	}
+	cancel()
+	<-done
+}
+
 // 摘流：收到退出信号后 /ready 立刻 503、/health 照常，等满 SHUTDOWN_DRAIN 才关闭监听。
 func TestRunDrainsBeforeShutdown(t *testing.T) {
 	addr := freeAddr(t)

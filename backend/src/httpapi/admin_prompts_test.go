@@ -225,6 +225,13 @@ func TestPromptVersionInRunTraces(t *testing.T) {
 	if v := plannerVersion(second); v != 1.0 {
 		t.Fatalf("second run version: %v", v)
 	}
+	// 运行本身也记下用到的 Prompt 版本（管理端调试观测直接显示）
+	for id, want := range map[string]int{first: 0, second: 1} {
+		d := decodeBody[adminRunDetailView](t, ts.call(t, http.MethodGet, "/api/v1/admin/agent/runs/"+id, admin, nil))
+		if v, ok := d.PromptVersions[agent.PromptPlanner]; !ok || v != want {
+			t.Fatalf("run %s prompt_versions = %v, want %s=%d", id, d.PromptVersions, agent.PromptPlanner, want)
+		}
+	}
 	found := false
 	for _, req := range mock.Requests {
 		if strings.HasPrefix(req.Messages[0].Content, "PLANNER-V1") {
