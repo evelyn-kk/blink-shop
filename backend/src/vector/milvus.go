@@ -70,17 +70,18 @@ type MilvusError struct {
 func (e *MilvusError) Error() string { return fmt.Sprintf("milvus: code %d: %s", e.Code, e.Message) }
 
 func (m *Milvus) call(ctx context.Context, path string, body any, out any) (err error) {
-	if !m.breaker.Allow() {
+	done, ok := m.breaker.Start()
+	if !ok {
 		return resilience.ErrOpen
 	}
 	defer metrics.Track("milvus", time.Now(), &err)
 	defer func() {
 		var me *MilvusError
 		if errors.As(err, &me) {
-			m.breaker.Record(nil) // 服务正常响应了
+			done(nil) // 服务正常响应了
 			return
 		}
-		m.breaker.Record(err)
+		done(err)
 	}()
 	payload, err := json.Marshal(body)
 	if err != nil {

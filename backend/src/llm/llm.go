@@ -92,16 +92,18 @@ func WithBreaker(p Provider, b *resilience.Breaker) Provider {
 }
 
 func (bp breakerProvider) Complete(ctx context.Context, req Request) (Response, error) {
-	if !bp.b.Allow() {
+	done, ok := bp.b.Start()
+	if !ok {
 		return Response{}, resilience.ErrOpen
 	}
 	resp, err := bp.p.Complete(ctx, req)
-	bp.b.Record(err)
+	done(err)
 	return resp, err
 }
 
 func (bp breakerProvider) Stream(ctx context.Context, req Request, onDelta func(delta string) error) (Response, error) {
-	if !bp.b.Allow() {
+	done, ok := bp.b.Start()
+	if !ok {
 		return Response{}, resilience.ErrOpen
 	}
 	// 调用方回调主动中止（如输出过滤）不是模型服务的问题，不计入失败
@@ -114,9 +116,9 @@ func (bp breakerProvider) Stream(ctx context.Context, req Request, onDelta func(
 		return nil
 	})
 	if aborted != nil && errors.Is(err, aborted) {
-		bp.b.Record(nil)
+		done(nil)
 	} else {
-		bp.b.Record(err)
+		done(err)
 	}
 	return resp, err
 }

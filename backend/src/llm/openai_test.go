@@ -224,3 +224,25 @@ func TestWithBreaker(t *testing.T) {
 		t.Fatalf("aborted streams should not open the breaker: count=%d", m2.Count())
 	}
 }
+
+// REV-024 回归（包装层）：熔断后的探测调用被调用方取消，下一次调用仍会发出新的探测，模型恢复后熔断关闭。
+func TestWithBreakerCancelledProbe(t *testing.T) {
+	now := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+	b := resilience.NewBreaker("llm_cancel_probe", 1, 10*time.Second)
+	b.SetClock(func() time.Time { return now })
+	m := (&Mock{}).Then(Fail(errors.New("upstream 502")), Text("ok"))
+	p := WithBreaker(m, b)
+	if _, err := p.Complete(context.Background(), Request{}); err == nil {
+		t.Fatal("want upstream error")
+	}
+	now = now.Add(11 * time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := p.Complete(ctx, Request{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled probe: %v", err)
+	}
+	resp, err := p.Complete(context.Background(), Request{})
+	if err != nil || resp.Content != "ok" || b.Open() {
+		t.Fatalf("next probe should reach the model and close the breaker: %v %q open=%v", err, resp.Content, b.Open())
+	}
+}

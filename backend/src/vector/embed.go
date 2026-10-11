@@ -237,10 +237,11 @@ func WithBreaker(e Embedder, b *resilience.Breaker) Embedder {
 }
 
 func (be breakerEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
-	if !be.b.Allow() {
+	done, ok := be.b.Start()
+	if !ok {
 		return nil, resilience.ErrOpen
 	}
 	out, err := be.Embedder.Embed(ctx, texts)
-	be.b.Record(err)
+	done(err)
 	return out, err
 }

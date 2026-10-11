@@ -26,6 +26,7 @@ type Breaker struct {
 	openUntil time.Time
 	open      bool
 	probing   bool
+	epoch     uint64 // 每次打开加一：打开之前就发出的调用，结果不再影响打开后的状态
 }
 
 // NewBreaker 创建熔断器：threshold 次连续失败后打开 cooldown。name 是依赖名（指标标签）。
@@ -43,35 +44,43 @@ func NewBreaker(name string, threshold int, cooldown time.Duration) *Breaker {
 // SetClock 替换时钟（测试用）。
 func (b *Breaker) SetClock(now func() time.Time) { b.now = now }
 
-// Allow 判断这次能否发出调用；返回 false 时调用方应直接降级（并计 breaker_open）。
-// 冷却期结束后的第一次调用作为探测放行，探测结束（Record）前其他调用仍被拒绝。
-func (b *Breaker) Allow() bool {
+// Start 判断这次能否发出调用。ok 为 false 时调用方应直接降级（已计 breaker_open）；ok 为 true 时调用结束后必须调用一次 done(err)。
+// 冷却期结束后的第一次调用作为探测放行，探测结束前其他调用仍被拒绝。
+func (b *Breaker) Start() (done func(err error), ok bool) {
 	if b == nil {
-		return true
+		return func(error) {}, true
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if !b.open {
-		return true
+	probe := false
+	if b.open {
+		if b.probing || b.now().Before(b.openUntil) {
+			metrics.External.Inc(b.name, "breaker_open")
+			return nil, false
+		}
+		b.probing, probe = true, true
 	}
-	if b.probing || b.now().Before(b.openUntil) {
-		metrics.External.Inc(b.name, "breaker_open")
-		return false
-	}
-	b.probing = true
-	return true
+	epoch := b.epoch
+	var once sync.Once
+	return func(err error) { once.Do(func() { b.finish(epoch, probe, err) }) }, true
 }
 
-// Record 记录一次放行调用的结果。调用方主动取消（context.Canceled）不计入：那不是依赖的问题。
-func (b *Breaker) Record(err error) {
-	if b == nil {
-		return
-	}
+// finish 记录一次放行调用的结果：
+//   - 探测结束（不论结果）都清掉 probing，取消了也一样，下一次调用可以重新探测；
+//   - 调用方主动取消（context.Canceled）不计入：那不是依赖的问题；
+//   - 打开之前发出、打开之后才结束的调用（epoch 不同）不影响状态：不能让一个旧的成功把刚打开的熔断器关掉，
+//     也不能让它清掉正在进行的探测；
+//   - 成功关闭熔断器；失败累计，达到阈值或探测失败时打开（重新计冷却期）。
+func (b *Breaker) finish(epoch uint64, probe bool, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	probe := b.probing
-	b.probing = false
+	if probe {
+		b.probing = false
+	}
 	if err != nil && errors.Is(err, context.Canceled) {
+		return
+	}
+	if !probe && epoch != b.epoch {
 		return
 	}
 	if err == nil {
@@ -82,6 +91,7 @@ func (b *Breaker) Record(err error) {
 	b.failures++
 	if probe || b.failures >= b.threshold {
 		b.open, b.openUntil = true, b.now().Add(b.cooldown)
+		b.epoch++
 		metrics.BreakerOpen.Set(1, b.name)
 	}
 }
