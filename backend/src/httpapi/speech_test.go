@@ -171,6 +171,17 @@ func (c *speechClient) audio(seconds float64) {
 	}
 }
 
+// audioPastLimit 发送超过时长上限的音频：服务端到上限后会结束输入并关闭连接，之后的写入失败（broken pipe）是预期的，停止发送即可。
+func (c *speechClient) audioPastLimit(seconds float64) {
+	c.t.Helper()
+	n := int(seconds * speech.BytesPerSecond)
+	for sent := 0; sent < n; sent += 3200 {
+		if err := websocket.Message.Send(c.conn, make([]byte, min(3200, n-sent))); err != nil {
+			return
+		}
+	}
+}
+
 func (c *speechClient) control(typ string) {
 	c.t.Helper()
 	if err := websocket.Message.Send(c.conn, `{"type":"`+typ+`"}`); err != nil {
@@ -230,7 +241,7 @@ func TestSpeechRealtime(t *testing.T) {
 	// 达到时长上限：服务端结束输入，再给最终结果
 	c = mustDial(t, srv.URL, user)
 	c.next()
-	c.audio(3.5)
+	c.audioPastLimit(3.5)
 	got := c.events()
 	if !contains(got, "end_of_input:max_duration") || got[len(got)-2] != "final:降噪耳机" {
 		t.Fatalf("max duration: %v", got)
