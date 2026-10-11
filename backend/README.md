@@ -761,7 +761,11 @@ go run ./cmd/eval -suite=images -image-embedder=env       # 用 IMAGE_EMBEDDING_
 - **存放**：每个配置项一个 dataId（`NACOS_DATA_ID_PREFIX` + 配置键，内容就是值），不放在一个 JSON 合集里——Nacos 的 HTTP 接口不支持 casMd5，
   合集的“读-改-写”在多实例同时修改不同配置时会互相覆盖；分开存放后不同配置互不影响，同一配置并发修改以最后一次写入为准。
 - **读取**：按配置项缓存，超过 `NACOS_REFRESH_SECONDS` 才重新拉；Nacos 不可用时沿用最后一次读到的值（从没读到过则用环境变量 / 默认值），
-  下一个刷新间隔再试，服务照常启动和运行。Nacos 的读是最终一致的（写入后约 1 秒内其他实例可见）。
+  服务照常启动和运行。Nacos 的读是最终一致的（写入后约 1 秒内其他实例可见）。
+- **熔断**：任何一次拉取失败（连不上、超时、非 200）后，一个刷新间隔内所有配置项都不再请求 Nacos；过了间隔只放一个探测请求，
+  成功后恢复按项刷新。所以 Nacos 黑洞 / 丢包时，一次读取最多等一个请求超时（3 秒），不会按配置项累加。客户端断开导致的取消不算失败。
+- **启动预算**：启动时读取全部配置（含生产校验）共用 2 秒总预算（`nacosStartupBudget`）；用完后剩下的配置项直接用环境变量 / 默认值，
+  运行中再按刷新间隔读取，日志 `dynamic config on nacos` 的 `reachable` 标出启动时是否读到。
 - **写入**：管理端修改只写这一项（恢复默认 = 删除该 dataId）；写成功才在本实例生效并写审计，写失败返回 503 `config_center_unavailable`，不生效。
 - **状态**：`GET /admin/configs` 的 `backend`（`kind` = nacos / memory，`healthy` = 最近一次读写是否成功，`checked_at`），Web 配置页据此提示。
 - 启动时先只用环境变量读出 Nacos 连接配置，再用它创建动态配置来源；Nacos 自身的连接配置不能放在 Nacos 里。

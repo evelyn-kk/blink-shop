@@ -185,6 +185,10 @@ func (c *NacosClient) Delete(ctx context.Context, dataID string) error {
 // 每项一个 dataId 而不是一个 JSON 合集：Nacos 的 HTTP 接口不支持 casMd5（只有 gRPC 客户端支持），合集的“读-改-写”在多实例
 // 同时修改不同配置时会互相覆盖；分开存放后不同配置互不影响，同一配置并发修改以最后一次写入为准。
 // Nacos 的读是最终一致的（写入后约 1 秒内其他实例可见），本实例写入后立即生效。
+//
+// 熔断：任何一次拉取失败（连不上、超时、非 200）后，一个 TTL 内所有配置项都不再请求 Nacos，直接用缓存 / 未设置；
+// 过了 TTL 只放一个请求去探测，成功后恢复按项刷新。这样 Nacos 黑洞或丢包时，启动和请求最多等一次超时，
+// 而不是“配置项数 × 超时”。调用方主动取消（context.Canceled）不算 Nacos 失败。
 type NacosSource struct {
 	client *NacosClient
 	prefix string
@@ -195,6 +199,10 @@ type NacosSource struct {
 	entries map[string]*nacosEntry
 	lastErr error
 	lastAt  time.Time
+	down    bool      // 最近一次拉取失败
+	retryAt time.Time // down 时，过了这个时间才放一个探测请求
+	probing bool      // 有探测请求在路上，其他请求不再访问 Nacos
+	fetches int       // 发给 Nacos 的读请求数（测试用）
 }
 
 type nacosEntry struct {
@@ -223,30 +231,59 @@ func (n *NacosSource) DataID(name string) string { return n.prefix + name }
 func (n *NacosSource) Lookup(ctx context.Context, name string) (string, bool) {
 	n.mu.Lock()
 	e := n.entries[name]
-	fresh := e != nil && n.now().Sub(e.fetchedAt) < n.ttl
-	n.mu.Unlock()
-	if fresh {
+	cached := func() (string, bool) {
+		if e == nil {
+			return "", false
+		}
 		return e.value, e.found
 	}
-	// 拉取不持锁：一项配置的网络请求不会挡住其他配置的读取
-	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), n.client.opts.Timeout)
+	if e != nil && n.now().Sub(e.fetchedAt) < n.ttl {
+		n.mu.Unlock()
+		return e.value, e.found
+	}
+	if ctx.Err() != nil {
+		n.mu.Unlock()
+		return cached() // 调用方已经放弃（如启动预算用完）：不访问 Nacos，也不算 Nacos 失败
+	}
+	probe := false
+	if n.down {
+		if n.probing || n.now().Before(n.retryAt) {
+			n.mu.Unlock()
+			return cached() // 熔断中：不访问 Nacos
+		}
+		n.probing, probe = true, true
+	}
+	n.fetches++
+	n.mu.Unlock()
+
+	// 拉取不持锁：一项配置的网络请求不会挡住其他配置的读取。调用方的截止时间（如启动预算）同样生效。
+	rctx, cancel := context.WithTimeout(ctx, n.client.opts.Timeout)
 	defer cancel()
 	value, found, err := n.client.Get(rctx, n.DataID(name))
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	if probe {
+		n.probing = false
+	}
+	if err != nil && errors.Is(ctx.Err(), context.Canceled) {
+		return cached() // 调用方走了，不是 Nacos 的问题
+	}
 	n.lastAt = n.now()
 	if err != nil {
 		n.lastErr = err
-		if e == nil {
-			e = &nacosEntry{}
-			n.entries[name] = e
-		}
-		e.fetchedAt = n.now() // TTL 内不再重试，沿用旧值
-		return e.value, e.found
+		n.down, n.retryAt = true, n.now().Add(n.ttl)
+		return cached() // 沿用旧值；旧条目保持过期，恢复后第一时间重新拉取
 	}
-	n.lastErr = nil
+	n.lastErr, n.down = nil, false
 	n.entries[name] = &nacosEntry{value: strings.TrimSpace(value), found: found, fetchedAt: n.now()}
 	return strings.TrimSpace(value), found
+}
+
+// Fetches 返回发给 Nacos 的读请求数（测试用）。
+func (n *NacosSource) Fetches() int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.fetches
 }
 
 // Status 返回最近一次拉取的时间和错误（管理页展示配置中心是否可用）。
@@ -267,12 +304,13 @@ func (n *NacosSource) Write(ctx context.Context, name, value string) error {
 	if err != nil {
 		n.mu.Lock()
 		n.lastErr, n.lastAt = err, n.now()
+		n.down, n.retryAt = true, n.now().Add(n.ttl)
 		n.mu.Unlock()
 		return fmt.Errorf("%w: %v", ErrConfigCenter, err)
 	}
 	n.mu.Lock()
 	n.entries[name] = &nacosEntry{value: value, found: value != "", fetchedAt: n.now()}
-	n.lastErr, n.lastAt = nil, n.now()
+	n.lastErr, n.lastAt, n.down = nil, n.now(), false // 写成功说明 Nacos 已经恢复
 	n.mu.Unlock()
 	return nil
 }

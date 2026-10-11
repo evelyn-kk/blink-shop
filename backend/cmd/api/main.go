@@ -47,6 +47,9 @@ func main() {
 	}
 }
 
+// nacosStartupBudget 是启动时从 Nacos 读取全部配置的总时间上限。
+const nacosStartupBudget = 2 * time.Second
+
 // run 读取配置、校验、组装依赖并阻塞到 ctx 结束；配置不合法时在监听端口前返回错误。
 func run(ctx context.Context, getenv func(string) string, logOut io.Writer) error {
 	logger := logging.New(logOut, slog.LevelInfo)
@@ -60,7 +63,10 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 	}
 	dynamic := configcenter.OpenDynamic(boot.Nacos)
 	resolver := configcenter.NewResolver(getenv, dynamic)
-	cfg, err := configcenter.Load(ctx, resolver)
+	// 启动时读配置共用一个总预算：Nacos 慢或不可达时，剩下的配置项直接用环境变量 / 默认值，运行中再按刷新间隔重新读取
+	loadCtx, cancelLoad := context.WithTimeout(ctx, nacosStartupBudget)
+	defer cancelLoad()
+	cfg, err := configcenter.Load(loadCtx, resolver)
 	if err != nil {
 		return fmt.Errorf("配置不合法: %w", err)
 	}
@@ -71,10 +77,11 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 	} else {
 		logger.Warn("NACOS_ADDR not set, dynamic config kept in memory (lost on restart)")
 	}
-	agentSettings, _ := configcenter.AgentSettingsOf(ctx, resolver) // Load 已校验
-	if err := configcenter.ValidateProduction(ctx, cfg, resolver); err != nil {
+	agentSettings, _ := configcenter.AgentSettingsOf(loadCtx, resolver) // Load 已校验
+	if err := configcenter.ValidateProduction(loadCtx, cfg, resolver); err != nil {
 		return fmt.Errorf("生产环境配置不安全: %w", err)
 	}
+	cancelLoad()
 	logger.Info("config loaded",
 		"app_env", cfg.AppEnv,
 		"api_addr", cfg.APIAddr,

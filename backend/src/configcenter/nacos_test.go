@@ -22,6 +22,8 @@ type fakeNacos struct {
 	gets     atomic.Int32
 	needAuth bool
 	logins   atomic.Int32
+	hang     atomic.Bool  // 模拟黑洞 / 丢包：读请求一直不回，直到客户端放弃
+	delay    atomic.Int64 // 模拟慢 Nacos：每个读请求等这么久（纳秒）再正常回答
 }
 
 func (f *fakeNacos) handler(t *testing.T) http.Handler {
@@ -52,9 +54,25 @@ func (f *fakeNacos) handler(t *testing.T) http.Handler {
 		key := r.Form.Get("group") + "/" + r.Form.Get("dataId")
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		if r.Method == http.MethodGet {
+			f.gets.Add(1)
+			if f.hang.Load() {
+				f.mu.Unlock()
+				<-r.Context().Done()
+				f.mu.Lock()
+				return
+			}
+			if d := time.Duration(f.delay.Load()); d > 0 {
+				f.mu.Unlock()
+				select {
+				case <-time.After(d):
+				case <-r.Context().Done():
+				}
+				f.mu.Lock()
+			}
+		}
 		switch r.Method {
 		case http.MethodGet:
-			f.gets.Add(1)
 			v, ok := f.data[key]
 			if !ok {
 				http.Error(w, "config data not exist", http.StatusNotFound)
@@ -186,7 +204,7 @@ func TestNacosIntegration(t *testing.T) {
 		t.Skip("BLINK_TEST_NACOS_ADDR not set (Nacos integration test runs locally only)")
 	}
 	ctx := context.Background()
-	client := NewNacosClient(NacosOptions{Addr: addr, Group: "BLINK_SHOP_TEST"})
+	client := NewNacosClient(NacosOptions{Addr: addr, Group: "BLINK_SHOP_TEST", Timeout: 10 * time.Second}) // 全量测试并行时本机 Nacos 偶尔超过默认 3 秒
 	prefix := fmt.Sprintf("blink_shop_test_%d.", time.Now().UnixNano())
 	writer := NewNacosSource(client, prefix, time.Second)
 	t.Cleanup(func() { _ = client.Delete(ctx, prefix+"ai.timeout") })
@@ -215,5 +233,107 @@ func TestNacosIntegration(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatal("deleted value still visible")
 		}
+	}
+}
+
+// 黑洞 Nacos：完整 Load 只等一次请求超时（熔断后其余配置项直接用默认值），而不是“配置项数 × 超时”；
+// 熔断期间每个刷新间隔只放一个探测请求；Nacos 恢复后下一个刷新周期重新读到值。
+func TestNacosBlackholeDoesNotStackTimeouts(t *testing.T) {
+	ctx := context.Background()
+	f, srv := newFakeNacos(t)
+	f.data["G/p.risk.blocked_words"] = "假货,刷单"
+	f.hang.Store(true)
+	const timeout = 300 * time.Millisecond
+	src := NewNacosSource(NewNacosClient(NacosOptions{Addr: srv.URL, Group: "G", Timeout: timeout}), "p.", 10*time.Second)
+	var mu sync.Mutex
+	now := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+	src.SetClock(func() time.Time { mu.Lock(); defer mu.Unlock(); return now })
+	advance := func(d time.Duration) { mu.Lock(); now = now.Add(d); mu.Unlock() }
+	r := NewResolver(func(string) string { return "" }, src)
+
+	start := time.Now()
+	if _, err := Load(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > 3*timeout {
+		t.Fatalf("Load took %s with a blackholed Nacos (%d keys), want about one timeout", elapsed, len(Settings()))
+	}
+	if src.Fetches() != 1 || f.gets.Load() != 1 {
+		t.Fatalf("fetches=%d gets=%d, want 1", src.Fetches(), f.gets.Load())
+	}
+	if r.Get(ctx, KeyRequestTimeout) != "30s" || r.Get(ctx, KeyRiskBlockedWords) != KeyRiskBlockedWords.Default {
+		t.Fatal("unreachable Nacos should fall back to defaults")
+	}
+	if _, err := src.Status(); err == nil {
+		t.Fatal("status should report the failure")
+	}
+
+	// 过了一个刷新间隔：并发的读取里只有一个去探测，其他直接用缓存 / 默认值
+	advance(11 * time.Second)
+	var wg sync.WaitGroup
+	for _, k := range Settings() {
+		wg.Add(1)
+		go func() { defer wg.Done(); _ = r.Get(ctx, k.Key) }()
+	}
+	wg.Wait()
+	if src.Fetches() != 2 {
+		t.Fatalf("fetches=%d, want exactly one probe", src.Fetches())
+	}
+
+	// Nacos 恢复：下一个刷新周期读到值，熔断解除，其他配置项也恢复按项读取
+	f.hang.Store(false)
+	advance(11 * time.Second)
+	if v := r.Get(ctx, KeyRiskBlockedWords); v != "假货,刷单" {
+		t.Fatalf("after recovery: %q", v)
+	}
+	if _, err := src.Status(); err != nil {
+		t.Fatalf("status after recovery: %v", err)
+	}
+	before := src.Fetches()
+	_ = r.Get(ctx, KeyAITimeout)
+	if src.Fetches() != before+1 {
+		t.Fatal("other keys should be fetched again after recovery")
+	}
+}
+
+// 慢但能回答的 Nacos：调用方的截止时间（启动总预算）对整个 Load 生效，用完后剩下的配置项直接用默认值。
+func TestNacosLoadRespectsCallerBudget(t *testing.T) {
+	f, srv := newFakeNacos(t)
+	f.delay.Store(int64(150 * time.Millisecond))
+	src := NewNacosSource(NewNacosClient(NacosOptions{Addr: srv.URL, Group: "G", Timeout: 3 * time.Second}), "p.", 10*time.Second)
+	r := NewResolver(func(string) string { return "" }, src)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := Load(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("Load took %s, want it bounded by the 500ms budget", elapsed)
+	}
+	if n := src.Fetches(); n > 5 {
+		t.Fatalf("fetches=%d after the budget ran out", n)
+	}
+}
+
+// 调用方主动取消（客户端断开）不算 Nacos 失败，不触发熔断。
+func TestNacosCallerCancelIsNotAFailure(t *testing.T) {
+	f, srv := newFakeNacos(t)
+	f.hang.Store(true)
+	src := NewNacosSource(NewNacosClient(NacosOptions{Addr: srv.URL, Group: "G", Timeout: 3 * time.Second}), "p.", 10*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, cancel)
+	if _, ok := src.Lookup(ctx, "ai.timeout"); ok {
+		t.Fatal("cancelled lookup should be unset")
+	}
+	if _, err := src.Status(); err != nil {
+		t.Fatalf("cancel counted as failure: %v", err)
+	}
+	f.hang.Store(false)
+	f.mu.Lock()
+	f.data["G/p.ai.timeout"] = "20s"
+	f.mu.Unlock()
+	if v, ok := src.Lookup(context.Background(), "ai.timeout"); !ok || v != "20s" {
+		t.Fatalf("next lookup should hit Nacos: %q %v", v, ok)
 	}
 }

@@ -6,8 +6,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -96,6 +98,47 @@ func TestRunWithMySQLDown(t *testing.T) {
 	}
 	if strings.Contains(out, "blink:pw@") {
 		t.Fatalf("DSN leaked into logs: %s", out)
+	}
+}
+
+// Nacos 黑洞（请求一直不回）时照常启动：读配置受启动总预算限制，不按配置项累加超时；
+// 动态配置退回环境变量 / 默认值，日志标出 Nacos 不可达。
+func TestRunWithNacosBlackholed(t *testing.T) {
+	var gets atomic.Int32
+	nacos := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gets.Add(1)
+		<-r.Context().Done()
+	}))
+	t.Cleanup(nacos.Close)
+	addr := freeAddr(t)
+	env := map[string]string{
+		"API_ADDR":   addr,
+		"MYSQL_DSN":  "blink:pw@tcp(" + freeAddr(t) + ")/blink_shop?timeout=200ms",
+		"NACOS_ADDR": nacos.URL,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	logs := &syncBuffer{}
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() { done <- run(ctx, envOf(env), logs) }()
+	waitUntilUp(t, "http://"+addr+"/api/v1/health")
+	if elapsed := time.Since(start); elapsed > nacosStartupBudget+2*time.Second {
+		t.Fatalf("startup took %s with a blackholed Nacos", elapsed)
+	}
+	if n := gets.Load(); n != 1 {
+		t.Fatalf("nacos requests at startup = %d, want 1 (breaker should stop the rest)", n)
+	}
+	if !strings.Contains(logs.String(), `"reachable":false`) {
+		t.Fatalf("startup log should mark nacos unreachable: %s", logs)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("run returned %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not shut down")
 	}
 }
 
