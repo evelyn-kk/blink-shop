@@ -1,0 +1,67 @@
+# 意图评测集：规则规划（agent.Classify）对一句话的意图、动作和关键槽位。expect_action 为空表示不检查动作；expect_budget 是价格上限（元，两位小数）；held_out 标记的说法没有在规则开发时参考过，用来看泛化。group 缺省为 expect_intent。 guide 的 greeting / fallback 只在说法明确时检查（单字应答两种回应都可以）；“打开 X 看看”按导航算（与“打开购物车页面”一致）。
+{"id": "in_001", "query": "您好", "expect_intent": "guide", "expect_action": "greeting"}
+{"id": "in_002", "query": "hi，在吗", "expect_intent": "guide", "expect_action": "greeting"}
+{"id": "in_003", "query": "你可以帮我干嘛", "expect_intent": "guide", "expect_action": "greeting"}
+{"id": "in_004", "query": "嗯", "expect_intent": "guide"}
+{"id": "in_005", "query": "好的谢谢", "expect_intent": "guide", "held_out": true}
+{"id": "in_006", "query": "推荐一款降噪耳机", "expect_intent": "product_search"}
+{"id": "in_007", "query": "想要一个适合打游戏的鼠标", "expect_intent": "product_search"}
+{"id": "in_008", "query": "2000 以内的手机推荐一下", "expect_intent": "product_search", "expect_budget": "2000.00"}
+{"id": "in_009", "query": "有没有便宜点的蓝牙耳机", "expect_intent": "product_search"}
+{"id": "in_010", "query": "给我找个护眼台灯", "expect_intent": "product_search"}
+{"id": "in_011", "query": "预算 800 左右买什么耳机好", "expect_intent": "product_search", "held_out": true}
+{"id": "in_012", "query": "不要 Blink 的，推荐别的鼠标", "expect_intent": "product_search", "expect_exclude": ["Blink"]}
+{"id": "in_013", "query": "学生党用什么手机", "expect_intent": "product_search", "held_out": true}
+{"id": "in_014", "query": "1000 到 3000 的手机", "expect_intent": "product_search", "expect_budget": "3000.00"}
+{"id": "in_015", "query": "帮我挑一款送女朋友的耳机", "expect_intent": "product_search", "held_out": true}
+{"id": "in_016", "query": "Blink Nova 12 和 Blink Vista Pro 对比一下", "expect_intent": "product_compare"}
+{"id": "in_017", "query": "Nova 12 跟 Vista Pro 有什么区别", "expect_intent": "product_compare"}
+{"id": "in_018", "query": "比较一下这两款耳机", "expect_intent": "product_compare", "held_out": true}
+{"id": "in_019", "query": "帮我识图找同款", "expect_intent": "image_search"}
+{"id": "in_020", "query": "按照片搜商品", "expect_intent": "image_search"}
+{"id": "in_021", "query": "这个是什么", "expect_intent": "image_search", "has_image": true}
+{"id": "in_022", "query": "找这张图里的东西", "expect_intent": "image_search", "has_image": true, "held_out": true}
+{"id": "in_023", "query": "退货要多久到账", "expect_intent": "knowledge"}
+{"id": "in_024", "query": "耳机可以保修几年", "expect_intent": "knowledge"}
+{"id": "in_025", "query": "鼠标怎么配对蓝牙", "expect_intent": "knowledge"}
+{"id": "in_026", "query": "七天无理由退货的条件是什么", "expect_intent": "knowledge"}
+{"id": "in_027", "query": "台灯怎么调亮度", "expect_intent": "knowledge", "held_out": true}
+{"id": "in_028", "query": "发票怎么开", "expect_intent": "knowledge", "held_out": true}
+{"id": "in_029", "query": "加入购物车", "expect_intent": "cart", "expect_action": "add"}
+{"id": "in_030", "query": "把第二个加购", "expect_intent": "cart", "expect_action": "add"}
+{"id": "in_031", "query": "帮我把鼠标加到购物车里买三个", "expect_intent": "cart", "expect_action": "add"}
+{"id": "in_032", "query": "打开我的购物车看看", "expect_intent": "navigation"}
+{"id": "in_033", "query": "购物车有哪些东西", "expect_intent": "cart", "expect_action": "view"}
+{"id": "in_034", "query": "把购物车里的耳机删了", "expect_intent": "cart", "expect_action": "remove"}
+{"id": "in_035", "query": "鼠标数量改成 2", "expect_intent": "cart", "expect_action": "update"}
+{"id": "in_036", "query": "清空我的购物车", "expect_intent": "cart", "expect_action": "clear"}
+{"id": "in_037", "query": "购物车里的台灯先不选", "expect_intent": "cart", "expect_action": "unselect", "held_out": true}
+{"id": "in_038", "query": "把购物车里的鼠标选上", "expect_intent": "cart", "expect_action": "select", "held_out": true}
+{"id": "in_039", "query": "下单", "expect_intent": "checkout"}
+{"id": "in_040", "query": "我要结算", "expect_intent": "checkout"}
+{"id": "in_041", "query": "帮我把购物车结算了", "expect_intent": "checkout"}
+{"id": "in_042", "query": "现在付款买下来", "expect_intent": "checkout", "held_out": true}
+{"id": "in_043", "query": "查看我的订单", "expect_intent": "order", "expect_action": "list"}
+{"id": "in_044", "query": "我有哪些待发货的订单", "expect_intent": "order", "expect_action": "list"}
+{"id": "in_045", "query": "付一下 BS202609201000100", "expect_intent": "order", "expect_action": "pay"}
+{"id": "in_046", "query": "帮我支付刚才的订单", "expect_intent": "order", "expect_action": "pay"}
+{"id": "in_047", "query": "取消订单", "expect_intent": "order", "expect_action": "cancel"}
+{"id": "in_048", "query": "我已经收到货了，确认收货", "expect_intent": "order", "expect_action": "confirm"}
+{"id": "in_049", "query": "订单物流到哪了", "expect_intent": "order", "expect_action": "list", "held_out": true}
+{"id": "in_050", "query": "有优惠券吗", "expect_intent": "coupon", "expect_action": "list"}
+{"id": "in_051", "query": "领一下优惠券", "expect_intent": "coupon", "expect_action": "claim"}
+{"id": "in_052", "query": "我领过哪些券", "expect_intent": "coupon", "expect_action": "mine"}
+{"id": "in_053", "query": "最近有什么活动", "expect_intent": "coupon", "expect_action": "promotions"}
+{"id": "in_054", "query": "满减活动有哪些", "expect_intent": "coupon", "expect_action": "promotions", "held_out": true}
+{"id": "in_055", "query": "这款耳机评价好不好", "expect_intent": "review", "expect_action": "list"}
+{"id": "in_056", "query": "看看鼠标的评论", "expect_intent": "review", "expect_action": "list"}
+{"id": "in_057", "query": "给台灯五星好评，说很亮", "expect_intent": "review", "expect_action": "create"}
+{"id": "in_058", "query": "大家觉得 Nova 12 怎么样", "expect_intent": "review", "expect_action": "list", "held_out": true}
+{"id": "in_059", "query": "去购物车页面", "expect_intent": "navigation"}
+{"id": "in_060", "query": "打开订单页", "expect_intent": "navigation"}
+{"id": "in_061", "query": "跳到我的优惠券页面", "expect_intent": "navigation", "held_out": true}
+{"id": "in_062", "query": "今天北京天气", "expect_intent": "non_guide"}
+{"id": "in_063", "query": "给我写首诗", "expect_intent": "non_guide"}
+{"id": "in_064", "query": "1+1 等于几", "expect_intent": "non_guide"}
+{"id": "in_065", "query": "帮我翻译一下 hello", "expect_intent": "non_guide"}
+{"id": "in_066", "query": "讲讲世界历史", "expect_intent": "non_guide", "held_out": true}

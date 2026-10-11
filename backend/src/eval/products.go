@@ -35,6 +35,8 @@ type ProductCase struct {
 
 // ProductOptions 是商品搜索评测的输入。
 type ProductOptions struct {
+	// MinPass 是门槛通过率，0 表示要求全部通过。
+	MinPass      float64
 	Cases        string
 	ProductIndex rag.ProductIndex
 	Version      string
@@ -125,12 +127,7 @@ func RunProducts(ctx context.Context, o ProductOptions) (Report, error) {
 				problems = append(problems, "回答应包含“"+want+"”")
 			}
 		}
-		rep.Total++
-		if len(problems) == 0 {
-			rep.Passed++
-		} else {
-			rep.Failures = append(rep.Failures, Failure{ID: c.ID, Query: c.Query, Problems: problems, Got: rec})
-		}
+		rep.record(firstTag(c.Tags), Failure{ID: c.ID, Query: c.Query, Problems: problems, Got: rec})
 	}
 	if topCases > 0 {
 		rep.Metrics["top1_accuracy"] = round(float64(topOK) / float64(topCases))
@@ -141,7 +138,7 @@ func RunProducts(ctx context.Context, o ProductOptions) (Report, error) {
 	if negCases > 0 {
 		rep.Metrics["negative_constraint_accuracy"] = round(float64(negOK) / float64(negCases))
 	}
-	rep.finish(start)
+	rep.finish(start, o.MinPass)
 	return rep, nil
 }
 
@@ -151,6 +148,7 @@ type capture struct {
 	text   strings.Builder
 	blocks []map[string]any
 	follow []string
+	traces []traceRec
 }
 
 func (c *capture) Thinking(agent.Step) {}
@@ -160,8 +158,18 @@ func (c *capture) Block(b map[string]any) {
 	c.blocks = append(c.blocks, b)
 	c.mu.Unlock()
 }
-func (c *capture) Followups(q []string)                                        { c.mu.Lock(); c.follow = q; c.mu.Unlock() }
-func (c *capture) Trace(string, string, string, time.Duration, map[string]any) {}
+func (c *capture) Followups(q []string) { c.mu.Lock(); c.follow = q; c.mu.Unlock() }
+func (c *capture) Trace(stage, typ, status string, _ time.Duration, meta map[string]any) {
+	c.mu.Lock()
+	c.traces = append(c.traces, traceRec{stage: stage, typ: typ, status: status, meta: meta})
+	c.mu.Unlock()
+}
+
+// traceRec 是运行器写出的一条轨迹（端到端评测检查阶段、工具和脱敏）。
+type traceRec struct {
+	stage, typ, status string
+	meta               map[string]any
+}
 
 // recommended 返回推荐卡（标题为“为你找到的商品”）里的商品 ID；“相近 / 不太合适 / 匹配到的”等参考卡不算推荐。
 func (c *capture) recommended() []string {

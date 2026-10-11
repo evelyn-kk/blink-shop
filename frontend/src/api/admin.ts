@@ -1,5 +1,12 @@
 import type {
   AdminAccount,
+  AdminRun,
+  AdminRunDetail,
+  EvalOverview,
+  EvalReport,
+  EvalToolResult,
+  RunStatus,
+  VectorStatus,
   AdminMerchant,
   AdminProduct,
   AdminReview,
@@ -85,4 +92,33 @@ export function listAuditLogs(params: { targetType?: string; targetID?: string; 
   return request(
     `/admin/audit-logs${query({ target_type: params.targetType, target_id: params.targetID, operator_id: params.operatorID, page: params.page, page_size: params.pageSize })}`,
   );
+}
+
+export function listAdminRuns(params: { status?: RunStatus | ''; accountID?: string; page?: number; pageSize?: number }): Promise<Page<AdminRun>> {
+  return request(`/admin/agent/runs${query({ status: params.status || undefined, account_id: params.accountID, page: params.page, page_size: params.pageSize })}`);
+}
+
+export function getAdminRun(id: string): Promise<AdminRunDetail> {
+  return request(`/admin/agent/runs/${encodeURIComponent(id)}`);
+}
+
+export function getVectorStatus(): Promise<VectorStatus> {
+  return request('/admin/vector/status');
+}
+
+export function listEvals(): Promise<EvalOverview> {
+  return request('/admin/evals');
+}
+
+/** id 形如 `<报告目录>/<suite>`，两段分别编码。 */
+export function getEvalReport(id: string): Promise<EvalReport> {
+  return request(`/admin/evals/reports/${id.split('/').map(encodeURIComponent).join('/')}`);
+}
+
+export function evalIntent(q: string): Promise<{ query: string; plan: Record<string, unknown>; duration_ms: number }> {
+  return request('/eval/intent', { method: 'POST', body: JSON.stringify({ query: q }) });
+}
+
+export function evalTool(kind: 'rag' | 'products', q: string): Promise<EvalToolResult> {
+  return request(`/eval/${kind}`, { method: 'POST', body: JSON.stringify({ query: q }) });
 }

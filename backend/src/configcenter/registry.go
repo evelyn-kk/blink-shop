@@ -34,6 +34,8 @@ var (
 	KeyAuthTokenTTL        = Key{Name: "auth.token_ttl", Env: "AUTH_TOKEN_TTL", Default: "24h"}
 	KeyLoginAttemptsPerMin = Key{Name: "auth.login_attempts_per_minute", Env: "LOGIN_ATTEMPTS_PER_MINUTE", Default: "10"}
 	KeyAvatarUploadDir     = Key{Name: "uploads.avatar_dir", Env: "AVATAR_UPLOAD_DIR", Default: "uploads/avatar"} // 仅启动时读取
+	KeyEvalDataDir         = Key{Name: "eval.data_dir", Env: "EVAL_DATA_DIR", Default: "../quality/data/eval"}    // 仅启动时读取
+	KeyEvalReportDir       = Key{Name: "eval.report_dir", Env: "EVAL_REPORT_DIR", Default: "../quality/reports"}  // 仅启动时读取
 )
 
 // 对象存储；仅启动时读取。MINIO_ENDPOINT 为空表示未配置，文件接口返回 object_storage_unavailable。

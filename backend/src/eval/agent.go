@@ -1,0 +1,225 @@
+package eval
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/evelyn-kk/blink-shop/backend/src/agent"
+	"github.com/evelyn-kk/blink-shop/backend/src/domain"
+	"github.com/evelyn-kk/blink-shop/backend/src/rag"
+	"github.com/evelyn-kk/blink-shop/backend/src/risk"
+	"github.com/evelyn-kk/blink-shop/backend/src/seed"
+	"github.com/evelyn-kk/blink-shop/backend/src/shop"
+)
+
+// AgentCase 是一条端到端导购用例：在全新的演示数据上，用规则运行器（与线上相同的风险检查、规划、工具白名单）跑完一段对话，
+// 检查最后一轮的回答、结构化块、轨迹和副作用。
+//   - expect_intent：规划结果的意图；expect_blocks：必须出现的块类型；expect_products：必须出现在任一商品卡里；
+//   - expect_no_products：不能出现任何商品卡，回答里也不能出现商品 ID；expect_text_any：回答至少包含其中一个；forbidden_text：都不能出现；
+//   - expect_tools：必须调用过的工具；expect_trace：必须出现的 “阶段/类型/状态”；
+//   - no_leak：回答、块和轨迹里都不能出现的原文（如提问里的手机号，验证脱敏）；expect_cart：运行后购物车里必须有的商品。
+type AgentCase struct {
+	ID               string   `json:"id"`
+	Group            string   `json:"group"`
+	History          []string `json:"history"`
+	Query            string   `json:"query"`
+	ExpectIntent     string   `json:"expect_intent"`
+	ExpectBlocks     []string `json:"expect_blocks"`
+	ExpectProducts   []string `json:"expect_products"`
+	ExpectNoProducts bool     `json:"expect_no_products"`
+	ExpectTextAny    []string `json:"expect_text_any"`
+	ForbiddenText    []string `json:"forbidden_text"`
+	ExpectTools      []string `json:"expect_tools"`
+	ExpectTrace      []string `json:"expect_trace"`
+	NoLeak           []string `json:"no_leak"`
+	ExpectCart       []string `json:"expect_cart"`
+}
+
+// AgentOptions 是端到端导购评测的输入。
+type AgentOptions struct {
+	// MinPass 是门槛通过率，0 表示要求全部通过。
+	MinPass float64
+	Cases   string
+	Version string
+	Config  map[string]string
+	Now     func() time.Time
+}
+
+var productIDRe = regexp.MustCompile(`\bp_seed_[a-z0-9_]+\b`)
+
+// RunAgent 跑端到端导购评测：每条用例一份新的演示数据（购物车、订单互不影响），用户为演示用户二。
+// 指标：意图准确率、无商品用例正确率（不编造商品）、脱敏用例正确率。
+func RunAgent(ctx context.Context, o AgentOptions) (Report, error) {
+	cases, err := readJSONL[AgentCase](o.Cases)
+	if err != nil {
+		return Report{}, err
+	}
+	start := time.Now()
+	rep := Report{Suite: "agent", Version: o.Version, Config: map[string]string{"runner": "rule", "recall": "keyword"}, StartedAt: start.UTC(), Metrics: map[string]float64{}}
+	for k, v := range o.Config {
+		rep.Config[k] = v
+	}
+	now := o.Now
+	if now == nil {
+		fixed := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC) // 演示促销有效期内，结果可复现
+		now = func() time.Time { return fixed }
+	}
+	var intentCases, intentOK, noneCases, noneOK, leakCases, leakOK int
+	for i, c := range cases {
+		if err := ctx.Err(); err != nil {
+			return rep, err
+		}
+		st, err := newSeededStore(ctx)
+		if err != nil {
+			return rep, err
+		}
+		sh := shop.New(st, now, 0)
+		runner := agent.NewRuleRunner(agent.Deps{Store: st, Shop: sh, Retriever: rag.NewRetriever(st, nil, nil),
+			Risk: risk.Static("违法", "违禁", "假货", "绕过风控"), Now: now})
+		account := seed.User2ID
+		cs, err := st.CreateChatSession(ctx, domain.ChatSession{AccountID: account, Title: "评测"})
+		if err != nil {
+			return rep, err
+		}
+		var last *capture
+		for j, msg := range append(append([]string{}, c.History...), c.Query) {
+			if last, err = runOnce(ctx, st, runner, account, cs.SessionID, fmt.Sprintf("agent-%d-%d", i, j), msg); err != nil {
+				return rep, fmt.Errorf("%s: %w", c.ID, err)
+			}
+		}
+		text := last.text.String()
+		blocksJSON, _ := json.Marshal(last.blocks)
+		var problems []string
+		types := map[string]bool{}
+		var products []string
+		for _, b := range last.blocks {
+			t, _ := b["type"].(string)
+			types[t] = true
+			if t == agent.BlockProductList || t == agent.BlockComparison {
+				products = append(products, productIDRe.FindAllString(string(mustJSON(b)), -1)...)
+			}
+		}
+		var intent string
+		tools := map[string]bool{}
+		trace := map[string]bool{}
+		var traceText strings.Builder
+		for _, tr := range last.traces {
+			trace[tr.stage+"/"+tr.typ+"/"+tr.status] = true
+			if tr.stage == "tool" {
+				tools[tr.typ] = true
+			}
+			if tr.stage == "planner" && tr.typ == "rule" {
+				intent, _ = tr.meta["intent"].(string)
+			}
+			traceText.Write(mustJSON(tr.meta))
+		}
+		if c.ExpectIntent != "" {
+			intentCases++
+			if intent == c.ExpectIntent {
+				intentOK++
+			} else {
+				problems = append(problems, "意图应为 "+c.ExpectIntent)
+			}
+		}
+		for _, t := range c.ExpectBlocks {
+			if !types[t] {
+				problems = append(problems, "应有 "+t+" 块")
+			}
+		}
+		for _, id := range c.ExpectProducts {
+			if !slices.Contains(products, id) {
+				problems = append(problems, id+" 应出现在商品卡里")
+			}
+		}
+		if c.ExpectNoProducts {
+			noneCases++
+			if len(products) == 0 && !productIDRe.MatchString(text) {
+				noneOK++
+			} else {
+				problems = append(problems, "不应给出商品")
+			}
+		}
+		if len(c.ExpectTextAny) > 0 && !slices.ContainsFunc(c.ExpectTextAny, func(w string) bool { return strings.Contains(text, w) }) {
+			problems = append(problems, "回答应包含其中之一："+strings.Join(c.ExpectTextAny, " / "))
+		}
+		for _, w := range c.ForbiddenText {
+			if strings.Contains(text, w) {
+				problems = append(problems, "回答不应包含“"+w+"”")
+			}
+		}
+		for _, tool := range c.ExpectTools {
+			if !tools[tool] {
+				problems = append(problems, "应调用工具 "+tool)
+			}
+		}
+		for _, want := range c.ExpectTrace {
+			if !trace[want] {
+				problems = append(problems, "轨迹应有 "+want)
+			}
+		}
+		if len(c.NoLeak) > 0 {
+			leakCases++
+			leaked := false
+			for _, raw := range c.NoLeak {
+				if strings.Contains(text, raw) || strings.Contains(string(blocksJSON), raw) || strings.Contains(traceText.String(), raw) {
+					problems = append(problems, "原文“"+raw+"”出现在回答、块或轨迹里")
+					leaked = true
+				}
+			}
+			if !leaked {
+				leakOK++
+			}
+		}
+		if len(c.ExpectCart) > 0 {
+			cart, err := sh.Cart(ctx, account)
+			if err != nil {
+				return rep, fmt.Errorf("%s: cart: %w", c.ID, err)
+			}
+			raw := string(mustJSON(cart))
+			for _, id := range c.ExpectCart {
+				if !strings.Contains(raw, `"`+id+`"`) {
+					problems = append(problems, id+" 应已加入购物车")
+				}
+			}
+		}
+		got := []string{"intent=" + intent}
+		for t := range types {
+			got = append(got, "block="+t)
+		}
+		slices.Sort(got[1:])
+		if len(products) > 0 {
+			got = append(got, "products="+strings.Join(slices.Compact(slices.Sorted(slices.Values(products))), ","))
+		}
+		got = append(got, "text="+truncateRunes(text, 60))
+		rep.record(c.Group, Failure{ID: c.ID, Query: c.Query, Problems: problems, Got: got})
+	}
+	ratio := func(a, b int) float64 {
+		if b == 0 {
+			return 1
+		}
+		return round(float64(a) / float64(b))
+	}
+	rep.Metrics["intent_accuracy"] = ratio(intentOK, intentCases)
+	rep.Metrics["no_product_accuracy"] = ratio(noneOK, noneCases)
+	rep.Metrics["redaction_accuracy"] = ratio(leakOK, leakCases)
+	rep.finish(start, o.MinPass)
+	return rep, nil
+}
+
+func mustJSON(v any) []byte {
+	b, _ := json.Marshal(v)
+	return b
+}
+
+func truncateRunes(s string, n int) string {
+	r := []rune(strings.ReplaceAll(s, "\n", " "))
+	if len(r) <= n {
+		return string(r)
+	}
+	return string(r[:n]) + "…"
+}

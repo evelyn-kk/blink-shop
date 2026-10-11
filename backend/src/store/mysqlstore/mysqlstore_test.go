@@ -56,7 +56,7 @@ func TestMigrateEmptyThenAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(applied, []string{"0001_init.sql", "0002_promotion_discount_rate_check.sql",
-		"0003_knowledge_document_product.sql", "0004_backfill_knowledge_document_product.sql", "0005_admin_audit_logs.sql", "0006_agent_write_order.sql", "0007_prompt_publish_actions.sql"}) {
+		"0003_knowledge_document_product.sql", "0004_backfill_knowledge_document_product.sql", "0005_admin_audit_logs.sql", "0006_agent_write_order.sql", "0007_prompt_publish_actions.sql", "0008_agent_runs_admin_index.sql"}) {
 		t.Fatalf("first run applied %v", applied)
 	}
 	applied, err = s.Migrate(ctx, migrations.FS)
@@ -64,7 +64,7 @@ func TestMigrateEmptyThenAgain(t *testing.T) {
 		t.Fatalf("second run applied %v, err %v; want nothing", applied, err)
 	}
 	var count int
-	if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil || count != 7 {
+	if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil || count != 8 {
 		t.Fatalf("schema_migrations rows = %d, %v", count, err)
 	}
 }
@@ -413,7 +413,7 @@ func TestMigrateUpgradeFrom0001(t *testing.T) {
 	}
 	applied, err := s.Migrate(ctx, migrations.FS)
 	want := []string{"0002_promotion_discount_rate_check.sql", "0003_knowledge_document_product.sql", "0004_backfill_knowledge_document_product.sql",
-		"0005_admin_audit_logs.sql", "0006_agent_write_order.sql", "0007_prompt_publish_actions.sql"}
+		"0005_admin_audit_logs.sql", "0006_agent_write_order.sql", "0007_prompt_publish_actions.sql", "0008_agent_runs_admin_index.sql"}
 	if err != nil || !reflect.DeepEqual(applied, want) {
 		t.Fatalf("upgrade applied %v, %v", applied, err)
 	}

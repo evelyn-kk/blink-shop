@@ -1195,3 +1195,65 @@ td {
 .form textarea.prompt-editor {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+/* ---------- 调试观测与质量评测 ---------- */
+
+.timeline {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+  counter-reset: step;
+}
+
+.timeline-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  counter-increment: step;
+}
+
+.timeline-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.timeline-head::before {
+  content: counter(step);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 1.5em;
+}
+
+.tone-border-ok {
+  border-left-color: var(--ok);
+}
+
+.tone-border-bad {
+  border-left-color: var(--bad);
+}
+
+.tone-border-warn {
+  border-left-color: var(--warn);
+}
+
+.stat-card.stat-bad,
+.eval-failed {
+  border-color: var(--bad);
+  background: var(--bad-bg);
+}
+
+.eval-failed .muted {
+  color: var(--bad);
+}
+
+.code-inline {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}

@@ -302,3 +302,47 @@ func (s *Store) FailInterruptedRuns(ctx context.Context, errorCode string, creat
 	}
 	return n, nil
 }
+
+func (s *Store) adminRun(r domain.AgentRun) store.AdminRun {
+	out := store.AdminRun{Run: deepCopy(r)}
+	if a, ok := s.data.accounts[r.AccountID]; ok {
+		out.Username = a.Username
+	}
+	if m, ok := s.data.messages[r.MessageID]; ok {
+		out.Query, out.Attachments = m.Content, len(m.Attachments)
+	}
+	return out
+}
+
+func (s *Store) ListRunsForAdmin(ctx context.Context, q store.RunQuery) ([]store.AdminRun, int, error) {
+	defer s.lock(ctx)()
+	var all []domain.AgentRun
+	for _, r := range s.data.runs {
+		if (q.Status == "" || r.Status == q.Status) && (q.AccountID == "" || r.AccountID == q.AccountID) {
+			all = append(all, r)
+		}
+	}
+	// 同一毫秒创建的按用户消息的写入顺序（与 MySQL 的 user_messages.seq 一致）
+	sort.Slice(all, func(i, j int) bool {
+		if !all[i].CreatedAt.Equal(all[j].CreatedAt) {
+			return all[i].CreatedAt.After(all[j].CreatedAt)
+		}
+		return s.data.messageSeq[all[i].MessageID] > s.data.messageSeq[all[j].MessageID]
+	})
+	out := []store.AdminRun{}
+	for i := q.Page.Offset(); i < len(all) && len(out) < q.Page.PageSize; i++ {
+		a := s.adminRun(all[i])
+		a.Run.Content, a.Run.Blocks, a.Run.Followups = "", nil, nil
+		out = append(out, a)
+	}
+	return out, len(all), nil
+}
+
+func (s *Store) GetRunForAdmin(ctx context.Context, runID string) (store.AdminRun, error) {
+	defer s.lock(ctx)()
+	r, ok := s.data.runs[runID]
+	if !ok {
+		return store.AdminRun{}, store.ErrNotFound
+	}
+	return s.adminRun(r), nil
+}

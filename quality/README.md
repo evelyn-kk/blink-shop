@@ -14,6 +14,20 @@
   ```
 
   已有本地库若是旧版种子（图片指向外网占位图），用新库：`MYSQL_DSN=.../blink_shop_e2e?parseTime=true`。
-- `data/eval/`：评测 JSONL 数据集：`rag.jsonl`（知识检索 38 条）、`product_search.jsonl`（商品搜索 28 条，含预算、品牌、排除、冲突、无结果和多轮追问）、`image_search.jsonl`（图片搜索 231 条，商品图变换 + 不可售商品 + 无关图片）。
-- 评测 runner 在后端：`cd backend && go run ./cmd/eval`（`-suite rag|products|images|all`，`-vector off|hash|env`，`-image-index memory|milvus`），报告写到 `reports/eval-<时间>/`（JSON + Markdown），用法和指标见 `backend/README.md`“离线评测”。
+- `data/eval/`：评测 JSONL 数据集：`intent.jsonl`（意图 66 条，含 16 条留出集）、`rag.jsonl`（知识检索 38 条）、`product_search.jsonl`（商品搜索 28 条，含预算、品牌、排除、冲突、无结果和多轮追问）、`image_search.jsonl`（图片搜索 231 条，商品图变换 + 不可售商品 + 无关图片）、`agent.jsonl`（端到端导购 26 条）。每个文件第一行注释说明字段。
+- `schemas/eval-report.schema.json`：评测报告格式（门槛结论、分组、逐条结果、失败样本），管理端质量评测页按它读取。
+- 评测 runner 在后端：`cd backend && go run ./cmd/eval`（`-suite intent|rag|products|images|agent|all`，`-vector off|hash|env`，`-image-index memory|milvus`），报告写到 `reports/eval-<时间>/`（JSON + Markdown），用法和指标见 `backend/README.md`“离线评测”。
+
+### 评测运行手册
+
+1. **改了规划、检索、重排或导购回答后**：`cd backend && go test ./src/eval`（CI 同样跑），再 `go run ./cmd/eval -version=$(git rev-parse --short HEAD)` 生成报告。
+2. **看结果**：命令行每套一行（`passed` / `failed`、通过率、门槛、指标）；任一套未过门槛退出码 1。详细结果在 `reports/eval-<时间>/report-<suite>.md`，
+   或在 Web 管理端“质量评测”页（读取 `EVAL_REPORT_DIR`，默认就是这里）：未过门槛的套件和报告标红，详情默认只列失败用例，带原因和实际输出。
+3. **失败了怎么办**：
+   - 先在“质量评测 → 单条试跑”或 `POST /eval/intent|rag|products` 复现那一句，看规划、召回和重排明细；端到端用例到“调试观测”看同类运行的时间线。
+   - 是代码退化就修代码；是标注本身有歧义，改数据集要在提交说明里写清理由。
+   - **不要为了让留出集（`held_out`）通过去改规则**——留出集用来衡量泛化，针对它调规则就失去意义；要扩大覆盖就把新说法加进开发集，再补新的留出用例。
+4. **加用例**：按文件第一行注释的字段写一行 JSON，`id` 不重复；端到端用例每条都在全新演示数据上跑，可以用 `history` 写多轮。
+5. **改门槛**：在 `backend/src/eval`（`DefaultIntentMinPass` 等）和 `cmd/eval` 参数里改，报告会记下当时的门槛。
+6. **真实向量 / 模型**：`-vector=env`、`-image-embedder=env` 用临时集合，跑完删除，不碰正式集合；需要的环境变量见后端 README。
 - `tools/`：数据整理脚本（后续节点补充）。

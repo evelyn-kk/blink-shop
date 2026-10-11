@@ -45,6 +45,9 @@ type Options struct {
 	ProductIndex rag.ProductIndex
 	// ImageSearch 是图片找商品；nil 表示图搜不可用（接口返回 503，导购如实说明）。商品图随商品变更异步重建。
 	ImageSearch *imagesearch.Service
+	// EvalDataDir / EvalReportDir 是评测数据集（*.jsonl）和 cmd/eval 报告的目录；为空表示没有配置，管理端评测页只显示空列表。
+	EvalDataDir   string
+	EvalReportDir string
 	// PromptTTL 是已发布 Prompt 的缓存时间（其他实例的发布最迟这么久后生效）；0 用 10 秒。
 	PromptTTL time.Duration
 	// PromptMirror 把发布后的 Prompt 推送到配置中心；nil 表示不推送。
@@ -90,6 +93,10 @@ type Server struct {
 	paymentTimeout time.Duration
 	runner         agent.Runner
 	productIndex   rag.ProductIndex
+	vectorIndex    rag.VectorIndex
+	evalTools      *agent.Registry
+	evalDataDir    string
+	evalReportDir  string
 	imageSearch    *imagesearch.Service
 	vectorSync     sync.WaitGroup
 	syncs          productSyncs
@@ -123,6 +130,9 @@ func NewServer(opts Options) *Server {
 		paymentTimeout: opts.PaymentTimeout,
 		runner:         opts.AgentRunner,
 		productIndex:   opts.ProductIndex,
+		vectorIndex:    opts.VectorIndex,
+		evalDataDir:    opts.EvalDataDir,
+		evalReportDir:  opts.EvalReportDir,
 		imageSearch:    opts.ImageSearch,
 		speech:         opts.Speech,
 		promptMirror:   opts.PromptMirror,
@@ -146,15 +156,18 @@ func NewServer(opts Options) *Server {
 		s.logger = slog.New(slog.DiscardHandler)
 	}
 	s.prompts = agent.NewPromptCache(s.store, opts.PromptTTL, s.logger)
-	if s.runner == nil {
-		words := opts.RiskWords
-		if words == nil {
-			words = func(context.Context) []string { return risk.Split(configcenter.KeyRiskBlockedWords.Default) }
-		}
-		s.runner = agent.NewRuleRunner(agent.Deps{LLM: opts.LLM, Settings: opts.AgentSettings, Store: s.store, Shop: s.shop(), ProductIndex: opts.ProductIndex,
-			ImageSearch: serverImageSearch{s}, Prompts: s.prompts, Retriever: rag.NewRetriever(s.store, opts.VectorIndex, s.logger), Risk: risk.WordList{Words: words}, Logger: s.logger,
-			Now: func() time.Time { return s.now() }})
+	words := opts.RiskWords
+	if words == nil {
+		words = func(context.Context) []string { return risk.Split(configcenter.KeyRiskBlockedWords.Default) }
 	}
+	deps := agent.Deps{LLM: opts.LLM, Settings: opts.AgentSettings, Store: s.store, Shop: s.shop(), ProductIndex: opts.ProductIndex,
+		ImageSearch: serverImageSearch{s}, Prompts: s.prompts, Retriever: rag.NewRetriever(s.store, opts.VectorIndex, s.logger), Risk: risk.WordList{Words: words}, Logger: s.logger,
+		Now: func() time.Time { return s.now() }}
+	if s.runner == nil {
+		s.runner = agent.NewRuleRunner(deps)
+	}
+	// 评测接口用与导购相同的工具（同样的参数校验、召回和重排），只调只读工具
+	s.evalTools = agent.NewRegistry(deps)
 	if s.runTimeout <= 0 {
 		s.runTimeout = DefaultAgentRunTimeout
 	}
@@ -286,6 +299,15 @@ func (s *Server) routes() {
 	s.handle("PATCH /api/v1/admin/prompts/{key}", accessAdmin, s.handleSavePromptDraft)
 	s.handle("POST /api/v1/admin/prompts/{key}/publish", accessAdmin, s.handlePublishPrompt)
 	s.handle("POST /api/v1/admin/prompts/{key}/rollback", accessAdmin, s.handleRollbackPrompt)
+	s.handle("GET /api/v1/admin/agent/runs", accessAdmin, s.handleListAdminRuns)
+	s.handle("GET /api/v1/admin/agent/runs/{id}", accessAdmin, s.handleGetAdminRun)
+	s.handle("GET /api/v1/admin/vector/status", accessAdmin, s.handleVectorStatus)
+	s.handle("GET /api/v1/admin/evals", accessAdmin, s.handleListEvals)
+	s.handle("GET /api/v1/admin/evals/reports/{run}/{suite}", accessAdmin, s.handleGetEvalReport)
+	s.handle("POST /api/v1/eval/intent", accessAdmin, s.handleEvalIntent)
+	s.handle("POST /api/v1/eval/rag", accessAdmin, s.handleEvalRAG)
+	s.handle("POST /api/v1/eval/products", accessAdmin, s.handleEvalProducts)
+	s.handle("POST /api/v1/eval/image-search", accessAdmin, s.handleEvalImageSearch)
 	s.handle("GET /api/v1/admin/risk/overview", accessAdmin, s.handleRiskOverview)
 	s.handle("GET /api/v1/admin/audit-logs", accessAdmin, s.handleListAuditLogs)
 

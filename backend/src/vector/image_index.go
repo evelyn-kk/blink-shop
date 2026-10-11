@@ -87,3 +87,8 @@ func (x *ImageIndex) Search(ctx context.Context, vec []float32, k int) ([]images
 	}
 	return out, nil
 }
+
+// Status 返回商品图集合的状态（只读）。
+func (x *ImageIndex) Status(ctx context.Context) CollectionStatus {
+	return x.m.Status(ctx, x.collection)
+}

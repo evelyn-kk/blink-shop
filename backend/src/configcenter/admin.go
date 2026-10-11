@@ -184,6 +184,8 @@ var settings = []Setting{
 	{Key: KeyTTSCluster, Description: "豆包合成集群"},
 	{Key: KeyTTSMaxRunes, Description: "单次朗读最多字数，1–2000"},
 	{Key: KeyAvatarUploadDir, Description: "头像文件目录"},
+	{Key: KeyEvalDataDir, Description: "评测数据集（*.jsonl）目录，管理端质量评测页读取；目录不存在时列表为空"},
+	{Key: KeyEvalReportDir, Description: "cmd/eval 报告目录，管理端质量评测页读取；目录不存在时列表为空"},
 	{Key: KeyMinIOEndpoint, Description: "对象存储地址"},
 	{Key: KeyMinIOBucket, Description: "对象存储桶名"},
 	{Key: KeyMinIOUseSSL, Description: "对象存储使用 HTTPS"},

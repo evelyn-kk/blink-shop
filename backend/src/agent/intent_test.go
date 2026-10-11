@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/domain"
@@ -151,4 +152,24 @@ func joinTerms(terms []string) string {
 		out += t
 	}
 	return out
+}
+
+// 用户顺带说的联系方式不进入检索词：不当检索词（“手机号”不会找手机），也不会被回答复述。
+func TestClassifyStripsPII(t *testing.T) {
+	for _, tc := range []struct{ text, query string }{
+		{"我手机号 13812345678，推荐一款降噪耳机", "降噪耳机"},
+		{"邮箱是 alice@example.com 推荐个鼠标", "鼠标"},
+		{"推荐 3000 以内的手机", "手机"},
+	} {
+		p := Classify(tc.text, false)
+		if p.Intent != IntentProductSearch || p.Query != tc.query {
+			t.Errorf("%q: %s %q, want query %q", tc.text, p.Intent, p.Query, tc.query)
+		}
+	}
+	if p := Classify("七天无理由怎么退？电话 13812345678", false); p.Intent != IntentKnowledge || strings.Contains(p.Query, "138") {
+		t.Errorf("knowledge query keeps PII: %+v", p)
+	}
+	if got := StripPII("订单 BS202609201000100 到哪了"); got != "订单 BS202609201000100 到哪了" {
+		t.Errorf("order number stripped: %q", got)
+	}
 }

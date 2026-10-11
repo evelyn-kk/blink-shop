@@ -513,3 +513,142 @@ export interface AuditLog {
   request_id: string;
   created_at: string;
 }
+
+// ---------- 调试观测与质量评测 ----------
+
+export type RunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export interface AdminRun {
+  run_id: string;
+  session_id: string;
+  account_id: string;
+  username: string;
+  trace_id: string;
+  status: RunStatus;
+  /** 用户提问（脱敏，列表里最多 80 字）。 */
+  query: string;
+  attachments: number;
+  prompt_versions: Record<string, number>;
+  error_code: string;
+  /** 已结束的运行的耗时；未结束为 null。 */
+  elapsed_ms: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TraceEvent {
+  trace_event_id: string;
+  stage: string;
+  event_type: string;
+  model: string;
+  status: string;
+  duration_ms: number;
+  error: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AdminRunDetail extends AdminRun {
+  content: string;
+  blocks: Record<string, unknown>[];
+  followups: string[];
+  summary: {
+    event_count: number;
+    failed_count: number;
+    events_ms: number;
+    models: string[];
+    tools: string[];
+    chunk_ids: string[];
+    product_ids: string[];
+  };
+  items: TraceEvent[];
+}
+
+export interface VectorCollectionStatus {
+  name: string;
+  exists: boolean;
+  dimension: number;
+  row_count: number;
+  load_state: string;
+  error: string;
+}
+
+export interface VectorIndexStatus {
+  enabled: boolean;
+  backend: 'milvus' | 'memory' | '';
+  embedder: string;
+  collection: VectorCollectionStatus | null;
+  indexed_products?: number;
+}
+
+export interface VectorStatus {
+  knowledge: VectorIndexStatus;
+  products: VectorIndexStatus;
+  images: VectorIndexStatus;
+  sync: { running: number; succeeded: number; failed: number; last_at: string | null; last_error_at: string | null };
+  checked_at: string;
+}
+
+export type EvalSuiteID = 'intent' | 'rag' | 'products' | 'images' | 'agent';
+
+export interface EvalReportSummary {
+  id: string;
+  suite: EvalSuiteID;
+  version: string;
+  config_fingerprint: string;
+  started_at: string;
+  total: number;
+  passed: number;
+  pass_rate: number;
+  min_pass_rate: number;
+  gate: 'passed' | 'failed';
+  failure_count: number;
+}
+
+export interface EvalOverview {
+  configured: boolean;
+  suites: {
+    id: EvalSuiteID;
+    name: string;
+    dataset: string;
+    min_pass_rate: number;
+    command: string;
+    try_path: string;
+    case_count: number;
+    latest: EvalReportSummary | null;
+  }[];
+  datasets: { id: string; suite: string; description: string; case_count: number; updated_at: string }[];
+  reports: EvalReportSummary[];
+  reports_total: number;
+  skipped: number;
+}
+
+export interface EvalFailure {
+  id: string;
+  group: string;
+  query: string;
+  problems: string[];
+  got: string[];
+}
+
+export interface EvalReport extends EvalReportSummary {
+  schema_version: string;
+  config: Record<string, string>;
+  duration_ms: number;
+  metrics: Record<string, number>;
+  groups: Record<string, { total: number; passed: number; pass_rate: number }>;
+  cases: { id: string; group: string; passed: boolean }[];
+  failures: EvalFailure[];
+}
+
+export interface EvalToolResult {
+  query: string;
+  tool: string;
+  ok: boolean;
+  code?: string;
+  message?: string;
+  data: unknown;
+  recall?: unknown;
+  rerank?: unknown;
+  duration_ms: number;
+}

@@ -267,3 +267,34 @@ func TestMilvusImageIndex(t *testing.T) {
 		t.Fatalf("image search: %+v %v", res, err)
 	}
 }
+
+// TestMilvusStatus：集合不存在时 exists=false 且不会被创建；存在时有维度、行数和加载状态；Milvus 不可达时只给出错误类别。
+func TestMilvusStatus(t *testing.T) {
+	ctx := context.Background()
+	m := NewMilvus(milvusAddr(t), "", 10*time.Second)
+	name := tempCollection(t, m, "status")
+	if st := m.Status(ctx, name); st.Exists || st.Error != "" {
+		t.Fatalf("missing collection: %+v", st)
+	}
+	if st := m.Status(ctx, name); st.Exists {
+		t.Fatal("status must not create the collection")
+	}
+	idx := NewProductIndex(m, HashEmbedder{D: 32}, name)
+	if err := idx.UpsertProducts(ctx, []rag.IndexedProduct{{ProductID: "p1", Text: "降噪耳机"}, {ProductID: "p2", Text: "无线鼠标"}}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		st, embedder := idx.Status(ctx)
+		if st.Exists && st.Dimension == 32 && st.RowCount == 2 && st.LoadState != "" && st.Error == "" && embedder == "hash:32" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("status: %+v %s", st, embedder)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if st := NewMilvus("127.0.0.1:1", "", 300*time.Millisecond).Status(ctx, name); st.Error != "unreachable" || strings.Contains(st.Error, "127.0.0.1") {
+		t.Fatalf("unreachable: %+v", st)
+	}
+}

@@ -28,6 +28,7 @@ func agentCases() []struct {
 		{"ChatMessagesInWriteOrder", testChatMessageOrder},
 		{"TraceEventsInWriteOrder", testTraceEvents},
 		{"FailInterruptedRuns", testFailInterruptedRuns},
+		{"AdminRunListAndDetail", testAdminRuns},
 	}
 }
 
@@ -353,5 +354,64 @@ func testFailInterruptedRuns(t *testing.T, s store.Store) {
 	}
 	if n, _ := s.FailInterruptedRuns(ctx, "interrupted", startedAt); n != 0 {
 		t.Fatalf("second sweep %d", n)
+	}
+}
+
+// 管理端运行列表：不限账号、按创建时间倒序、按状态 / 账号筛选、分页；列表不带回答正文，详情带用户提问、附件数和完整结果。
+func testAdminRuns(t *testing.T, s store.Store) {
+	ctx := context.Background()
+	u1, err := s.CreateAccount(ctx, newUser("runs_alice"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u2, err := s.CreateAccount(ctx, newUser("runs_bob"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := newSession(t, s, u1.AccountID, "A")
+	b := newSession(t, s, u2.AccountID, "B")
+	first := send(t, s, u1.AccountID, a.SessionID, "c1", "推荐一款降噪耳机") // 不 sleep：同一毫秒内也要按写入顺序
+	if _, err := s.StartAgentRun(ctx, domain.UserMessage{AccountID: u2.AccountID, SessionID: b.SessionID, ClientMessageID: "c2", Content: "看看这张图",
+		Attachments: []domain.Attachment{{FileID: "file_1", MimeType: "image/png"}}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	third := send(t, s, u1.AccountID, a.SessionID, "c3", "那 3000 以内的呢")
+	if _, err := s.UpdateAgentRun(ctx, u1.AccountID, first.Run.RunID, func(r *domain.AgentRun) error {
+		r.Status, r.Content = domain.RunCompleted, "推荐 Nova 耳机"
+		r.Blocks = []map[string]any{{"type": "product_cards"}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	all, total, err := s.ListRunsForAdmin(ctx, store.RunQuery{Page: store.Page{Page: 1, PageSize: 2}})
+	if err != nil || total != 3 || len(all) != 2 || all[0].Run.RunID != third.Run.RunID {
+		t.Fatalf("list: total=%d len=%d err=%v", total, len(all), err)
+	}
+	if all[0].Query != "那 3000 以内的呢" || all[0].Username != "runs_alice" || all[1].Username != "runs_bob" || all[1].Attachments != 1 {
+		t.Fatalf("list rows: %+v", all)
+	}
+	page2, _, err := s.ListRunsForAdmin(ctx, store.RunQuery{Page: store.Page{Page: 2, PageSize: 2}})
+	if err != nil || len(page2) != 1 || page2[0].Run.RunID != first.Run.RunID {
+		t.Fatalf("page 2: %+v %v", page2, err)
+	}
+	if page2[0].Run.Content != "" || len(page2[0].Run.Blocks) != 0 || page2[0].Run.Status != domain.RunCompleted {
+		t.Fatalf("list should not carry content/blocks: %+v", page2[0].Run)
+	}
+	done, total, err := s.ListRunsForAdmin(ctx, store.RunQuery{Status: domain.RunCompleted, Page: store.Page{Page: 1, PageSize: 10}})
+	if err != nil || total != 1 || done[0].Run.RunID != first.Run.RunID {
+		t.Fatalf("status filter: %d %+v %v", total, done, err)
+	}
+	mine, total, err := s.ListRunsForAdmin(ctx, store.RunQuery{AccountID: u2.AccountID, Page: store.Page{Page: 1, PageSize: 10}})
+	if err != nil || total != 1 || mine[0].Run.AccountID != u2.AccountID {
+		t.Fatalf("account filter: %d %+v %v", total, mine, err)
+	}
+
+	d, err := s.GetRunForAdmin(ctx, first.Run.RunID)
+	if err != nil || d.Run.Content != "推荐 Nova 耳机" || len(d.Run.Blocks) != 1 || d.Query != "推荐一款降噪耳机" || d.Username != "runs_alice" {
+		t.Fatalf("detail: %+v %v", d, err)
+	}
+	if _, err := s.GetRunForAdmin(ctx, "run_missing"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing run: %v", err)
 	}
 }

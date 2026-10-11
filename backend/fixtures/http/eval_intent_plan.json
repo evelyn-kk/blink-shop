@@ -1,0 +1,24 @@
+{
+  "description": "单条试跑意图：返回规则规划的意图、槽位（价格上限）和命中的规则；提问脱敏后回显",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/eval/intent",
+    "as": "blink_admin",
+    "body": {
+      "query": "3000 以内拍照好的手机"
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "query": "3000 以内拍照好的手机",
+      "plan": {
+        "intent": "product_search",
+        "query": "拍照 手机",
+        "budget": "3000.00",
+        "rule": "product_search"
+      },
+      "duration_ms": "<duration_ms>"
+    }
+  }
+}

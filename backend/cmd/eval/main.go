@@ -1,4 +1,4 @@
-// Command eval 运行知识检索（rag）、商品搜索（products）和图片搜索（images）离线评测，报告写到 -out 目录（JSON + Markdown）。
+// Command eval 运行意图（intent）、知识检索（rag）、商品搜索（products）、图片搜索（images）和端到端导购（agent）离线评测，报告写到 -out 目录（JSON + Markdown）。
 //
 //	go run ./cmd/eval                       # 纯关键词 / 规则，图片用本地特征 + 内存索引，报告写到 ../quality/reports/eval-<时间>/
 //	go run ./cmd/eval -vector=hash          # 本地演示：散列向量 + Milvus 临时集合（MILVUS_ADDR），跑完删除
@@ -36,7 +36,7 @@ func main() {
 
 func run(ctx context.Context, args []string, getenv func(string) string, out io.Writer) error {
 	fs := flag.NewFlagSet("eval", flag.ContinueOnError)
-	suite := fs.String("suite", "all", "rag / products / images / all")
+	suite := fs.String("suite", "all", "intent / rag / products / images / agent / all")
 	data := fs.String("data", "../quality/data/eval", "JSONL 用例目录")
 	corpus := fs.String("corpus", "fixtures/rag/corpus.json", "知识检索固定语料")
 	outDir := fs.String("out", "", "报告目录，默认 ../quality/reports/eval-<时间>")
@@ -45,7 +45,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	imageIndex := fs.String("image-index", "memory", "memory / milvus：图片评测用的索引")
 	imageEmbedder := fs.String("image-embedder", "local", "local / env：图片 Embedder（env 按 IMAGE_EMBEDDING_* 配置）")
 	minPass := fs.Float64("min-pass", 1, "通过率下限（图片评测用 -image-min-pass）")
-	imageMinPass := fs.Float64("image-min-pass", 0.98, "图片评测通过率下限（本地特征对外形相近的商品会混淆，不要求全对）")
+	intentMinPass := fs.Float64("intent-min-pass", eval.DefaultIntentMinPass, "意图评测通过率下限（留出集允许少量没覆盖的说法）")
+	imageMinPass := fs.Float64("image-min-pass", eval.DefaultImageMinPass, "图片评测通过率下限（本地特征对外形相近的商品会混淆，不要求全对）")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -65,15 +66,22 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 		cfg["embedder"] = name
 	}
 	var reports []eval.Report
+	if *suite == "all" || *suite == "intent" {
+		r, err := eval.RunIntent(ctx, eval.IntentOptions{Cases: filepath.Join(*data, "intent.jsonl"), Version: *version, Config: cfg, MinPass: *intentMinPass})
+		if err != nil {
+			return err
+		}
+		reports = append(reports, r)
+	}
 	if *suite == "all" || *suite == "rag" {
-		r, err := eval.RunRAG(ctx, eval.RAGOptions{Cases: filepath.Join(*data, "rag.jsonl"), Corpus: *corpus, K: 3, Vector: knowledge, Version: *version, Config: cfg})
+		r, err := eval.RunRAG(ctx, eval.RAGOptions{Cases: filepath.Join(*data, "rag.jsonl"), Corpus: *corpus, K: 3, Vector: knowledge, Version: *version, Config: cfg, MinPass: *minPass})
 		if err != nil {
 			return err
 		}
 		reports = append(reports, r)
 	}
 	if *suite == "all" || *suite == "products" {
-		r, err := eval.RunProducts(ctx, eval.ProductOptions{Cases: filepath.Join(*data, "product_search.jsonl"), ProductIndex: products, Version: *version, Config: cfg})
+		r, err := eval.RunProducts(ctx, eval.ProductOptions{Cases: filepath.Join(*data, "product_search.jsonl"), ProductIndex: products, Version: *version, Config: cfg, MinPass: *minPass})
 		if err != nil {
 			return err
 		}
@@ -85,8 +93,15 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 			return err
 		}
 		defer cleanup()
-		opts.Cases, opts.Version = filepath.Join(*data, "image_search.jsonl"), *version
+		opts.Cases, opts.Version, opts.MinPass = filepath.Join(*data, "image_search.jsonl"), *version, *imageMinPass
 		r, err := eval.RunImages(ctx, opts)
+		if err != nil {
+			return err
+		}
+		reports = append(reports, r)
+	}
+	if *suite == "all" || *suite == "agent" {
+		r, err := eval.RunAgent(ctx, eval.AgentOptions{Cases: filepath.Join(*data, "agent.jsonl"), Version: *version, Config: cfg, MinPass: *minPass})
 		if err != nil {
 			return err
 		}
@@ -100,18 +115,14 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 		if err := eval.WriteReport(*outDir, r); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%-8s %d/%d 通过（%.2f%%） 指标 %v 指纹 %s\n", r.Suite, r.Passed, r.Total, r.PassRate*100, r.Metrics, r.Fingerprint)
-		threshold := *minPass
-		if r.Suite == "images" {
-			threshold = *imageMinPass
-		}
-		if r.PassRate < threshold {
+		fmt.Fprintf(out, "%-8s %-6s %d/%d 通过（%.2f%%，门槛 %.2f%%） 指标 %v 指纹 %s\n", r.Suite, r.Gate, r.Passed, r.Total, r.PassRate*100, r.MinPassRate*100, r.Metrics, r.Fingerprint)
+		if r.Gate != eval.GatePassed {
 			low = append(low, r.Suite)
 		}
 	}
 	fmt.Fprintln(out, "报告：", *outDir)
 	if len(low) > 0 {
-		return fmt.Errorf("通过率低于下限：%v", low)
+		return fmt.Errorf("未过门槛：%v", low)
 	}
 	return nil
 }

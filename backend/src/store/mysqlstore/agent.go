@@ -411,3 +411,52 @@ func (s *Store) FailInterruptedRuns(ctx context.Context, errorCode string, creat
 	n, err := res.RowsAffected()
 	return int(n), err
 }
+
+// 管理端列表不取回答正文和结构化块（可能很大），详情再取。同一毫秒创建的按用户消息的写入顺序（user_messages.seq）排。
+const adminRunListColumns = `r.run_id, r.session_id, r.message_id, r.account_id, r.trace_id, r.status, '', NULL,
+	NULL, r.prompt_versions_json, r.error_code, r.created_at, r.updated_at`
+
+const adminRunJoins = ` FROM agent_runs r LEFT JOIN accounts a ON a.account_id = r.account_id
+	LEFT JOIN user_messages m ON m.message_id = r.message_id`
+
+func (s *Store) scanAdminRun(row interface{ Scan(...any) error }) (store.AdminRun, error) {
+	var rs runScan
+	var username, query sql.NullString
+	var attachments sql.NullInt64
+	if err := row.Scan(append(rs.dest(), &username, &query, &attachments)...); err != nil {
+		return store.AdminRun{}, mapErr(err)
+	}
+	r, err := rs.finish()
+	if err != nil {
+		return store.AdminRun{}, err
+	}
+	return store.AdminRun{Run: *r, Username: username.String, Query: query.String, Attachments: int(attachments.Int64)}, nil
+}
+
+func (s *Store) ListRunsForAdmin(ctx context.Context, q store.RunQuery) ([]store.AdminRun, int, error) {
+	where, args := filters(` WHERE 1 = 1`, nil, "r.status", string(q.Status), "r.account_id", q.AccountID)
+	var total int
+	if err := s.q(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_runs r`+where, args...).Scan(&total); err != nil {
+		return nil, 0, mapErr(err)
+	}
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+adminRunListColumns+`, a.username, m.content, JSON_LENGTH(m.attachments_json)`+adminRunJoins+where+
+		` ORDER BY r.created_at DESC, m.seq DESC LIMIT ? OFFSET ?`, append(args, q.Page.PageSize, q.Page.Offset())...)
+	if err != nil {
+		return nil, 0, mapErr(err)
+	}
+	defer rows.Close()
+	out := []store.AdminRun{}
+	for rows.Next() {
+		a, err := s.scanAdminRun(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, a)
+	}
+	return out, total, mapErr(rows.Err())
+}
+
+func (s *Store) GetRunForAdmin(ctx context.Context, runID string) (store.AdminRun, error) {
+	return s.scanAdminRun(s.q(ctx).QueryRowContext(ctx, `SELECT `+runColumns+`, a.username, m.content, JSON_LENGTH(m.attachments_json)`+adminRunJoins+
+		` WHERE r.run_id = ?`, runID))
+}

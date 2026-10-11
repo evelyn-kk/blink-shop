@@ -36,39 +36,53 @@ type searchImageResponse struct {
 // handleSearchImage 用本人上传的图片找相似的可售商品。别人的文件和不存在的文件同样返回 404。
 func (s *Server) handleSearchImage(w http.ResponseWriter, r *http.Request) {
 	acc, _ := accountFromContext(r.Context())
+	in, res, ok := s.searchImageFile(w, r, acc.AccountID)
+	if !ok {
+		return
+	}
+	out := toSearchImageResponse(res)
+	s.logger.InfoContext(r.Context(), "image search", "request_id", requestIDFromContext(r.Context()), "account_id", acc.AccountID,
+		"file_id", in.FileID, "status", res.Status, "items", len(res.Items), "candidates", res.Candidates, "dropped", res.Dropped, "embedder", res.Embedder)
+	writeJSON(w, http.StatusOK, out)
+}
+
+// searchImageFile 读取请求（file_id、top_k）并用 accountID 本人上传的图片搜索；出错时已写好错误响应，ok=false。
+func (s *Server) searchImageFile(w http.ResponseWriter, r *http.Request, accountID string) (searchImageRequest, imagesearch.Result, bool) {
 	var in searchImageRequest
 	if err := decodeJSON(r, &in); err != nil {
 		writeError(w, err)
-		return
+		return in, imagesearch.Result{}, false
 	}
 	if !fileIDPattern.MatchString(in.FileID) {
 		writeError(w, fieldError("file_id", "请先上传图片，再用返回的 file_id 搜索"))
-		return
+		return in, imagesearch.Result{}, false
 	}
 	k := imagesearch.DefaultTopK
 	if in.TopK != nil {
 		if *in.TopK < 1 || *in.TopK > imagesearch.MaxTopK {
 			writeError(w, fieldError("top_k", "top_k 取 1–20"))
-			return
+			return in, imagesearch.Result{}, false
 		}
 		k = *in.TopK
 	}
 	if s.imageSearch == nil {
 		writeError(w, ErrImageSearchDown)
-		return
+		return in, imagesearch.Result{}, false
 	}
-	res, err := s.imageSearch.SearchFile(r.Context(), acc.AccountID, in.FileID, k)
+	res, err := s.imageSearch.SearchFile(r.Context(), accountID, in.FileID, k)
 	if err != nil {
 		writeError(w, s.imageSearchError(r, err))
-		return
+		return in, imagesearch.Result{}, false
 	}
+	return in, res, true
+}
+
+func toSearchImageResponse(res imagesearch.Result) searchImageResponse {
 	out := searchImageResponse{Status: res.Status, Embedder: res.Embedder, Items: make([]imageMatchView, 0, len(res.Items))}
 	for _, m := range res.Items {
 		out.Items = append(out.Items, imageMatchView{Product: toProductCard(m.Product), Score: round4(m.Score), Level: m.Level, MatchedImageURL: m.ImageURL})
 	}
-	s.logger.InfoContext(r.Context(), "image search", "request_id", requestIDFromContext(r.Context()), "account_id", acc.AccountID,
-		"file_id", in.FileID, "status", res.Status, "items", len(res.Items), "candidates", res.Candidates, "dropped", res.Dropped, "embedder", res.Embedder)
-	writeJSON(w, http.StatusOK, out)
+	return out
 }
 
 func (s *Server) imageSearchError(r *http.Request, err error) error {

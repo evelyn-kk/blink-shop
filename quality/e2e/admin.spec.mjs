@@ -31,6 +31,9 @@ test('账号风控：原因必填 → 该账号立即只读 → 操作记录可�
     await page.getByLabel('按账号或名称查找').fill(keyword);
     await page.getByRole('button', { name: '查找' }).click();
     await expect(page).toHaveURL(new RegExp(`keyword=${keyword}`));
+    // 地址变了不代表页面已按新地址渲染（目标行可能本来就在未筛选的列表里）：等状态筛选链接带上新关键字，
+    // 它和查找框的重建在同一次渲染里，之后再操作查找框不会被重建覆盖。
+    await expect(page.getByRole('navigation', { name: '按状态筛选' }).getByRole('link', { name: '全部' })).toHaveAttribute('href', new RegExp(`keyword=${keyword}`));
     await expect(page.getByRole('row').filter({ hasText: keyword })).toHaveCount(1);
   };
   await search(username);
@@ -137,7 +140,7 @@ test('商家和普通用户打不开管理页面，也调不了管理接口', as
   for (const username of ['blink_merchant', 'blink_user']) {
     const session = await apiLogin(request, username);
     await signedIn(page, session);
-    for (const path of ['/#/admin/platform', '/#/admin/risk', '/#/admin/configs', '/#/admin/prompts', '/#/admin/audit']) {
+    for (const path of ['/#/admin/platform', '/#/admin/risk', '/#/admin/configs', '/#/admin/prompts', '/#/admin/debug', '/#/admin/evals', '/#/admin/audit']) {
       await page.goto(path);
       await page.reload();
       await expect(page.getByText('当前账号不是管理员，无权访问平台管理')).toBeVisible();
@@ -192,4 +195,48 @@ test('Prompt：保存草稿 → 发布（立即生效，有发布记录）→ �
       await request.post(`/api/v1/admin/prompts/${key}/rollback`, { headers: auth, data: { version: 0, expected_active_version: d.active_version, reason: 'E2E 清理' } });
     }
   }
+});
+
+test('调试观测：用户的一次导购（含手机号）在运行列表里脱敏显示，点开看时间线和汇总', async ({ page, request }, testInfo) => {
+  const user = await apiLogin(request, 'blink_user');
+  const headers = { Authorization: `Bearer ${user.token}` };
+  const session = await (await request.post('/api/v1/agent/sessions', { headers, data: {} })).json();
+  const marker = `E2E${testInfo.project.name}${String(Date.now()).slice(-6)}`;
+  const res = await request.post(`/api/v1/agent/sessions/${session.session_id}/messages:stream`, {
+    headers: { ...headers, Accept: 'text/event-stream' },
+    data: { client_message_id: marker, content: `耳机保修多久 ${marker}，电话 13812345678` },
+  });
+  expect(res.status()).toBe(200);
+  const runID = JSON.parse((await res.text()).split('\n').find((l) => l.startsWith('data: ')).slice(6)).run_id;
+
+  const admin = await apiLogin(request, 'blink_admin');
+  await signedIn(page, admin);
+  await page.goto(`/#/admin/debug?account_id=${user.account.account_id}`);
+  await expect(page.getByRole('heading', { name: '调试观测' })).toBeVisible();
+  const row = page.locator('tr').filter({ hasText: marker });
+  await expect(row).toContainText('[手机号]');
+  await expect(row).not.toContainText('13812345678');
+  await row.getByRole('link', { name: `查看运行 ${runID}` }).click();
+  const detail = page.locator('section').filter({ has: page.getByRole('heading', { name: `运行 ${runID}` }) });
+  await expect(detail.locator('.stat-card').filter({ hasText: '工具' })).toContainText('search_knowledge');
+  await expect(detail.locator('.timeline-item').first()).toContainText('run · start');
+  await expect(detail.locator('.timeline-item').filter({ hasText: 'retrieval · knowledge' })).toBeVisible();
+  expect(await page.locator('main').innerText()).not.toContain('13812345678');
+  await page.screenshot({ path: shots(testInfo, 'debug'), fullPage: true });
+});
+
+test('质量评测：套件、向量状态可见，单条试跑意图返回规则规划', async ({ page, request }, testInfo) => {
+  await signedIn(page, await apiLogin(request, 'blink_admin'));
+  await page.goto('/#/admin/evals');
+  await expect(page.getByRole('heading', { name: '质量评测' })).toBeVisible();
+  await expect(page.getByRole('table', { name: '向量索引状态' })).toBeVisible();
+  const panel = page.locator('section').filter({ has: page.getByRole('heading', { name: '单条试跑' }) });
+  await panel.getByLabel('输入').fill('把第一个加入购物车');
+  await panel.getByRole('button', { name: '试跑' }).click();
+  await expect(panel.getByLabel('试跑结果')).toContainText('"rule": "cart_add"');
+  await panel.getByLabel('类型').selectOption('products');
+  await panel.getByLabel('输入').fill('降噪耳机');
+  await panel.getByRole('button', { name: '试跑' }).click();
+  await expect(panel.getByLabel('试跑结果')).toContainText('p_seed_earbuds');
+  await page.screenshot({ path: shots(testInfo, 'evals'), fullPage: true });
 });

@@ -655,6 +655,10 @@ type Store interface {
 	// FailInterruptedRuns 把 createdBefore 之前创建、仍是 queued/running 的运行改为 failed（errorCode），返回改了几条。
 	// 服务启动时以进程启动时间调用：上一个进程里没跑完的运行不会再有人写结果；本进程已经开始的运行不受影响。
 	FailInterruptedRuns(ctx context.Context, errorCode string, createdBefore time.Time) (int, error)
+	// ListRunsForAdmin 是管理端的运行列表（不限账号）：按创建时间倒序，可按状态、账号筛选；不带回答正文和结构化块。
+	ListRunsForAdmin(ctx context.Context, q RunQuery) ([]AdminRun, int, error)
+	// GetRunForAdmin 按 ID 读一次运行（不限账号），带用户提问和完整结果；不存在返回 ErrNotFound。
+	GetRunForAdmin(ctx context.Context, runID string) (AdminRun, error)
 
 	// ApplySeed 在一个事务内写入开发种子：按主键“不存在才插入”，可重复执行；违反其他唯一键时整体回滚并返回 ErrConflict。
 	ApplySeed(ctx context.Context, data SeedData) (SeedResult, error)
@@ -671,6 +675,21 @@ type ChatSessionQuery struct {
 type ChatTurn struct {
 	Message domain.UserMessage
 	Run     *domain.AgentRun
+}
+
+// RunQuery 是管理端运行列表的筛选条件；空字段表示不限。
+type RunQuery struct {
+	Status    domain.RunStatus
+	AccountID string
+	Page      Page
+}
+
+// AdminRun 是管理端看到的一次运行：运行本身、发起账号的用户名、用户提问和附件数。
+type AdminRun struct {
+	Run         domain.AgentRun
+	Username    string
+	Query       string
+	Attachments int
 }
 
 // StartedRun 是 StartAgentRun 的结果；Created=false 表示这条消息之前已经提交过。

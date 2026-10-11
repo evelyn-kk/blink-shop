@@ -30,6 +30,8 @@ servers:
 security:
   - bearerAuth: []
 tags:
+  - name: eval
+    description: 评测试跑（仅管理员）
   - name: health
     description: 进程存活与就绪检查
   - name: auth
@@ -1797,6 +1799,419 @@ paths:
               example:
                 code: prompt_state_conflict
                 message: 这个版本当前的状态不能执行该操作
+  /admin/agent/runs:
+    get:
+      tags: [admin]
+      operationId: listAdminAgentRuns
+      summary: 导购运行列表（调试观测）
+      description: |
+        全部账号的导购运行，按创建时间倒序（同一毫秒按消息写入顺序）。只返回提问摘要（脱敏、最多 80 字）和状态、耗时、Prompt 版本，
+        不带回答正文和结构化块（看详情）。仅管理员。
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [queued, running, completed, failed, cancelled]
+        - name: account_id
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        "200":
+          description: 运行列表
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AdminAgentRun"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /admin/agent/runs/{id}:
+    get:
+      tags: [admin]
+      operationId: getAdminAgentRun
+      summary: 一次运行的详情和轨迹时间线
+      description: |
+        运行结果（回答脱敏）、按写入顺序的轨迹事件和汇总（事件数、失败数、事件耗时合计、模型、工具、检索到的 chunk 与商品）。
+        轨迹 metadata 在写入时已脱敏，不含工具的私密参数原文。仅管理员；不限账号。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 运行详情
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAgentRunDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 运行不存在（`run_not_found`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: run_not_found
+                message: 运行记录不存在
+  /admin/vector/status:
+    get:
+      tags: [admin]
+      operationId: getVectorStatus
+      summary: 向量索引状态
+      description: |
+        只读查询本服务配置的知识分块、商品文本、商品图集合（是否存在、维度、行数、加载状态，不会创建或修改集合），
+        Embedder 名称，以及本进程启动以来的商品向量同步结果。没有配置向量时 enabled=false；查询出错时 collection.error 只给出错误类别。
+      responses:
+        "200":
+          description: 向量索引状态
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VectorStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /admin/evals:
+    get:
+      tags: [admin]
+      operationId: listEvals
+      summary: 评测套件、数据集和报告
+      description: |
+        读取 EVAL_DATA_DIR 下的 *.jsonl 数据集和 EVAL_REPORT_DIR 下 cmd/eval 写出的报告（`<目录>/report-<suite>.json`，按开始时间倒序，最多 50 条）。
+        不是当前格式版本（schema_version）的报告跳过并计入 skipped。接口不运行评测；套件给出本地运行命令。
+      responses:
+        "200":
+          description: 评测概览
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvalOverview"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /admin/evals/reports/{run}/{suite}:
+    get:
+      tags: [admin]
+      operationId: getEvalReport
+      summary: 评测报告详情
+      description: 完整报告（门槛结论、分组、逐条结果和失败样本），格式见 quality/schemas/eval-report.schema.json。两段路径都只允许字母、数字、点、下划线和短横线。
+      parameters:
+        - name: run
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+        - name: suite
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+      responses:
+        "200":
+          description: 评测报告
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvalReportDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 报告不存在或报告 ID 不合法（`report_not_found`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: report_not_found
+                message: 评测报告不存在
+        "422":
+          description: 不是当前格式版本的报告（`report_invalid`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: report_invalid
+                message: 评测报告格式不对（不是当前版本的报告）
+  /eval/intent:
+    post:
+      tags: [eval]
+      operationId: evalIntent
+      summary: 单条试跑意图识别
+      description: 用与导购相同的规则规划（agent.Classify）判断一句话，返回意图、动作、槽位和命中的规则。同步、不保存。仅管理员。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                  description: 首尾空白去掉后 1–500 字
+                has_image:
+                  type: boolean
+                  default: false
+                  description: 模拟消息带图片附件
+      responses:
+        "200":
+          description: 规划结果
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [query, plan, duration_ms]
+                properties:
+                  query:
+                    type: string
+                    description: 脱敏后的输入
+                  plan:
+                    type: object
+                    additionalProperties: true
+                    required: [intent, rule]
+                    properties:
+                      intent:
+                        type: string
+                      action:
+                        type: string
+                      rule:
+                        type: string
+                  duration_ms:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /eval/rag:
+    post:
+      tags: [eval]
+      operationId: evalRAG
+      summary: 单条试跑知识检索
+      description: 以管理员身份调用导购的 search_knowledge 工具（同样的参数校验和召回），返回引用的分块。仅管理员。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                  description: 首尾空白去掉后 1–500 字
+                top_k:
+                  type: integer
+                  minimum: 1
+                  maximum: 20
+                  default: 3
+                product_id:
+                  type: string
+      responses:
+        "200":
+          description: 工具结果
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvalToolResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /eval/products:
+    post:
+      tags: [eval]
+      operationId: evalProducts
+      summary: 单条试跑商品搜索
+      description: 以管理员身份调用导购的 search_products 工具，返回结果以及召回（关键词 / 向量数量）和重排（方式、前几名得分）明细。仅管理员。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                  description: 首尾空白去掉后 1–100 字（工具的参数上限）
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                max_price:
+                  type: number
+                  minimum: 0
+                min_price:
+                  type: number
+                  minimum: 0
+                brands:
+                  type: array
+                  maxItems: 5
+                  items:
+                    type: string
+                exclude:
+                  type: array
+                  maxItems: 10
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: 工具结果
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvalToolResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /eval/image-search:
+    post:
+      tags: [eval]
+      operationId: evalImageSearch
+      summary: 单条试跑图片搜索
+      description: 用管理员本人上传的图片搜索相似的可售商品，附带候选命中数、因不可售被丢弃的数量和耗时。仅管理员。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file_id]
+              properties:
+                file_id:
+                  type: string
+                  pattern: "^file_[A-Za-z0-9_]{1,64}$"
+                top_k:
+                  type: integer
+                  minimum: 1
+                  maximum: 20
+      responses:
+        "200":
+          description: 图搜结果
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result, candidates, dropped, duration_ms]
+                properties:
+                  result:
+                    $ref: "#/components/schemas/ImageSearchResult"
+                  candidates:
+                    type: integer
+                  dropped:
+                    type: integer
+                  duration_ms:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 文件不存在或不是本人上传的（`file_not_found`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: file_not_found
+                message: 文件不存在
+        "503":
+          description: 图片搜索未配置或索引不可用（`image_search_unavailable`）
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: image_search_unavailable
+                message: 图片搜索暂不可用，请稍后再试或用文字描述商品
   /admin/configs:
     get:
       tags: [admin]
@@ -6211,6 +6626,342 @@ components:
               created_at:
                 type: string
                 description: 日期（YYYY-MM-DD）。
+    AdminAgentRun:
+      type: object
+      required: [run_id, session_id, account_id, username, trace_id, status, query, attachments, prompt_versions, error_code, elapsed_ms, created_at, updated_at]
+      properties:
+        run_id:
+          type: string
+        session_id:
+          type: string
+        account_id:
+          type: string
+        username:
+          type: string
+        trace_id:
+          type: string
+        status:
+          type: string
+          enum: [queued, running, completed, failed, cancelled]
+        query:
+          type: string
+          description: 用户提问（脱敏；列表里最多 80 字）
+        attachments:
+          type: integer
+        prompt_versions:
+          type: object
+          additionalProperties:
+            type: integer
+        error_code:
+          type: string
+        elapsed_ms:
+          type: [integer, "null"]
+          description: 已结束的运行从创建到最后更新的毫秒数；未结束为 null
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    AdminAgentRunDetail:
+      allOf:
+        - $ref: "#/components/schemas/AdminAgentRun"
+        - type: object
+          required: [content, blocks, followups, summary, items]
+          properties:
+            content:
+              type: string
+              description: 回答正文（脱敏）
+            blocks:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+            followups:
+              type: array
+              items:
+                type: string
+            summary:
+              type: object
+              required: [event_count, failed_count, events_ms, models, tools, chunk_ids, product_ids]
+              properties:
+                event_count:
+                  type: integer
+                failed_count:
+                  type: integer
+                  description: status 为 error / failed 的事件数
+                events_ms:
+                  type: integer
+                models:
+                  type: array
+                  items:
+                    type: string
+                tools:
+                  type: array
+                  items:
+                    type: string
+                chunk_ids:
+                  type: array
+                  items:
+                    type: string
+                product_ids:
+                  type: array
+                  items:
+                    type: string
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/AgentTraceEvent"
+    VectorCollectionStatus:
+      type: object
+      required: [name, exists, dimension, row_count, load_state, error]
+      properties:
+        name:
+          type: string
+        exists:
+          type: boolean
+        dimension:
+          type: integer
+        row_count:
+          type: integer
+        load_state:
+          type: string
+        error:
+          type: string
+          description: 错误类别（unreachable / timeout / milvus code N），不含地址和凭据
+    VectorIndexStatus:
+      type: object
+      required: [enabled, backend, embedder, collection]
+      properties:
+        enabled:
+          type: boolean
+        backend:
+          type: string
+          enum: [milvus, memory, ""]
+        embedder:
+          type: string
+        collection:
+          oneOf:
+            - $ref: "#/components/schemas/VectorCollectionStatus"
+            - type: "null"
+        indexed_products:
+          type: integer
+          description: 图片用进程内存索引时已索引的商品数
+    VectorStatus:
+      type: object
+      required: [knowledge, products, images, sync, checked_at]
+      properties:
+        knowledge:
+          $ref: "#/components/schemas/VectorIndexStatus"
+        products:
+          $ref: "#/components/schemas/VectorIndexStatus"
+        images:
+          $ref: "#/components/schemas/VectorIndexStatus"
+        sync:
+          type: object
+          required: [running, succeeded, failed, last_at, last_error_at]
+          properties:
+            running:
+              type: integer
+            succeeded:
+              type: integer
+            failed:
+              type: integer
+            last_at:
+              type: [string, "null"]
+              format: date-time
+            last_error_at:
+              type: [string, "null"]
+              format: date-time
+        checked_at:
+          type: string
+          format: date-time
+    EvalReportSummary:
+      type: object
+      required: [id, suite, version, config_fingerprint, started_at, total, passed, pass_rate, min_pass_rate, gate, failure_count]
+      properties:
+        id:
+          type: string
+          description: "`<报告目录>/<suite>`"
+        suite:
+          type: string
+        version:
+          type: string
+        config_fingerprint:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        total:
+          type: integer
+        passed:
+          type: integer
+        pass_rate:
+          type: number
+        min_pass_rate:
+          type: number
+        gate:
+          type: string
+          enum: [passed, failed]
+        failure_count:
+          type: integer
+    EvalOverview:
+      type: object
+      required: [configured, suites, datasets, reports, reports_total, skipped]
+      properties:
+        configured:
+          type: boolean
+        suites:
+          type: array
+          items:
+            type: object
+            required: [id, name, dataset, min_pass_rate, command, try_path, case_count, latest]
+            properties:
+              id:
+                type: string
+                enum: [intent, rag, products, images, agent]
+              name:
+                type: string
+              dataset:
+                type: string
+              min_pass_rate:
+                type: number
+              command:
+                type: string
+              try_path:
+                type: string
+                description: 单条试跑接口；为空表示没有
+              case_count:
+                type: integer
+              latest:
+                oneOf:
+                  - $ref: "#/components/schemas/EvalReportSummary"
+                  - type: "null"
+        datasets:
+          type: array
+          items:
+            type: object
+            required: [id, suite, description, case_count, updated_at]
+            properties:
+              id:
+                type: string
+              suite:
+                type: string
+              description:
+                type: string
+              case_count:
+                type: integer
+              updated_at:
+                type: string
+                format: date-time
+        reports:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvalReportSummary"
+        reports_total:
+          type: integer
+        skipped:
+          type: integer
+          description: 跳过的旧格式或无法解析的报告数
+    EvalReportDetail:
+      type: object
+      description: quality/schemas/eval-report.schema.json 的报告，加上 id。
+      required: [id, schema_version, suite, version, gate, pass_rate, min_pass_rate, total, passed, metrics, groups, cases, failures]
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        schema_version:
+          type: string
+          const: blink_shop.eval_report.v1
+        suite:
+          type: string
+        version:
+          type: string
+        gate:
+          type: string
+          enum: [passed, failed]
+        pass_rate:
+          type: number
+        min_pass_rate:
+          type: number
+        total:
+          type: integer
+        passed:
+          type: integer
+        metrics:
+          type: object
+          additionalProperties:
+            type: number
+        groups:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              total:
+                type: integer
+              passed:
+                type: integer
+              pass_rate:
+                type: number
+        cases:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              group:
+                type: string
+              passed:
+                type: boolean
+        failures:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              group:
+                type: string
+              query:
+                type: string
+              problems:
+                type: array
+                items:
+                  type: string
+              got:
+                type: array
+                items:
+                  type: string
+    EvalToolResult:
+      type: object
+      required: [query, tool, ok, data, duration_ms]
+      properties:
+        query:
+          type: string
+          description: 脱敏后的输入
+        tool:
+          type: string
+        ok:
+          type: boolean
+        code:
+          type: string
+          description: 工具失败时的错误码（参数错误直接返回 400）
+        message:
+          type: string
+        data:
+          description: 工具返回（与导购观测到的一致）
+        recall:
+          type: object
+          additionalProperties: true
+          description: 商品搜索的召回来源与数量
+        rerank:
+          type: object
+          additionalProperties: true
+          description: 商品搜索的排序方式和前几名得分
+        duration_ms:
+          type: integer
     AgentTraceEvent:
       type: object
       required: [trace_event_id, stage, event_type, model, status, duration_ms, error, metadata, created_at]

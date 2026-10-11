@@ -612,26 +612,57 @@ boolean / array，required、additionalProperties=false、enum、minimum/maximum
 ## 离线评测
 
 `src/eval` + `cmd/eval`：在内存 Store（开发种子 + `fixtures/rag/corpus.json`）上跑 `quality/data/eval/` 下的 JSONL 用例，
-报告（JSON + Markdown）含版本、配置和配置指纹、通过率、各项指标和失败样本：
+报告（`report-<suite>.json` + `.md`）格式见 `quality/schemas/eval-report.schema.json`（`schema_version = blink_shop.eval_report.v1`）：
+版本、配置和配置指纹、通过率、**门槛**（`min_pass_rate` 与结论 `gate = passed / failed`；没有用例算 failed）、各项指标、**分组**通过率、
+**逐条结果**（`cases`）和失败样本（带分组、原因和实际输出）。Markdown 里未过门槛、失败的分组和用例用 ❌ 标出。
 
-- `rag.jsonl`（38 条）：recall@3、MRR、held-out recall、无结果正确率；每条 citation 的 chunk_id 都要能回查。
-- `product_search.jsonl`（28 条）：经导购运行器端到端执行（每条一个新会话，可带 `history` 做多轮）：top1、推荐卡包含 / 不包含、
-  不推荐（无结果、相近、冲突）、负向约束（预算、区间、品牌、排除、冲突、下架 / 风控商品）和追问继承。
-- `image_search.jsonl`（231 条）：从 6 件在售商品的 12 张图按变换生成查询图（裁剪、缩放、亮度、对比度、JPEG、翻转、加边框、噪声及组合），
-  另有下架 / 风控 / 删除商品的图和纯色、噪声、棋盘格等无关图片：recall@1、recall@3、MRR、held-out recall@3（标 `held_out` 的变换没参与
-  阈值标定，`held_out_v2` 是阈值定下后才加入、只跑过一次的）、无关图片不返回率、同款（match 级）准确率、不可售商品泄漏数。
+| 套件 | 数据集 | 门槛 | 内容 |
+| --- | --- | --- | --- |
+| `intent` | `intent.jsonl`（66 条） | 0.9 | 规则规划（与线上同一个 `agent.Classify`）的意图、动作和槽位（预算、品牌、排除）；分开发集和 `held_out` 留出集。指标：意图 / 动作 / 槽位 / 留出集准确率 |
+| `rag` | `rag.jsonl`（38 条） | 1 | recall@3、MRR、held-out recall、无结果正确率；每条 citation 的 chunk_id 都要能回查 |
+| `products` | `product_search.jsonl`（28 条） | 1 | 经导购运行器端到端执行：top1、推荐卡包含 / 不包含、不推荐（无结果、相近、冲突）、负向约束和追问继承 |
+| `images` | `image_search.jsonl`（231 条） | 0.98 | 商品图按变换生成查询图，另有不可售商品和无关图片：recall@1/3、MRR、held-out、无关图片不返回、同款准确率、不可售泄漏数 |
+| `agent` | `agent.jsonl`（26 条） | 1 | 端到端导购：每条在全新演示数据上跑完对话，检查意图、结构化块、商品卡、不编造商品、下架 / 风控 / 删除商品不出现、知识引用、工具调用、购物车副作用、风险拦截轨迹、联系方式脱敏 |
+
+意图门槛不是 1：开发集要求全对（`TestIntentSuite`），留出集是没参考过的说法，用来看规则的泛化（当前 11/16，没覆盖的说法如
+“台灯怎么调亮度”“现在付款买下来”，不针对它们调规则）；测试要求留出集准确率不低于 0.6 防退化。端到端评测首次运行发现提问里的手机号
+被当成检索词（“手机号”召回了手机）并在回答里复述，已修复：检索词提取前 `agent.StripPII` 去掉联系方式及其说明词（评价正文等业务数据不改）。
 
 ```bash
-go run ./cmd/eval                                         # 关键词 / 规则；报告写到 ../quality/reports/eval-<时间>/
+go run ./cmd/eval                                         # 全部 5 套；报告写到 ../quality/reports/eval-<时间>/
+go run ./cmd/eval -suite=intent -version=$(git rev-parse --short HEAD)
 MILVUS_ADDR=127.0.0.1:19530 go run ./cmd/eval -vector=hash  # 本地演示向量链路（散列向量 + 临时集合，跑完删除）
 go run ./cmd/eval -vector=env                             # 用 MILVUS_ADDR + EMBEDDING_* 的真实向量
 go run ./cmd/eval -suite=images -image-index=milvus       # 商品图写进 Milvus 临时集合（MILVUS_ADDR，跑完删除）
 go run ./cmd/eval -suite=images -image-embedder=env       # 用 IMAGE_EMBEDDING_* 配置的图片 Embedder（如 dashscope）
 ```
 
-`TestRAGSuite` / `TestProductSuite`（`go test ./src/eval`）在 CI 里要求两套全部通过；`TestImageSuite` 要求 recall@3 与 held-out recall@3
-≥ 0.98、无关图片全部不返回、不可售商品零泄漏、标为同款的准确率 ≥ 0.98（本地特征下当前 230/231，唯一失败是浅色背景的台灯图裁到 70% 后
-相似度低于 0.58，被当作没有相似商品）。`cmd/eval` 的图片评测通过率下限默认 0.98（`-image-min-pass`）。
+任一套件 `gate=failed` 时退出码为 1（门槛可用 `-min-pass`、`-intent-min-pass`、`-image-min-pass` 调整，并写进报告）。
+`go test ./src/eval` 在 CI 里跑全部套件；`TestReportMarksDeliberateFailures` 故意构造失败用例，检查报告 gate、失败样本、分组、Markdown 标红，
+并按 schema 校验写出的 JSON。`TestImageSuite` 要求 recall@3 与 held-out recall@3 ≥ 0.98、无关图片全部不返回、不可售商品零泄漏、
+同款准确率 ≥ 0.98（本地特征下当前 230/231，唯一失败是浅色背景的台灯图裁到 70% 后相似度低于 0.58）。
+
+### 调试观测与质量评测接口
+
+都只允许管理员（RBAC 矩阵），照常限流。
+
+- `GET /admin/agent/runs?status=&account_id=&page=&page_size=`：全部账号的运行，按创建时间倒序（同一毫秒按消息写入顺序），
+  只带提问摘要（`agent.RedactPII` 脱敏，最多 80 字）、用户名、状态、耗时、Prompt 版本、错误码，不带回答和结构化块。迁移 0008 加了
+  `(status, created_at)`、`(account_id, created_at)` 索引。
+- `GET /admin/agent/runs/{id}`：运行结果（回答脱敏）、按写入顺序的轨迹事件和汇总（事件数、error / failed 事件数、事件耗时合计、模型、工具、
+  检索到的 chunk 与商品）；不存在 404 `run_not_found`。轨迹 metadata 写入时已脱敏、不含工具私密参数原文。
+- `GET /admin/vector/status`：只读查询配置的知识分块、商品文本、商品图集合（has / describe / `count(*)` / load_state，不会创建或修改集合；
+  `get_stats` 不含未落盘的行，所以行数用 `count(*)`），Embedder 名称；图片用进程内存索引时给出已索引商品数；本进程启动以来商品向量同步的成功 / 失败次数和时间。
+  Milvus 出错时只给错误类别（unreachable / timeout / milvus code N）。
+- `GET /admin/evals`：`EVAL_DATA_DIR` 下的数据集（用例数、第一行注释作说明）、5 个套件（门槛、本地运行命令、最新报告）、`EVAL_REPORT_DIR`
+  下一层目录里的报告（按开始时间倒序最多 50 条；不是当前 schema 版本或无法解析的跳过并计数）。接口不运行评测。
+- `GET /admin/evals/reports/{run}/{suite}`：完整报告；两段只允许字母、数字、点、下划线、短横线（不能跳出报告目录），不存在 404，格式不对 422 `report_invalid`。
+- `POST /eval/intent`（`{query, has_image}`，返回规划）、`/eval/rag`（`{query, top_k, product_id}`）、`/eval/products`（`{query, limit, max_price,
+  min_price, brands, exclude}`，附召回和重排明细）、`/eval/image-search`（管理员本人上传的 `file_id`）：与导购用同一套规则和只读工具（参数按工具
+  schema 校验，错误 400），同步返回、不保存。
+
+与上游的差异：上游运行列表没有服务端筛选、每行带完整回答和结构化块；轨迹详情不返回运行信息、未知运行不报 404；评测页对数据集和报告做了
+“至少 120 条”的展示填充、端到端失败用例显示为通过；评测接口不限流。Blink 都按实际数据展示。
 
 ## 认证与权限
 
@@ -680,7 +711,7 @@ go run ./cmd/eval -suite=images -image-embedder=env       # 用 IMAGE_EMBEDDING_
 | `GET /admin/documents`、`GET /admin/documents/{id}`、`POST /admin/unstructured-ingestions` | admin |
 | `GET /admin/orders`、`GET,PATCH /admin/orders/{id}` | admin |
 | `GET /admin/accounts`、`PATCH /admin/accounts/{id}`、`GET /admin/merchants`、`PATCH /admin/merchants/{id}`、`GET /admin/products`、`PATCH /admin/products/{id}`、`GET /admin/promotions`、`PATCH /admin/promotions/{id}`、`GET /admin/reviews`、`PATCH /admin/reviews/{id}` | admin（不能修改自己的账号） |
-| `GET /admin/configs`、`PATCH /admin/configs/{key}`、`GET /admin/prompts`、`GET,PATCH /admin/prompts/{key}`、`POST /admin/prompts/{key}/publish`、`POST /admin/prompts/{key}/rollback`、`GET /admin/risk/overview`、`GET /admin/audit-logs` | admin |
+| `GET /admin/agent/runs`、`GET /admin/agent/runs/{id}`、`GET /admin/vector/status`、`GET /admin/evals`、`GET /admin/evals/reports/{run}/{suite}`、`POST /eval/intent`、`POST /eval/rag`、`POST /eval/products`、`POST /eval/image-search`、`GET /admin/configs`、`PATCH /admin/configs/{key}`、`GET /admin/prompts`、`GET,PATCH /admin/prompts/{key}`、`POST /admin/prompts/{key}/publish`、`POST /admin/prompts/{key}/rollback`、`GET /admin/risk/overview`、`GET /admin/audit-logs` | admin |
 
 后续节点按前缀约定（`TestRoutePrefixRoles` 检查）：`/admin/*` → admin；`/merchant/*` → merchant；`/cart`、`/orders`、`/coupons/*`、`/agent/*`、`/speech/*` → user；`/files` → account；分类/商家/商品读取 → public。
 
@@ -746,6 +777,7 @@ go run ./cmd/eval -suite=images -image-embedder=env       # 用 IMAGE_EMBEDDING_
 | `STT_ENDPOINT` / `STT_LANG` / `STT_MAX_SECONDS` | — | 讯飞实时转写地址 / `autodialect` / `60` | ws(s) 地址（生产只允许 `wss://`）、语种；单次语音输入最长秒数（5–300） |
 | `TTS_APP_ID` / `TTS_API_KEY` / `TTS_API_SECRET` | — | 空 | 合成凭据：讯飞三项都要；豆包为 appid + token（`TTS_API_KEY`） |
 | `TTS_ENDPOINT` / `TTS_DEFAULT_VOICE` / `TTS_CLUSTER` / `TTS_MAX_RUNES` | — | 按供应商默认 / 按供应商默认 / `volcano_tts` / `800` | 合成地址（生产讯飞只允许 `wss://`、豆包只允许 `https://`；默认地址都是 TLS）和默认音色（为空用供应商默认）、豆包集群、单次朗读最多字数（1–2000） |
+| `EVAL_DATA_DIR` / `EVAL_REPORT_DIR` | — | `../quality/data/eval` / `../quality/reports` | 管理端质量评测页读取的数据集和 `cmd/eval` 报告目录（相对启动目录）；目录不存在时列表为空 |
 | `IMAGE_FETCH_ALLOWED_HOSTS` | — | 空 | 服务端可以下载商品图的 https 域名（逗号分隔，只写主机名，不接受 IP）；为空只读平台内图片 |
 | `NACOS_ADDR` | — | 空 | Nacos 地址（如 `127.0.0.1:8848`）；为空时动态配置存在内存 |
 | `NACOS_NAMESPACE` / `NACOS_GROUP` | — | 空 / `BLINK_SHOP` | 命名空间和分组 |

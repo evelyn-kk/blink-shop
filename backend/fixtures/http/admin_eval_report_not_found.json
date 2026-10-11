@@ -1,0 +1,16 @@
+{
+  "description": "评测报告不存在（或报告 ID 不合法、试图跳出报告目录）：404 report_not_found",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/admin/evals/reports/eval-19700101-000000/intent",
+    "as": "blink_admin"
+  },
+  "response": {
+    "status": 404,
+    "body": {
+      "code": "report_not_found",
+      "message": "评测报告不存在",
+      "request_id": "<request_id>"
+    }
+  }
+}

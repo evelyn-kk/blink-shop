@@ -29,6 +29,8 @@ type Config struct {
 	AIAPIKey             string
 	AIBaseURL            string
 	AvatarUploadDir      string
+	EvalDataDir          string
+	EvalReportDir        string
 	// 向量检索（都配置了才启用）
 	MilvusAddr              string
 	MilvusTextCollection    string
@@ -116,6 +118,8 @@ func Load(ctx context.Context, r *Resolver) (Config, error) {
 		AIAPIKey:        r.Get(ctx, KeyAIAPIKey),
 		AIBaseURL:       strings.TrimSpace(r.Get(ctx, KeyAIBaseURL)),
 		AvatarUploadDir: r.Get(ctx, KeyAvatarUploadDir),
+		EvalDataDir:     strings.TrimSpace(r.Get(ctx, KeyEvalDataDir)),
+		EvalReportDir:   strings.TrimSpace(r.Get(ctx, KeyEvalReportDir)),
 
 		MilvusAddr:              strings.TrimSpace(r.Get(ctx, KeyMilvusAddr)),
 		MilvusTextCollection:    strings.TrimSpace(r.Get(ctx, KeyMilvusTextCollection)),

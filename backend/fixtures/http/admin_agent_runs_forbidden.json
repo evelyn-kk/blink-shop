@@ -1,0 +1,16 @@
+{
+  "description": "非管理员访问调试观测（运行列表 / 详情）、向量状态、评测列表和单条试跑：403 forbidden",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/admin/agent/runs",
+    "as": "blink_user"
+  },
+  "response": {
+    "status": 403,
+    "body": {
+      "code": "forbidden",
+      "message": "当前账号无权访问",
+      "request_id": "<request_id>"
+    }
+  }
+}

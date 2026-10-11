@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -219,4 +220,68 @@ func and(clauses ...string) string {
 		}
 	}
 	return strings.Join(out, " and ")
+}
+
+// CollectionStatus 是一个集合的当前状态（管理端展示）。
+type CollectionStatus struct {
+	Name      string `json:"name"`
+	Exists    bool   `json:"exists"`
+	Dimension int    `json:"dimension"`
+	RowCount  int64  `json:"row_count"`
+	LoadState string `json:"load_state"`
+	Error     string `json:"error"`
+}
+
+// Status 只读地查询集合状态（has / describe / count(*) / get_load_state），不会创建、加载或修改集合。
+// 出错时把错误类别写进 Error（不含地址和凭据），不返回 error。
+func (m *Milvus) Status(ctx context.Context, name string) CollectionStatus {
+	st := CollectionStatus{Name: name}
+	var has struct {
+		Has bool `json:"has"`
+	}
+	if err := m.call(ctx, "/v2/vectordb/collections/has", map[string]any{"collectionName": name}, &has); err != nil {
+		st.Error = statusError(err)
+		return st
+	}
+	if st.Exists = has.Has; !has.Has {
+		return st
+	}
+	var errs []string
+	if d, err := m.dim(ctx, name); err != nil {
+		errs = append(errs, statusError(err))
+	} else {
+		st.Dimension = d
+	}
+	// get_stats 只统计已落盘的段，刚写入的行要等 flush；count(*) 查询包含尚未落盘的行
+	var counts []map[string]any
+	if err := m.call(ctx, "/v2/vectordb/entities/query", map[string]any{"collectionName": name, "filter": "", "outputFields": []string{"count(*)"}}, &counts); err != nil {
+		errs = append(errs, statusError(err))
+	} else if len(counts) > 0 {
+		if n, ok := counts[0]["count(*)"].(float64); ok {
+			st.RowCount = int64(n)
+		}
+	}
+	var load struct {
+		LoadState string `json:"loadState"`
+	}
+	if err := m.call(ctx, "/v2/vectordb/collections/get_load_state", map[string]any{"collectionName": name}, &load); err != nil {
+		errs = append(errs, statusError(err))
+	} else {
+		st.LoadState = load.LoadState
+	}
+	st.Error = strings.Join(errs, "; ")
+	return st
+}
+
+// statusError 把错误归成不含地址的简短说明。
+func statusError(err error) string {
+	var me *MilvusError
+	switch {
+	case errors.As(err, &me):
+		return fmt.Sprintf("milvus code %d", me.Code)
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	default:
+		return "unreachable"
+	}
 }

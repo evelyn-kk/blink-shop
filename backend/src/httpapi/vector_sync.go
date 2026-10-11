@@ -34,6 +34,33 @@ var syncDelay = func(round int) time.Duration {
 type productSyncs struct {
 	mu      sync.Mutex
 	running map[string]*productSync
+	// 本进程启动以来的同步结果（管理端向量状态展示）：每个任务结束时记一次。
+	succeeded, failed int
+	lastAt, lastErrAt time.Time
+}
+
+// productSyncStats 是商品向量同步的累计结果。
+type productSyncStats struct {
+	Running     int        `json:"running"`
+	Succeeded   int        `json:"succeeded"`
+	Failed      int        `json:"failed"`
+	LastAt      *time.Time `json:"last_at"`
+	LastErrorAt *time.Time `json:"last_error_at"`
+}
+
+func (p *productSyncs) stats() productSyncStats {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	st := productSyncStats{Running: len(p.running), Succeeded: p.succeeded, Failed: p.failed}
+	if !p.lastAt.IsZero() {
+		t := p.lastAt
+		st.LastAt = &t
+	}
+	if !p.lastErrAt.IsZero() {
+		t := p.lastErrAt
+		st.LastErrorAt = &t
+	}
+	return st
 }
 
 type productSync struct {
@@ -83,6 +110,13 @@ func (s *Server) runProductSync(id string) {
 		dirty := s.syncs.running[id].dirty
 		if (err == nil && converged && !dirty) || (err != nil && !dirty) {
 			delete(s.syncs.running, id)
+			s.syncs.lastAt = s.now()
+			if err != nil {
+				s.syncs.failed++
+				s.syncs.lastErrAt = s.syncs.lastAt
+			} else {
+				s.syncs.succeeded++
+			}
 			s.syncs.mu.Unlock()
 			return
 		}

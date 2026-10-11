@@ -48,16 +48,18 @@ type Plan struct {
 }
 
 var (
-	greetings  = []string{"你好", "您好", "嗨", "哈喽", "哈罗", "hello", "hi", "hey", "在吗", "在不在", "你是谁", "你是什么", "你能做什么", "你会什么", "能帮我什么", "可以帮我什么", "帮助", "help", "谢谢", "谢谢你", "感谢", "多谢", "好的", "ok", "好", "嗯", "早上好", "晚上好", "下午好"}
+	greetings  = []string{"你好", "您好", "嗨", "哈喽", "哈罗", "hello", "hi", "hey", "在吗", "在不在", "你是谁", "你是什么", "你能做什么", "你会什么", "能帮我什么", "可以帮我什么", "你可以帮我干嘛", "你能帮我干嘛", "你能干嘛", "你能干什么", "你可以做什么", "帮助", "help", "谢谢", "谢谢你", "感谢", "多谢", "好的", "ok", "好", "嗯", "早上好", "晚上好", "下午好"}
 	navVerbs   = []string{"打开", "跳转", "跳到", "进入", "带我去", "切到", "切换到", "转到", "去到"}
 	navPages   = map[string]string{"购物车": "cart", "订单": "orders", "我的订单": "orders", "首页": "products", "商品列表": "products", "商品页": "products", "列表页": "products", "优惠券": "coupons", "券包": "coupons", "我的券": "coupons", "会话": "sessions", "历史": "sessions", "聊天记录": "sessions", "设置": "settings"}
-	imageWords = []string{"拍照找", "拍照搜", "找同款", "图片找", "识图", "这张图", "图里", "图片里", "照片里", "看图", "以图搜"}
+	imageWords = []string{"拍照找", "拍照搜", "找同款", "图片找", "识图", "这张图", "图里", "图片里", "照片里", "看图", "以图搜", "按图搜", "按照片搜", "用照片搜", "用图片搜", "照片搜"}
+	// salutations 是可以连着说的招呼语（“hi，在吗”），整句只由它们组成时算打招呼；“好的”“嗯”这类应答不在内。
+	salutations = []string{"你好", "您好", "嗨", "哈喽", "哈罗", "hello", "hi", "hey", "在吗", "在不在", "早上好", "晚上好", "下午好"}
 	// imageFillers 是图搜句子里不代表商品条件的词（“帮我找一下同款”“图上这个是什么”）。
 	imageFillers = []string{"这张图片里", "这张照片里", "这张图片", "这张照片", "这个图片", "图片里", "照片里", "这张", "图片", "照片", "图上", "图中", "图里",
 		"同款", "一样的", "类似的", "相似的", "差不多的", "同样的", "长这样", "这样的", "这个", "这是什么", "是什么", "什么牌子", "哪款", "哪个",
 		"有没有", "找一下", "找找", "搜一下", "搜搜", "帮我", "看看", "一下", "里的"}
 	cartAddWords    = []string{"加入购物车", "加到购物车", "放进购物车", "放入购物车", "添加到购物车", "加进购物车", "加购物车", "加购", "加车", "放到车里", "加到车里", "放进车里"}
-	cartRemoveWords = []string{"删掉", "删除", "移除", "去掉", "拿掉", "移出", "不要了", "清空", "去除"}
+	cartRemoveWords = []string{"删掉", "删除", "删了", "移除", "去掉", "拿掉", "移出", "不要了", "清空", "去除"}
 	cartQtyWords    = []string{"改成", "改为", "换成", "调成", "变成", "改到", "数量", "减到", "加到"}
 	cartSelectWords = []string{"取消选中", "取消勾选", "不选", "别选", "选中", "勾选", "全选"}
 	cartWords       = []string{"购物车", "车里", "车内", "加购的", "凑单", "凑够", "试算", "合计", "总价", "应付", "实付", "用券"}
@@ -78,7 +80,7 @@ var (
 	nonGuideTopics  = map[string][]string{
 		"weather": {"天气", "下雨", "气温", "温度多少"},
 		"coding":  {"写代码", "代码", "编程", "脚本", "python", "java", "sql", "bug", "函数", "程序"},
-		"chat":    {"笑话", "讲个故事", "写诗", "作文", "翻译", "聊聊天", "唱歌", "星座", "算命"},
+		"chat":    {"笑话", "讲个故事", "写诗", "写首诗", "写一首诗", "作诗", "作文", "翻译", "聊聊天", "唱歌", "星座", "算命"},
 		"finance": {"股票", "基金", "彩票", "比特币", "汇率", "贷款"},
 		"news":    {"新闻", "政治", "总统", "选举", "战争"},
 		"math":    {"等于几", "等于多少", "数学题", "计算一下", "方程"},
@@ -104,6 +106,9 @@ func Classify(content string, hasImage bool) Plan {
 	if plain == "" {
 		return Plan{Intent: IntentGuide, Action: "greeting", Rule: "empty"}
 	}
+	if onlySalutations(lower) {
+		return Plan{Intent: IntentGuide, Action: "greeting", Rule: "greeting"}
+	}
 
 	// 2. 图片找货：带图或明确说识图。带图时文字里的品类、预算、品牌、排除词作为图搜的附加条件；
 	// 说了“拍照找 / 找同款”但没带图，Action=ask_upload（请用户上传）。
@@ -123,8 +128,9 @@ func Classify(content string, hasImage bool) Plan {
 		return p
 	}
 
-	// 3. 页面跳转：导航动词 + 页面名，且没有别的操作动词。
-	if containsAny(lower, navVerbs...) && !containsAny(lower, cartAddWords...) && !containsAny(lower, checkoutWords...) {
+	// 3. 页面跳转：导航动词 + 页面名，且没有别的操作动词。“去 X 页面”也算（单独的“去”太宽，如“去结算”）。
+	navigate := containsAny(lower, navVerbs...) || (strings.HasPrefix(plain, "去") && containsAny(lower, "页面", "页"))
+	if navigate && !containsAny(lower, cartAddWords...) && !containsAny(lower, checkoutWords...) {
 		if target := navTarget(lower); target != "" {
 			return Plan{Intent: IntentNavigation, Target: target, Rule: "navigation"}
 		}
@@ -146,7 +152,9 @@ func Classify(content string, hasImage bool) Plan {
 		p.Query = productQuery(stripWords(text, cartAddWords, cartWords, []string{"商品", "那款", "这款"}))
 		return p
 	}
-	inCart := containsAny(lower, cartWords...) || ((base.Ordinal != 0 || base.Reference) && containsAny(lower, "商品", "件", "个"))
+	// “数量改成 2”没提购物车，但改数量只会是购物车里的商品。
+	inCart := containsAny(lower, cartWords...) || ((base.Ordinal != 0 || base.Reference) && containsAny(lower, "商品", "件", "个")) ||
+		containsAny(lower, "数量改", "数量调", "数量换", "改数量", "调数量")
 	if inCart && containsAny(lower, "清空", "全部删", "都删", "全删") {
 		return Plan{Intent: IntentCart, Action: "clear", Rule: "cart_clear"}
 	}
@@ -215,7 +223,7 @@ func Classify(content string, hasImage bool) Plan {
 		switch {
 		case containsAny(lower, "怎么领", "如何领", "在哪领", "哪里领", "领取方式", "怎么用", "如何使用", "使用规则", "能不能用", "能用吗"):
 			p.Intent, p.Action, p.Rule = IntentKnowledge, "", "coupon_help"
-			p.Query = text
+			p.Query = strings.TrimSpace(StripPII(text))
 		case containsAny(lower, couponClaim...):
 			p.Action, p.Rule = "claim", "coupon_claim"
 			p.Query = productQuery(stripWords(text, couponClaim, couponWords, []string{"所有", "全部", "都", "能领的", "可以领的"}))
@@ -246,7 +254,7 @@ func Classify(content string, hasImage bool) Plan {
 	// 8. 知识问答：售后、规则、用法。
 	if containsAny(lower, knowledgeWords...) && !containsAny(lower, "推荐", "想买", "要买") {
 		p := base
-		p.Intent, p.Rule, p.Query = IntentKnowledge, "knowledge", text
+		p.Intent, p.Rule, p.Query = IntentKnowledge, "knowledge", strings.TrimSpace(StripPII(text))
 		return p
 	}
 
@@ -320,8 +328,9 @@ func stripWords(text string, groups ...[]string) string {
 }
 
 // productQuery 把句子压成检索词串（空格分隔）。
+// 联系方式（及前面的“手机号”等说明词）先去掉：不当检索词，也不会被回答复述。
 func productQuery(text string) string {
-	text = ordinalPattern.ReplaceAllString(text, " ")
+	text = ordinalPattern.ReplaceAllString(StripPII(text), " ")
 	text = quantityPattern.ReplaceAllString(text, " ")
 	text = referenceRe.ReplaceAllString(text, " ")
 	return strings.Join(QueryTerms(text), " ")
@@ -361,4 +370,21 @@ func reviewContent(text string) (content, product string) {
 		}
 	}
 	return "", productQuery(stripWords(ratingPattern.ReplaceAllString(text, " "), reviewCreate, reviewWords, []string{"给", "打", "我要", "我想", "帮我", "写", "这个", "那个"}))
+}
+
+// onlySalutations 判断整句是否只由招呼语和标点、空白组成（如“hi，在吗”“你好你好”）。
+func onlySalutations(lower string) bool {
+	rest := compact(lower)
+	if rest == "" {
+		return false
+	}
+	for changed := true; changed && rest != ""; {
+		changed = false
+		for _, g := range salutations {
+			if strings.HasPrefix(rest, g) {
+				rest, changed = strings.TrimPrefix(rest, g), true
+			}
+		}
+	}
+	return rest == ""
 }

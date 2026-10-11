@@ -30,6 +30,8 @@ type ImageCase struct {
 
 // ImageOptions 是图片搜索评测的输入；Index 为 nil 时用内存索引，Embedder 为 nil 时用本地特征。
 type ImageOptions struct {
+	// MinPass 是门槛通过率，0 表示要求全部通过（图片评测默认 0.98）。
+	MinPass  float64
 	Cases    string
 	Index    imagesearch.Index
 	Embedder imagevector.Embedder
@@ -140,12 +142,7 @@ func RunImages(ctx context.Context, o ImageOptions) (Report, error) {
 				}
 			}
 		}
-		rep.Total++
-		if len(problems) == 0 {
-			rep.Passed++
-		} else {
-			rep.Failures = append(rep.Failures, Failure{ID: c.ID, Query: c.Source + " " + strings.Join(c.Transforms, "+"), Problems: problems, Got: got})
-		}
+		rep.record(firstTag(c.Tags), Failure{ID: c.ID, Query: c.Source + " " + strings.Join(c.Transforms, "+"), Problems: problems, Got: got})
 	}
 	ratio := func(a, b int) float64 {
 		if b == 0 {
@@ -163,7 +160,10 @@ func RunImages(ctx context.Context, o ImageOptions) (Report, error) {
 	rep.Metrics["match_precision"] = ratio(matchTopOK, matchTop)
 	rep.Metrics["match_rate"] = ratio(matchTop, positives)
 	rep.Metrics["inactive_leaks"] = float64(leaks)
-	rep.finish(start)
+	if o.MinPass == 0 {
+		o.MinPass = DefaultImageMinPass
+	}
+	rep.finish(start, o.MinPass)
 	return rep, nil
 }
 

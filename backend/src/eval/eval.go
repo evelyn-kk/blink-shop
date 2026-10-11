@@ -21,33 +21,108 @@ import (
 	"github.com/evelyn-kk/blink-shop/backend/src/store/memstore"
 )
 
+// SchemaVersion 是报告格式版本，见 quality/schemas/eval-report.schema.json。
+const SchemaVersion = "blink_shop.eval_report.v1"
+
+// 报告的门槛结论：通过率不低于 min_pass_rate 为 passed，否则 failed（管理端标红、cmd/eval 退出码 1）。
+const (
+	GatePassed = "passed"
+	GateFailed = "failed"
+)
+
 // Report 是一个评测集的结果。
 type Report struct {
-	Suite       string             `json:"suite"`
-	Version     string             `json:"version"`
-	Config      map[string]string  `json:"config"`
-	Fingerprint string             `json:"config_fingerprint"`
-	StartedAt   time.Time          `json:"started_at"`
-	DurationMS  int64              `json:"duration_ms"`
-	Total       int                `json:"total"`
-	Passed      int                `json:"passed"`
-	PassRate    float64            `json:"pass_rate"`
-	Metrics     map[string]float64 `json:"metrics"`
-	Failures    []Failure          `json:"failures"`
+	SchemaVersion string             `json:"schema_version"`
+	Suite         string             `json:"suite"`
+	Version       string             `json:"version"`
+	Config        map[string]string  `json:"config"`
+	Fingerprint   string             `json:"config_fingerprint"`
+	StartedAt     time.Time          `json:"started_at"`
+	DurationMS    int64              `json:"duration_ms"`
+	Total         int                `json:"total"`
+	Passed        int                `json:"passed"`
+	PassRate      float64            `json:"pass_rate"`
+	MinPassRate   float64            `json:"min_pass_rate"`
+	Gate          string             `json:"gate"`
+	Metrics       map[string]float64 `json:"metrics"`
+	Groups        map[string]Group   `json:"groups"`
+	Cases         []CaseResult       `json:"cases"`
+	Failures      []Failure          `json:"failures"`
+}
+
+// Group 是按用例分组（标签 / 类型）的通过情况。
+type Group struct {
+	Total    int     `json:"total"`
+	Passed   int     `json:"passed"`
+	PassRate float64 `json:"pass_rate"`
+}
+
+// CaseResult 是一条用例的结论（详情见 Failures）。
+type CaseResult struct {
+	ID     string `json:"id"`
+	Group  string `json:"group"`
+	Passed bool   `json:"passed"`
 }
 
 // Failure 是一条失败样本。
 type Failure struct {
 	ID       string   `json:"id"`
+	Group    string   `json:"group"`
 	Query    string   `json:"query"`
 	Problems []string `json:"problems"`
 	Got      []string `json:"got"`
 }
 
-func (r *Report) finish(start time.Time) {
+// record 记一条用例：f.Problems 为空即通过，否则作为失败样本记下。
+func (r *Report) record(group string, f Failure) {
+	if group == "" {
+		group = "default"
+	}
+	if r.Groups == nil {
+		r.Groups = map[string]Group{}
+	}
+	g := r.Groups[group]
+	g.Total++
+	r.Total++
+	passed := len(f.Problems) == 0
+	if passed {
+		g.Passed++
+		r.Passed++
+	} else {
+		f.Group = group
+		r.Failures = append(r.Failures, f)
+	}
+	r.Groups[group] = g
+	r.Cases = append(r.Cases, CaseResult{ID: f.ID, Group: group, Passed: passed})
+}
+
+// finish 计算通过率和门槛结论；minPass 为 0 时要求全部通过。没有用例的报告算 failed（数据集读空不能当作通过）。
+func (r *Report) finish(start time.Time, minPass float64) {
+	r.SchemaVersion = SchemaVersion
 	r.DurationMS = time.Since(start).Milliseconds()
 	if r.Total > 0 {
 		r.PassRate = round(float64(r.Passed) / float64(r.Total))
+	}
+	if minPass <= 0 {
+		minPass = 1
+	}
+	r.MinPassRate = minPass
+	r.Gate = GateFailed
+	if r.Total > 0 && r.PassRate >= minPass {
+		r.Gate = GatePassed
+	}
+	for k, g := range r.Groups {
+		g.PassRate = round(float64(g.Passed) / float64(g.Total))
+		r.Groups[k] = g
+	}
+	if r.Groups == nil {
+		r.Groups = map[string]Group{}
+	}
+	if r.Cases == nil {
+		r.Cases = []CaseResult{}
+	}
+	if r.Metrics == nil {
+		r.Metrics = map[string]float64{}
 	}
 	keys := make([]string, 0, len(r.Config))
 	for k := range r.Config {
@@ -62,6 +137,17 @@ func (r *Report) finish(start time.Time) {
 	if r.Failures == nil {
 		r.Failures = []Failure{}
 	}
+}
+
+// DefaultImageMinPass 是图片评测的默认门槛：本地特征对外形相近的商品会混淆，不要求全对。
+const DefaultImageMinPass = 0.98
+
+// firstTag 用第一个标签作为分组，没有标签为 default。
+func firstTag(tags []string) string {
+	if len(tags) == 0 {
+		return "default"
+	}
+	return tags[0]
 }
 
 func round(f float64) float64 { return float64(int(f*10000+0.5)) / 10000 }
@@ -155,8 +241,12 @@ func WriteReport(dir string, r Report) error {
 		return err
 	}
 	var md strings.Builder
-	fmt.Fprintf(&md, "# 评测报告：%s\n\n- 版本：%s\n- 时间：%s\n- 配置指纹：%s\n- 用例：%d，通过 %d，通过率 %.2f%%\n", r.Suite, r.Version,
-		r.StartedAt.Format(time.RFC3339), r.Fingerprint, r.Total, r.Passed, r.PassRate*100)
+	gate := "✅ 通过"
+	if r.Gate != GatePassed {
+		gate = "❌ 未通过"
+	}
+	fmt.Fprintf(&md, "# 评测报告：%s\n\n- 结论：%s（门槛 %.2f%%）\n- 版本：%s\n- 时间：%s\n- 配置指纹：%s\n- 用例：%d，通过 %d，通过率 %.2f%%\n", r.Suite,
+		gate, r.MinPassRate*100, r.Version, r.StartedAt.Format(time.RFC3339), r.Fingerprint, r.Total, r.Passed, r.PassRate*100)
 	keys := make([]string, 0, len(r.Metrics))
 	for k := range r.Metrics {
 		keys = append(keys, k)
@@ -164,6 +254,20 @@ func WriteReport(dir string, r Report) error {
 	sort.Strings(keys)
 	for _, k := range keys {
 		fmt.Fprintf(&md, "- %s：%.4f\n", k, r.Metrics[k])
+	}
+	md.WriteString("\n## 分组\n\n")
+	gk := make([]string, 0, len(r.Groups))
+	for k := range r.Groups {
+		gk = append(gk, k)
+	}
+	sort.Strings(gk)
+	for _, k := range gk {
+		g := r.Groups[k]
+		mark := ""
+		if g.Passed < g.Total {
+			mark = " ❌"
+		}
+		fmt.Fprintf(&md, "- %s：%d/%d%s\n", k, g.Passed, g.Total, mark)
 	}
 	md.WriteString("\n## 配置\n\n")
 	ck := make([]string, 0, len(r.Config))
@@ -179,7 +283,7 @@ func WriteReport(dir string, r Report) error {
 		md.WriteString("无\n")
 	}
 	for _, f := range r.Failures {
-		fmt.Fprintf(&md, "- `%s` %s：%s（实际：%s）\n", f.ID, f.Query, strings.Join(f.Problems, "；"), strings.Join(f.Got, ", "))
+		fmt.Fprintf(&md, "- ❌ `%s` %s：%s（实际：%s）\n", f.ID, f.Query, strings.Join(f.Problems, "；"), strings.Join(f.Got, ", "))
 	}
 	return os.WriteFile(filepath.Join(dir, "report-"+r.Suite+".md"), []byte(md.String()), 0o644)
 }

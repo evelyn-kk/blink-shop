@@ -383,3 +383,6 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 		return nil
 	}
 }
+
+// Index 返回商品图索引（管理端查看状态用）。
+func (s *Service) Index() Index { return s.index }

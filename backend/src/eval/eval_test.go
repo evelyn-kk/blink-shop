@@ -41,7 +41,7 @@ func TestWriteReport(t *testing.T) {
 	dir := t.TempDir()
 	rep := Report{Suite: "x", Version: "v", Config: map[string]string{"a": "1"}, Metrics: map[string]float64{"m": 0.5}, Total: 2, Passed: 1,
 		Failures: []Failure{{ID: "c1", Query: "q", Problems: []string{"p"}, Got: []string{"g"}}}}
-	rep.finish(rep.StartedAt)
+	rep.finish(rep.StartedAt, 0)
 	if err := WriteReport(dir, rep); err != nil {
 		t.Fatal(err)
 	}
@@ -67,5 +67,45 @@ func TestImageSuite(t *testing.T) {
 	m := rep.Metrics
 	if m["recall_at_3"] < 0.98 || m["held_out_recall_at_3"] < 0.98 || m["no_match_accuracy"] < 1 || m["inactive_leaks"] != 0 || m["match_precision"] < 0.98 {
 		t.Fatalf("image metrics below threshold: %v", m)
+	}
+}
+
+// TestIntentSuite：开发集（非 held_out）全部通过；留出集准确率不低于当前水平（防退化），整体过门槛。
+func TestIntentSuite(t *testing.T) {
+	rep, err := RunIntent(context.Background(), IntentOptions{Cases: dataDir + "intent.jsonl", Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases, err := readJSONL[IntentCase](dataDir + "intent.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	heldOut := map[string]bool{}
+	for _, c := range cases {
+		heldOut[c.ID] = c.HeldOut
+	}
+	for _, f := range rep.Failures {
+		if heldOut[f.ID] {
+			t.Logf("held-out miss %s %q: %v got=%v", f.ID, f.Query, f.Problems, f.Got)
+			continue
+		}
+		t.Errorf("%s %q: %v got=%v", f.ID, f.Query, f.Problems, f.Got)
+	}
+	if rep.Total < 60 || rep.Gate != GatePassed || rep.Metrics["held_out_accuracy"] < 0.6 || len(rep.Groups) < 12 {
+		t.Fatalf("report: total=%d gate=%s metrics=%v groups=%d", rep.Total, rep.Gate, rep.Metrics, len(rep.Groups))
+	}
+}
+
+// TestAgentSuite：端到端导购评测集全部通过（推荐、不编造商品、下架/风控商品不出现、知识引用、购物车副作用、风险拦截、脱敏）。
+func TestAgentSuite(t *testing.T) {
+	rep, err := RunAgent(context.Background(), AgentOptions{Cases: dataDir + "agent.jsonl", Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range rep.Failures {
+		t.Errorf("%s %q: %v got=%v", f.ID, f.Query, f.Problems, f.Got)
+	}
+	if rep.Total < 20 || rep.Gate != GatePassed || rep.Metrics["no_product_accuracy"] != 1 || rep.Metrics["redaction_accuracy"] != 1 {
+		t.Fatalf("report: total=%d gate=%s metrics=%v", rep.Total, rep.Gate, rep.Metrics)
 	}
 }

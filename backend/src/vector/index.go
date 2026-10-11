@@ -184,3 +184,13 @@ func clip(s string) string {
 	}
 	return s
 }
+
+// Status 返回知识分块集合的状态和 Embedder 名称（只读）。
+func (k *KnowledgeIndex) Status(ctx context.Context) (CollectionStatus, string) {
+	return k.m.Status(ctx, k.collection), k.e.Name()
+}
+
+// Status 返回商品文本集合的状态和 Embedder 名称（只读）。
+func (p *ProductIndex) Status(ctx context.Context) (CollectionStatus, string) {
+	return p.m.Status(ctx, p.collection), p.e.Name()
+}

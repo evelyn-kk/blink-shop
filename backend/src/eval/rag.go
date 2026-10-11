@@ -24,6 +24,8 @@ type RAGCase struct {
 
 // RAGOptions 是检索评测的输入。Vector 为 nil 表示纯关键词。
 type RAGOptions struct {
+	// MinPass 是门槛通过率，0 表示要求全部通过。
+	MinPass float64
 	Cases   string // JSONL 用例
 	Corpus  string // 固定语料 JSON
 	K       int
@@ -116,12 +118,7 @@ func RunRAG(ctx context.Context, o RAGOptions) (Report, error) {
 				problems = append(problems, "citation 的 chunk_id 不能全部回查")
 			}
 		}
-		rep.Total++
-		if len(problems) == 0 {
-			rep.Passed++
-		} else {
-			rep.Failures = append(rep.Failures, Failure{ID: c.ID, Query: c.Query, Problems: problems, Got: got})
-		}
+		rep.record(ragGroup(c), Failure{ID: c.ID, Query: c.Query, Problems: problems, Got: got})
 	}
 	if expected > 0 {
 		rep.Metrics["recall_at_k"] = round(float64(found) / float64(expected))
@@ -133,6 +130,17 @@ func RunRAG(ctx context.Context, o RAGOptions) (Report, error) {
 	if noneCases > 0 {
 		rep.Metrics["no_result_accuracy"] = round(float64(noneOK) / float64(noneCases))
 	}
-	rep.finish(start)
+	rep.finish(start, o.MinPass)
 	return rep, nil
+}
+
+// ragGroup：留出集 / 无结果 / 普通召回。
+func ragGroup(c RAGCase) string {
+	switch {
+	case c.HeldOut:
+		return "held_out"
+	case c.ExpectNone:
+		return "no_result"
+	}
+	return "recall"
 }

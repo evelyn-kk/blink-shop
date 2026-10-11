@@ -14,6 +14,8 @@
 | 调试观测 | run 列表和时间线：规划、工具、检索、输出、失败、耗时 |
 | 质量评测 | 数据集、工具套件、报告、通过率和失败样例；向量索引状态 |
 
+调试观测（`#/admin/debug`）和质量评测（`#/admin/evals`）的接口与报告格式见 `backend/README.md`“离线评测 → 调试观测与质量评测接口”和 `quality/schemas/eval-report.schema.json`；运行手册在 `quality/README.md`。
+
 ## 原生 Android（用户端）
 
 Java 包名 `com.blink.shop`。用 OkHttp 管理请求、SSE 与 bearer token；SharedPreferences 保存会话（安全存储可作为增强）。页面：登录注册、商品列表/筛选、商品详情、聊天、购物车、结算、订单、优惠券、账户资料、设置/帮助。聊天支持历史抽屉、图片选择/拍照、流式 markdown、商品/比较块点击跳转、取消生成、TTS 播放。商品/购物车/订单页展示可关闭的 AI 浮窗建议；点击带入聊天。

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://blink.shop/schemas/eval-report.schema.json",
+  "title": "Blink Shop 评测报告",
+  "description": "cmd/eval 写出的 report-<suite>.json；管理端质量评测页按此读取。schema_version 变化表示不兼容的格式调整。",
+  "type": "object",
+  "required": ["schema_version", "suite", "version", "config", "config_fingerprint", "started_at", "duration_ms", "total", "passed",
+    "pass_rate", "min_pass_rate", "gate", "metrics", "groups", "cases", "failures"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "blink_shop.eval_report.v1" },
+    "suite": { "type": "string", "enum": ["intent", "rag", "products", "images", "agent"] },
+    "version": { "type": "string", "description": "被评测代码的版本（如提交 SHA）" },
+    "config": { "type": "object", "additionalProperties": { "type": "string" } },
+    "config_fingerprint": { "type": "string", "description": "config 的 SHA-256 前 12 位" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "total": { "type": "integer", "minimum": 0 },
+    "passed": { "type": "integer", "minimum": 0 },
+    "pass_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+    "min_pass_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+    "gate": { "type": "string", "enum": ["passed", "failed"], "description": "pass_rate ≥ min_pass_rate 且至少有一条用例为 passed" },
+    "metrics": { "type": "object", "additionalProperties": { "type": "number" } },
+    "groups": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["total", "passed", "pass_rate"],
+        "properties": {
+          "total": { "type": "integer", "minimum": 1 },
+          "passed": { "type": "integer", "minimum": 0 },
+          "pass_rate": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "group", "passed"],
+        "properties": { "id": { "type": "string" }, "group": { "type": "string" }, "passed": { "type": "boolean" } }
+      }
+    },
+    "failures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "group", "query", "problems", "got"],
+        "properties": {
+          "id": { "type": "string" },
+          "group": { "type": "string" },
+          "query": { "type": "string" },
+          "problems": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+          "got": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}
