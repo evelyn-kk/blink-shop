@@ -4,7 +4,10 @@
 #   (cd frontend && npm ci && npm run build)            # 先构建前端，产物在 frontend/dist
 #   docker compose -f deployments/app/docker-compose.yml --env-file deployments/app/app.env up -d --build --wait
 #
-# 生产环境把基础设施换成托管服务即可，拓扑不变：浏览器 → web（nginx，静态文件 + /api 反代）→ api（多实例）→ MySQL / MinIO / Milvus / Nacos。
+# 生产环境把基础设施换成托管服务即可，拓扑不变：浏览器 → web（nginx，静态文件 + /api 反代）→ api（多实例）→ MySQL / MinIO / Milvus / Nacos / Redis。
+#
+# 多实例：BLINK_API_REPLICAS=3 起 3 个 api 容器，nginx 按 Docker DNS 解析出全部实例轮询（见 nginx.conf）。多实例时 app.env 要配
+# REDIS_ADDR（限流共享计数），并让 MYSQL_MAX_OPEN_CONNS × 实例数 不超过 MySQL 的 max_connections（本地默认 151）。
 name: blink_shop_app
 
 services:
@@ -12,6 +15,8 @@ services:
     build: ../../backend
     image: blink-shop-api:${BLINK_VERSION:-dev}
     env_file: app.env
+    deploy:
+      replicas: ${BLINK_API_REPLICAS:-1}
     environment:
       API_ADDR: ":8080"
     volumes:

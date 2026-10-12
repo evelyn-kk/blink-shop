@@ -20,7 +20,23 @@
    负载均衡的健康检查用 `/api/v1/ready`，存活检查用 `/api/v1/health`（容器里用 `/api -healthcheck`，镜像没有 curl）。
    前面有 nginx 时用 `deployments/app/nginx.conf` 的写法：上游连接池（`keepalive`，否则高并发时本地端口耗尽）和
    `server api:8080 resolve`（API 换 IP 后自动重新解析，不用重载 nginx）。
-5. **发布后 15 分钟**：看 5xx 比例、接口 P95、结算成功率、导购失败率、熔断状态；任何一项告警就按“回滚”处理。
+5. **多实例**（`deployments/app` 用 `BLINK_API_REPLICAS=N`；托管平台按其扩容方式）：
+   - 必须配 `REDIS_ADDR`：限流计数放在 Redis，所有实例共享一个窗口；不配时每个实例各自计数，实际限额是配置值 × 实例数。
+     Redis 故障时各实例自动退回进程内计数（照样限流），看 `blink_ratelimit_backend_redis{limiter}`（0 表示已退回）和 `blink_ratelimit_fallback_total`。
+   - 连接池：`MYSQL_MAX_OPEN_CONNS × 实例数` 不超过 MySQL `max_connections`（留 10–20 个给运维和迁移）。
+   - 按实例的状态（可以接受）：熔断器、商品向量同步计数、导购运行的取消（只能直接作用于本实例上的运行，其他实例上的运行改为写库）。
+     一个实例的模型熔断打开时，其他实例照常调用模型。
+   - 滚动替换（一次换一个，先加后减）：Compose 没有滚动发布，用 `--no-recreate` 保留现有实例，先多起一个新版本实例，
+     等它 `/ready` 200 后停掉一个旧实例，重复到全部换完：
+     ```bash
+     C="docker compose -f deployments/app/docker-compose.yml --env-file deployments/app/app.env"
+     BLINK_VERSION=<新版本> $C up -d --no-deps --no-recreate --scale api=$((N+1)) api   # 多起一个新版本实例（旧实例不动）
+     docker stop <一个旧实例容器> && docker rm <它>                                       # SIGTERM：/ready 先 503，SHUTDOWN_DRAIN 内被摘掉，再关闭
+     # 重复以上两步直到旧实例都换掉
+     ```
+     nginx 的上游按 Docker DNS 每 10 秒重新解析，下线实例的请求连不上时自动换下一个实例（`proxy_next_upstream` 默认 error / timeout），
+     演练记录见 `docs/10-release-readiness.md`。回滚同样按实例逐个替换成上一版本镜像。
+6. **发布后 15 分钟**：看 5xx 比例、接口 P95、结算成功率、导购失败率、熔断状态；任何一项告警就按“回滚”处理。
 
 ## 备份
 
