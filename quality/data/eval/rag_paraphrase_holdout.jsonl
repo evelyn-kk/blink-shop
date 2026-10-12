@@ -1,0 +1,45 @@
+# 知识检索改写留出集（held_out）：把 rag.jsonl 覆盖的知识点换成与期望文档几乎没有字面重合的说法（同义词、口语、错别字、中英混写），用来衡量向量召回相对关键词召回的收益。语料与 rag.jsonl 相同；expect 为必须出现在前 k 条的文档。每条与期望文档的二元组重合率 ≤ 20%（quality/tools/paraphrase_overlap.py 核对）。冻结后不得为它调规则、权重或阈值。
+{"id": "rp_001", "query": "晚上黑乎乎的地方照相糊不糊", "expect": ["vista_camera"], "held_out": true}
+{"id": "rp_002", "query": "拍人的时候背后能弄得朦胧一点吗", "expect": ["vista_camera"], "held_out": true}
+{"id": "rp_003", "query": "离得老远的明星能拍清楚不 zoom 够用吗", "expect": ["vista_camera"], "held_out": true}
+{"id": "rp_004", "query": "插上线半小时能回多少血", "expect": ["vista_battery"], "held_out": true}
+{"id": "rp_005", "query": "手机搁垫子上不插线能续命吗", "expect": ["vista_battery"], "held_out": true}
+{"id": "rp_006", "query": "用别家的插头给它供能会变慢吗", "expect": ["vista_battery"], "held_out": true}
+{"id": "rp_007", "query": "坐高铁吵不吵 能把外面的声音隔掉吗", "expect": ["earbuds_faq"], "held_out": true}
+{"id": "rp_008", "query": "戴着下水扑腾行不行", "expect": ["earbuds_faq"], "held_out": true}
+{"id": "rp_009", "query": "华为连上听歌是不是无损", "expect": ["earbuds_faq"], "held_out": true}
+{"id": "rp_010", "query": "earbuds 一口气能放几个钟头的歌", "expect": ["earbuds_faq"], "held_out": true}
+{"id": "rp_011", "query": "苹果笔记本上 win 键和 alt 键反了咋整", "expect": ["keyboard_guide"], "held_out": true}
+{"id": "rp_012", "query": "按键开关坏了能自己拆下来换新的吗 不用电烙铁那种", "expect": ["keyboard_guide"], "held_out": true}
+{"id": "rp_013", "query": "同时配对电脑平板和手机 怎么来回跳", "expect": ["keyboard_guide"], "held_out": true}
+{"id": "rp_014", "query": "买完大概啥时候寄出", "expect": ["digital_shipping"], "held_out": true}
+{"id": "rp_015", "query": "我在香港能邮过来吗", "expect": ["digital_shipping"], "held_out": true}
+{"id": "rp_016", "query": "住杭州第二天能到手吗", "expect": ["digital_shipping"], "held_out": true}
+{"id": "rp_017", "query": "包裹追踪编码去哪看", "expect": ["digital_shipping"], "held_out": true}
+{"id": "rp_018", "query": "公司报销要抬头的票据怎么弄", "expect": ["digital_invoice"], "held_out": true}
+{"id": "rp_019", "query": "报销凭证隔多久发到 email", "expect": ["digital_invoice"], "held_out": true}
+{"id": "rp_020", "query": "能给开专票抵扣进项吗", "expect": ["digital_invoice"], "held_out": true}
+{"id": "rp_021", "query": "小孩写作业对眼睛伤害大不大", "expect": ["lamp_guide"], "held_out": true}
+{"id": "rp_022", "query": "半夜起床想要一点点微光怎么弄", "expect": ["lamp_guide"], "held_out": true}
+{"id": "rp_023", "query": "看书时那盏灯是暖黄还是冷白", "expect": ["lamp_guide"], "held_out": true}
+{"id": "rp_024", "query": "照出来的颜色真实不失真吗", "expect": ["lamp_guide"], "held_out": true}
+{"id": "rp_025", "query": "买的沙发收到半个月了不喜欢还能送回去吗", "expect": ["home_returns"], "held_out": true}
+{"id": "rp_026", "query": "灯用了几个月不亮了 邮费谁付", "expect": ["home_returns"], "held_out": true}
+{"id": "rp_027", "query": "按我尺寸打的柜子能反悔吗", "expect": ["home_returns"], "held_out": true}
+{"id": "rp_028", "query": "能刷信用卡吗", "expect": ["platform_payment"], "held_out": true}
+{"id": "rp_029", "query": "拍下来忘了付钱会咋样", "expect": ["platform_payment"], "held_out": true}
+{"id": "rp_030", "query": "钱退回储蓄卡要等几天", "expect": ["platform_payment"], "held_out": true}
+{"id": "rp_031", "query": "两张折扣券一起抵行不行", "expect": ["platform_coupon"], "held_out": true}
+{"id": "rp_032", "query": "红包过了日期还能找回来吗", "expect": ["platform_coupon"], "held_out": true}
+{"id": "rp_033", "query": "只退一件东西 之前抵扣的券还给我吗", "expect": ["platform_coupon"], "held_out": true}
+{"id": "rp_034", "query": "大太阳底下看得清楚吗", "expect": ["web_review"], "held_out": true}
+{"id": "rp_035", "query": "打王者久了烫手吗", "expect": ["web_review"], "held_out": true}
+{"id": "rp_036", "query": "显示屏滑起来顺不顺 高帧", "expect": ["web_review"], "held_out": true}
+{"id": "rp_037", "query": "这款滑鼠拿在手里沉吗", "expect": ["json_specs"], "held_out": true}
+{"id": "rp_038", "query": "滑鼠隔多久得换一次电芯", "expect": ["json_specs"], "held_out": true}
+{"id": "rp_039", "query": "苹果平板上能用这个滑鼠吗", "expect": ["json_specs"], "held_out": true}
+{"id": "rp_040", "query": "nova12 白天随手照出来的相片够清晰吗", "expect": ["doc_seed_nova"], "held_out": true}
+{"id": "rp_041", "query": "nova12 从早用到晚电撑得住吗", "expect": ["doc_seed_nova"], "held_out": true}
+{"id": "rp_042", "query": "自己不小心摔裂的屏幕给免费修吗", "expect": ["doc_seed_after_sales"], "held_out": true}
+{"id": "rp_043", "query": "耳塞不想要了一周内寄回去邮费谁掏", "expect": ["doc_seed_after_sales"], "held_out": true}
+{"id": "rp_044", "query": "滑鼠能不能不插 USB 小头直接无线连", "expect": ["doc_seed_mouse"], "held_out": true}
