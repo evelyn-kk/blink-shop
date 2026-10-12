@@ -43,9 +43,18 @@ jobs:
         options: >-
           --health-cmd="curl -fsS http://127.0.0.1:9000/minio/health/live"
           --health-interval=5s --health-timeout=5s --health-retries=30
+      # 限流共享计数的集成测试用（两个实例共用一个窗口）；镜像与 deployments/docker-compose.yml 锁定的版本一致。
+      redis:
+        image: redis:7.4.11@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=5s --health-retries=30
     env:
       BLINK_TEST_MYSQL_DSN: root:blink_ci_root@tcp(127.0.0.1:3306)/
       BLINK_TEST_MINIO_ENDPOINT: 127.0.0.1:9000
+      BLINK_TEST_REDIS_ADDR: 127.0.0.1:6379
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -56,7 +65,7 @@ jobs:
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - name: go vet
         run: go vet ./...
-      - name: go test (race, with MySQL and MinIO)
+      - name: go test (race, with MySQL, MinIO and Redis)
         run: go test -race ./...
       - name: seed twice on empty database
         shell: bash # 开启 pipefail，seed 失败不会被 tee 吞掉

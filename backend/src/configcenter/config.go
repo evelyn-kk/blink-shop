@@ -28,6 +28,8 @@ type Config struct {
 	MinIOUseSSL          bool
 	MilvusToken          string
 	MetricsToken         string
+	RedisAddr            string // 为空表示限流只在进程内计数
+	RedisPassword        string
 	MySQLMaxOpen         int
 	MySQLMaxIdle         int
 	AIAPIKey             string
@@ -119,6 +121,8 @@ func Load(ctx context.Context, r *Resolver) (Config, error) {
 		MinIOSecretKey:  r.Get(ctx, KeyMinIOSecretKey),
 		MinIOBucket:     r.Get(ctx, KeyMinIOBucket),
 		MilvusToken:     r.Get(ctx, KeyMilvusToken),
+		RedisAddr:       strings.TrimSpace(r.Get(ctx, KeyRedisAddr)),
+		RedisPassword:   r.Get(ctx, KeyRedisPassword),
 		MetricsToken:    strings.TrimSpace(r.Get(ctx, KeyMetricsToken)),
 		AIAPIKey:        r.Get(ctx, KeyAIAPIKey),
 		AIBaseURL:       strings.TrimSpace(r.Get(ctx, KeyAIBaseURL)),

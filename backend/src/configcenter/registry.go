@@ -55,7 +55,10 @@ var (
 	KeyMetricsToken   = Key{Name: "metrics.token", Env: "METRICS_TOKEN", Secret: true}
 	KeyMinIOSecretKey = Key{Name: "minio.secret_key", Env: "MINIO_SECRET_KEY", Default: "minioadmin", Secret: true}
 	KeyMilvusToken    = Key{Name: "milvus.token", Env: "MILVUS_TOKEN", Secret: true}
-	KeyAIAPIKey       = Key{Name: "ai.api_key", Env: "AI_API_KEY", Secret: true}
+	// KeyRedisAddr / KeyRedisPassword：限流计数用的 Redis（多实例共享窗口）；为空表示进程内计数。仅启动时读取。
+	KeyRedisAddr     = Key{Name: "redis.addr", Env: "REDIS_ADDR"}
+	KeyRedisPassword = Key{Name: "redis.password", Env: "REDIS_PASSWORD", Secret: true}
+	KeyAIAPIKey      = Key{Name: "ai.api_key", Env: "AI_API_KEY", Secret: true}
 )
 
 // 风控；运行中可由动态配置调整。导购 Agent 的运行前检查在 7.2 接入后读取它。

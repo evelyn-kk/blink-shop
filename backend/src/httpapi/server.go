@@ -4,6 +4,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"github.com/redis/go-redis/v9"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -47,6 +48,8 @@ type Options struct {
 	ProductIndex rag.ProductIndex
 	// ImageSearch 是图片找商品；nil 表示图搜不可用（接口返回 503，导购如实说明）。商品图随商品变更异步重建。
 	ImageSearch *imagesearch.Service
+	// RateLimitRedis 是限流计数用的 Redis（多实例共享窗口）；nil 表示进程内计数（单实例）。Redis 出错时自动退回进程内计数。
+	RateLimitRedis redis.Scripter
 	// Metrics 控制 GET /metrics 的访问（见 MetricsOptions）。
 	Metrics MetricsOptions
 	// EvalDataDir / EvalReportDir 是评测数据集（*.jsonl）和 cmd/eval 报告的目录；为空表示没有配置，管理端评测页只显示空列表。
@@ -116,9 +119,9 @@ type Server struct {
 	configs        ConfigAdmin
 	mux            *http.ServeMux
 	routeAccess    map[string]access // 路由 pattern → 访问规则，RBAC 矩阵测试据此核对
-	ipLimiter      *rateLimiter
-	accountLimiter *rateLimiter
-	loginLimiter   *rateLimiter
+	ipLimiter      limiter
+	accountLimiter limiter
+	loginLimiter   limiter
 }
 
 const readinessTimeout = 2 * time.Second
@@ -149,10 +152,14 @@ func NewServer(opts Options) *Server {
 		configs:        opts.Configs,
 		mux:            http.NewServeMux(),
 		routeAccess:    map[string]access{},
-		ipLimiter:      newRateLimiter(time.Minute),
-		accountLimiter: newRateLimiter(time.Minute),
-		loginLimiter:   newRateLimiter(time.Minute),
 	}
+	logger := opts.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+	s.ipLimiter = newLimiter("ip", time.Minute, opts.RateLimitRedis, logger)
+	s.accountLimiter = newLimiter("account", time.Minute, opts.RateLimitRedis, logger)
+	s.loginLimiter = newLimiter("login", time.Minute, opts.RateLimitRedis, logger)
 	if s.now == nil {
 		s.now = time.Now
 	}

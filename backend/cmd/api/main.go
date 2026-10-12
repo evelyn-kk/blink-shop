@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/redis/go-redis/v9"
 	"io"
 	"log/slog"
 	"net"
@@ -149,22 +150,35 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 	logger.Info("speech configured", "stt_provider", cfg.Speech.STTProvider, "stt_enabled", recognizer != nil,
 		"tts_provider", cfg.Speech.TTSProvider, "tts_enabled", synthesizer != nil)
 
+	// 限流计数：配置了 Redis 时多实例共享窗口；Redis 不可用时每个请求自动退回进程内计数（不影响启动和 /ready）。
+	var rateRedis *redis.Client
+	if cfg.RedisAddr != "" {
+		rateRedis = redis.NewClient(&redis.Options{Addr: cfg.RedisAddr, Password: cfg.RedisPassword, DialTimeout: time.Second,
+			ReadTimeout: 200 * time.Millisecond, WriteTimeout: 200 * time.Millisecond, PoolSize: 64})
+		defer rateRedis.Close()
+		logger.Info("rate limit uses redis", "addr", cfg.RedisAddr)
+	}
+	var rateLimitRedis redis.Scripter
+	if rateRedis != nil {
+		rateLimitRedis = rateRedis
+	}
 	server := httpapi.NewServer(httpapi.Options{
-		PromptTTL:     cfg.Nacos.Refresh,
-		PromptMirror:  promptMirror(cfg),
-		Speech:        httpapi.SpeechOptions{Recognizer: recognizer, Synthesizer: synthesizer, MaxSeconds: cfg.Speech.STTMaxSeconds, MaxRunes: cfg.Speech.TTSMaxRunes},
-		VectorIndex:   vec.knowledgeOpt(),
-		ProductIndex:  vec.productOpt(),
-		ImageSearch:   images,
-		Logger:        logger,
-		Settings:      configcenter.NewHTTPSettingsProvider(resolver, cfg.IsProduction()),
-		Store:         st,
-		ObjectStore:   objects,
-		AvatarDir:     cfg.AvatarUploadDir,
-		EvalDataDir:   cfg.EvalDataDir,
-		Metrics:       httpapi.MetricsOptions{Token: cfg.MetricsToken, AllowLoopback: !cfg.IsProduction()},
-		EvalReportDir: cfg.EvalReportDir,
-		Configs:       configcenter.NewAdmin(resolver, dynamic),
+		RateLimitRedis: rateLimitRedis,
+		PromptTTL:      cfg.Nacos.Refresh,
+		PromptMirror:   promptMirror(cfg),
+		Speech:         httpapi.SpeechOptions{Recognizer: recognizer, Synthesizer: synthesizer, MaxSeconds: cfg.Speech.STTMaxSeconds, MaxRunes: cfg.Speech.TTSMaxRunes},
+		VectorIndex:    vec.knowledgeOpt(),
+		ProductIndex:   vec.productOpt(),
+		ImageSearch:    images,
+		Logger:         logger,
+		Settings:       configcenter.NewHTTPSettingsProvider(resolver, cfg.IsProduction()),
+		Store:          st,
+		ObjectStore:    objects,
+		AvatarDir:      cfg.AvatarUploadDir,
+		EvalDataDir:    cfg.EvalDataDir,
+		Metrics:        httpapi.MetricsOptions{Token: cfg.MetricsToken, AllowLoopback: !cfg.IsProduction()},
+		EvalReportDir:  cfg.EvalReportDir,
+		Configs:        configcenter.NewAdmin(resolver, dynamic),
 		// 导购风险词和模型设置跟随动态配置（管理后台可改，立即生效）。
 		RiskWords: func(ctx context.Context) []string { return configcenter.RiskBlockedWords(ctx, resolver) },
 		LLM:       provider,

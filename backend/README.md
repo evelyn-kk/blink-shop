@@ -91,6 +91,11 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 | 9 | 账号限流 | 认证后一层，已登录请求按账号计数；未登录请求只受 IP 层约束 |
 | 10 | 路由 | 未知路径 404、方法不支持 405（带 `Allow`），都是统一错误 JSON；命中后先按访问规则检查登录、账户状态和角色 |
 
+限流计数（IP、账号、登录尝试三个限流器，固定 1 分钟窗口）：配置了 `REDIS_ADDR` 时存在 Redis，多个实例共享同一个窗口
+（键 `blink_shop:rl:<ip|acct|login>:<key>:<窗口序号>`，一段 Lua 原子地 `INCR` 并在第一次计数时设过期；窗口按 Unix 时间对齐）；
+没配置时每个实例各自在内存计数（单实例部署）。Redis 出错或 100ms 内没有响应时退回进程内计数——照样限流，不是放开——
+记日志（每个限流器 10 秒最多一条）和指标 `blink_ratelimit_fallback_total{limiter}`、`blink_ratelimit_backend_redis{limiter}`（1 在用 Redis，0 退回内存），
+1 秒后再试 Redis。Redis 不影响启动和 `/ready`。
 `/health`、`/ready` 不参与限流。客户端 IP：只有直连方属于 `TRUSTED_PROXY_CIDRS` 时才读取 `X-Forwarded-For`，并从右往左跳过可信代理，取第一个不可信地址，客户端在头部前面伪造的地址不会被采用。
 
 ## 统一错误
@@ -823,6 +828,8 @@ MILVUS_ADDR=127.0.0.1:19530 go run ./cmd/eval -suite=rag -vector=env -recall=vec
 | `MINIO_USE_SSL` | — | `false` | 是否用 HTTPS 连接对象存储 |
 | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | — | `minioadmin` | 密钥类 |
 | `MILVUS_TOKEN` | — | 空 | 密钥类 |
+| `REDIS_ADDR` | — | 空 | 限流计数用的 Redis（如 `127.0.0.1:6379`），多实例共享窗口；为空每个实例各自计数 |
+| `REDIS_PASSWORD` | — | 空 | 密钥类 |
 | `AI_API_KEY` | — | 空 | 密钥类。为空时不创建模型客户端，导购完全走规则 |
 | `AI_BASE_URL` | — | `https://api.deepseek.com/v1` | OpenAI 兼容的模型服务地址（`/chat/completions`）；换别家（如千问 `https://dashscope.aliyuncs.com/compatible-mode/v1`）改这里和模型名即可 |
 | `AI_PLANNER_ENABLED` | `ai.planner_enabled` | `true` | 用小模型规划意图（失败回退规则） |

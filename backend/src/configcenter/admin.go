@@ -196,6 +196,8 @@ var settings = []Setting{
 	{Key: KeyMinIOSecretKey, Description: "对象存储 Secret Key"},
 	{Key: KeyMySQLMaxOpen, Description: "数据库连接池最大连接数（1–500；所有实例之和不能超过 MySQL max_connections）"},
 	{Key: KeyMySQLMaxIdle, Description: "数据库连接池保留的空闲连接数（0 到最大连接数）"},
+	{Key: KeyRedisAddr, Description: "限流计数用的 Redis 地址（如 127.0.0.1:6379），多实例共享计数；为空表示每个实例各自计数。Redis 不可用时自动退回进程内计数"},
+	{Key: KeyRedisPassword, Description: "Redis 密码"},
 	{Key: KeyMilvusToken, Description: "Milvus 访问令牌"},
 	{Key: KeyMetricsToken, Description: "GET /metrics 的 Bearer 令牌；为空时开发环境只允许本机访问，生产环境关闭"},
 	{Key: KeyAIAPIKey, Description: "模型服务 API Key"},
