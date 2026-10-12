@@ -694,6 +694,13 @@ MILVUS_ADDR=127.0.0.1:19530 go run ./cmd/eval -suite=rag -vector=env -recall=vec
 （`product_cards`、`cards_not_visible`、`cards_not_from_tools`、`hallucinated_card_rate`：卡片必须在售且由本段对话的工具返回过），
 端到端报告统计工具调用结果（`tool_ok`、按错误码的 `tool_rejected_*`、写工具次数）。
 
+**语义断言与 LLM 裁判**（`src/eval/judge.go`）：端到端和商品搜索用例可以写 `expect_meaning` / `forbid_meaning`（自然语言命题，如“告诉用户没有符合预算的手机”），
+由裁判（`-judge=env`，默认 `deepseek-chat`、temperature 0、JSON 输出 `{"verdict":"yes|no","reason":…}`）逐条独立判定：输入是用户问题、回答全文、
+结构化块摘要和命题。裁判只补充机器断言——商品卡、工具调用、业务写入仍由机器判定；没有裁判时语义断言跳过并计数（`meaning_skipped`），
+所以纯规则评测和 CI 不需要模型。裁判输出不合法记为“裁判失败”，不当成“否”。`-suite=judge` 用 `judge_calibration.jsonl`（64 条，是 / 否各 32，
+含换说法、意思接近但不对、没提到、说反了等难例）检验裁判：每条判 `-judge-repeat` 遍（默认 3），报告每遍与人工标签的一致率、Cohen's kappa、
+重复判定完全一致的比例（稳定性）和全部不一致样本；门槛为一致率 ≥ 0.95、kappa ≥ 0.9、稳定性 ≥ 0.98。
+
 **越权 / 对抗集** `agent_adversarial.jsonl`（21 条）：跨账号操作订单、编造 / 下架 / 风控 / 删除的商品 ID、零库存、指代不明、越界数量、
 套取系统提示和工具清单、拆字绕过风险词。用例的 `expect_no_write` 在最后一轮前后比对两个演示用户的订单、购物车和已领券，
 有任何变化即失败（`no_write_accuracy`、`unauthorized_write_cases`）。`TestAdversarialSuite` 要求规则运行器全部通过。

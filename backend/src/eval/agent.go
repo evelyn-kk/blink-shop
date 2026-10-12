@@ -36,11 +36,14 @@ type AgentCase struct {
 	ExpectNoProducts bool     `json:"expect_no_products"`
 	ExpectTextAny    []string `json:"expect_text_any"`
 	ForbiddenText    []string `json:"forbidden_text"`
-	ExpectTools      []string `json:"expect_tools"`
-	ExpectTrace      []string `json:"expect_trace"`
-	NoLeak           []string `json:"no_leak"`
-	ExpectCart       []string `json:"expect_cart"`
-	ExpectNoWrite    bool     `json:"expect_no_write"`
+	// ExpectMeaning / ForbidMeaning 是语义断言：回答（含结构化块）必须 / 不能表达的意思，由裁判判定（见 judge.go），没有裁判时跳过。
+	ExpectMeaning []string `json:"expect_meaning"`
+	ForbidMeaning []string `json:"forbid_meaning"`
+	ExpectTools   []string `json:"expect_tools"`
+	ExpectTrace   []string `json:"expect_trace"`
+	NoLeak        []string `json:"no_leak"`
+	ExpectCart    []string `json:"expect_cart"`
+	ExpectNoWrite bool     `json:"expect_no_write"`
 }
 
 // AgentOptions 是端到端导购评测的输入。
@@ -53,6 +56,8 @@ type AgentOptions struct {
 	Now     func() time.Time
 	// Model 不为 nil 时用模型跑规划 / 工具循环（与线上同一运行器），并统计调用、token、回退和商品卡出处。
 	Model *ModelConfig
+	// Judge 不为 nil 时判定 expect_meaning / forbid_meaning；nil 时这两类断言跳过并计数（meaning_skipped）。
+	Judge *Judge
 	// ProductIndex / Vector 是商品和知识的向量索引（可为 nil，表示只用关键词）。种子数据的商品和分块 ID 固定，
 	// 两个索引在开始前写一次种子数据，所有用例共用；每条用例的 Store 仍是新的，检索结果照样按它的可见性过滤。
 	ProductIndex rag.ProductIndex
@@ -98,7 +103,7 @@ func RunAgent(ctx context.Context, o AgentOptions) (Report, error) {
 		fixed := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC) // 演示促销有效期内，结果可复现
 		now = func() time.Time { return fixed }
 	}
-	var intentCases, intentOK, noneCases, noneOK, leakCases, leakOK int
+	var intentCases, intentOK, noneCases, noneOK, leakCases, leakOK, meaningSkipped int
 	for i, c := range cases {
 		if err := ctx.Err(); err != nil {
 			return rep, err
@@ -201,6 +206,12 @@ func RunAgent(ctx context.Context, o AgentOptions) (Report, error) {
 				problems = append(problems, "回答不应包含“"+w+"”")
 			}
 		}
+		mp, skipped, verdicts := checkMeaning(ctx, o.Judge, c.Query, text, last.blocks, c.ExpectMeaning, c.ForbidMeaning)
+		problems = append(problems, mp...)
+		meaningSkipped += skipped
+		if verdicts != nil {
+			detail["meaning"] = verdicts
+		}
 		for _, tool := range c.ExpectTools {
 			if !toolsUsed[tool] {
 				problems = append(problems, "应调用工具 "+tool)
@@ -269,6 +280,8 @@ func RunAgent(ctx context.Context, o AgentOptions) (Report, error) {
 	}
 	stats.write(&rep, o.Model != nil)
 	audit.write(&rep)
+	rep.Metrics["meaning_skipped"] = float64(meaningSkipped)
+	o.Judge.write(&rep)
 	ratio := func(a, b int) float64 {
 		if b == 0 {
 			return 1

@@ -10,6 +10,8 @@
 //	go run ./cmd/eval -suite=agent -llm=env                       # 用 AI_* 配置的真实模型跑规划和工具循环（会产生费用）
 //	go run ./cmd/eval -suite=intent -llm=env -react=false          # 只开模型规划
 //	go run ./cmd/eval -suite=agent -agent-cases=../quality/data/eval/agent_adversarial.jsonl -llm=env
+//	go run ./cmd/eval -suite=judge -judge=env                     # 用校准集检验语义断言裁判（一致率、kappa、重复稳定性）
+//	go run ./cmd/eval -suite=agent -llm=env -judge=env            # 端到端 + 语义断言
 //
 // 任何一个评测集通过率低于 -min-pass 时退出码为 1。
 package main
@@ -69,6 +71,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	productCases := fs.String("product-cases", "", "商品搜索用例文件，默认 <data>/product_search.jsonl")
 	agentCases := fs.String("agent-cases", "", "端到端用例文件，默认 <data>/agent.jsonl")
 	ragCases := fs.String("rag-cases", "", "知识检索用例文件，默认 <data>/rag.jsonl")
+	judgeMode := fs.String("judge", "off", "off / env：语义断言（expect_meaning / forbid_meaning）的裁判；env 用 AI_* 的模型（会产生费用），off 时语义断言跳过")
+	judgeModel := fs.String("judge-model", "deepseek-chat", "裁判模型")
+	judgeCases := fs.String("judge-cases", "", "裁判校准集，默认 <data>/judge_calibration.jsonl（-suite judge）")
+	judgeRepeat := fs.Int("judge-repeat", 3, "裁判校准每条判几遍（稳定性）")
 	recall := fs.String("recall", "", "keyword / vector / hybrid：知识检索和商品搜索的召回方式；空表示接了向量时 hybrid、否则 keyword")
 	vectorWeight := fs.Float64("vector-weight", 0, "知识检索混合打分的向量权重（0 表示线上默认 0.35），只用于敏感性对照")
 	strongSim := fs.Float64("vector-strong-sim", 0, "商品向量相似度达到多少可直接推荐（0 表示线上默认 0.78），只用于敏感性对照")
@@ -101,6 +107,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	if err != nil {
 		return err
 	}
+	judge, err := judgeConfig(ctx, *judgeMode, *judgeModel, getenv)
+	if err != nil {
+		return err
+	}
 	pick := func(override, name string) string {
 		if override != "" {
 			return override
@@ -125,7 +135,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	}
 	if *suite == "all" || *suite == "products" {
 		po := eval.ProductOptions{Cases: pick(*productCases, "product_search.jsonl"), Recall: *recall, VectorStrongSim: *strongSim,
-			Version: *version, Config: cfg, MinPass: *minPass, Model: model}
+			Version: *version, Config: cfg, MinPass: *minPass, Model: model, Judge: judge}
 		if products != nil {
 			// 先把种子商品写进临时集合，报告里的 Embedding 用量只算检索
 			if err := products.seed(ctx); err != nil {
@@ -159,11 +169,19 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 		reports = append(reports, r)
 	}
 	if *suite == "all" || *suite == "agent" {
-		ao := eval.AgentOptions{Cases: pick(*agentCases, "agent.jsonl"), Version: *version, Config: cfg, MinPass: *minPass, Model: model}
+		ao := eval.AgentOptions{Cases: pick(*agentCases, "agent.jsonl"), Version: *version, Config: cfg, MinPass: *minPass, Model: model, Judge: judge}
 		if products != nil {
 			ao.ProductIndex, ao.Vector = products, knowledge
 		}
 		r, err := eval.RunAgent(ctx, ao)
+		if err != nil {
+			return err
+		}
+		reports = append(reports, r)
+	}
+	if *suite == "judge" {
+		r, err := eval.RunJudgeCalibration(ctx, eval.JudgeOptions{Cases: pick(*judgeCases, "judge_calibration.jsonl"), Judge: judge, Repeat: *judgeRepeat,
+			Version: *version, Config: cfg})
 		if err != nil {
 			return err
 		}
@@ -314,4 +332,24 @@ func firstNonEmpty(vs ...string) string {
 		}
 	}
 	return ""
+}
+
+// judgeConfig 按 -judge 创建语义断言裁判；off 返回 nil（语义断言跳过）。
+func judgeConfig(ctx context.Context, mode, model string, getenv func(string) string) (*eval.Judge, error) {
+	switch mode {
+	case "off":
+		return nil, nil
+	case "env":
+	default:
+		return nil, fmt.Errorf("未知的 -judge %q", mode)
+	}
+	cfg, err := configcenter.Load(ctx, configcenter.NewResolver(getenv, nil))
+	if err != nil {
+		return nil, err
+	}
+	client := llm.NewClient(llm.Options{BaseURL: cfg.AIBaseURL, APIKey: cfg.AIAPIKey, Timeout: 30 * time.Second, MaxRetries: 2})
+	if client == nil {
+		return nil, errors.New("-judge=env 需要 AI_API_KEY")
+	}
+	return &eval.Judge{LLM: client, Model: model, Timeout: 30 * time.Second}, nil
 }

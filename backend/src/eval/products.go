@@ -32,7 +32,10 @@ type ProductCase struct {
 	Absent     []string `json:"absent"`
 	ExpectNone bool     `json:"expect_none"`
 	ExpectText []string `json:"expect_text"`
-	Tags       []string `json:"tags"`
+	// ExpectMeaning / ForbidMeaning 是语义断言（裁判判定，见 judge.go）；没有裁判时跳过。
+	ExpectMeaning []string `json:"expect_meaning"`
+	ForbidMeaning []string `json:"forbid_meaning"`
+	Tags          []string `json:"tags"`
 }
 
 // ProductOptions 是商品搜索评测的输入。
@@ -53,6 +56,8 @@ type ProductOptions struct {
 	VectorStrongSim float64
 	// Usage 返回 Embedding 累计用量（可为 nil），报告记本套件检索的调用数与 token。
 	Usage func() vector.EmbedUsage
+	// Judge 不为 nil 时判定 expect_meaning / forbid_meaning。
+	Judge *Judge
 }
 
 // noKeywordRecall 让商品搜索的关键词召回返回空（只看向量召回）；不带关键词的列表查询照常。
@@ -118,7 +123,7 @@ func RunProducts(ctx context.Context, o ProductOptions) (Report, error) {
 	}
 	var stats modelStats
 	var audit cardAudit
-	topCases, topOK, noneCases, noneOK, negCases, negOK := 0, 0, 0, 0, 0, 0
+	topCases, topOK, noneCases, noneOK, negCases, negOK, meaningSkipped := 0, 0, 0, 0, 0, 0, 0
 	for i, c := range cases {
 		account := seed.User2ID
 		cs, err := st.CreateChatSession(ctx, domain.ChatSession{AccountID: account, Title: "评测"})
@@ -185,6 +190,12 @@ func RunProducts(ctx context.Context, o ProductOptions) (Report, error) {
 				problems = append(problems, "回答应包含“"+want+"”")
 			}
 		}
+		mp, skipped, verdicts := checkMeaning(ctx, o.Judge, c.Query, last.text.String(), last.blocks, c.ExpectMeaning, c.ForbidMeaning)
+		problems = append(problems, mp...)
+		meaningSkipped += skipped
+		if verdicts != nil {
+			detail["meaning"] = verdicts
+		}
 		if bad := audit.check(last.blocks, traces, visible); len(bad) > 0 {
 			detail["bad_cards"] = bad
 		}
@@ -192,6 +203,8 @@ func RunProducts(ctx context.Context, o ProductOptions) (Report, error) {
 	}
 	stats.write(&rep, o.Model != nil)
 	audit.write(&rep)
+	rep.Metrics["meaning_skipped"] = float64(meaningSkipped)
+	o.Judge.write(&rep)
 	if o.Usage != nil {
 		writeUsage(rep.Metrics, "embed_query", o.Usage().Sub(u0))
 	}
