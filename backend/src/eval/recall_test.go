@@ -170,3 +170,32 @@ func (u *usageLocal) Embed(ctx context.Context, data []byte) ([]float32, error) 
 func (u *usageLocal) Usage() imagevector.Usage {
 	return imagevector.Usage{Images: u.n, ImageTokens: 100 * u.n, TotalTokens: 100 * u.n}
 }
+
+// 多轮链路的业务断言：加购 → 改数量 → 结算后订单里有鼠标、待支付、购物车为空；写错的期望都会失败并说明原因。
+func TestAgentOutcomeAssertions(t *testing.T) {
+	ctx := context.Background()
+	ok := writeCases(t,
+		`{"id":"a","history":["把 Blink 静音无线鼠标 M2 加到购物车","把数量改成 3 件"],"query":"结算","expect_orders":["p_seed_mouse"],"expect_order_status":"pending_payment","expect_cart_empty":true}`,
+		`{"id":"b","history":["把 Blink 静音无线鼠标 M2 加到购物车"],"query":"把数量改成 3 件","expect_cart_qty":{"p_seed_mouse":3}}`,
+		`{"id":"c","history":["有什么优惠券"],"query":"帮我领一下","expect_user_coupons":["coupon_seed_digital"]}`)
+	rep, err := RunAgent(ctx, AgentOptions{Cases: ok})
+	if err != nil || rep.Passed != 3 {
+		t.Fatalf("expected pass: %v %v", err, rep.Failures)
+	}
+	bad := writeCases(t,
+		`{"id":"a","history":["把 Blink 静音无线鼠标 M2 加到购物车"],"query":"结算","expect_orders":["p_seed_nova"],"expect_order_status":"paid","expect_cart_qty":{"p_seed_mouse":1}}`,
+		`{"id":"b","query":"把 Blink 静音无线鼠标 M2 加到购物车","expect_cart_empty":true,"expect_user_coupons":["coupon_seed_digital"]}`)
+	rep, err = RunAgent(ctx, AgentOptions{Cases: bad})
+	if err != nil || rep.Passed != 0 {
+		t.Fatalf("expected failures: %v %v", err, rep.Failures)
+	}
+	all := ""
+	for _, f := range rep.Failures {
+		all += strings.Join(f.Problems, ";") + ";"
+	}
+	for _, want := range []string{"p_seed_nova 应在订单里", "最近的订单状态应为 paid", "购物车里 p_seed_mouse 应为 1 件，实际 0", "购物车应为空", "coupon_seed_digital 应已领到"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("missing %q in %s", want, all)
+		}
+	}
+}
