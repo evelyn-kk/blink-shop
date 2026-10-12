@@ -214,7 +214,7 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
   不理解语义：同款经裁剪、缩放、亮度、压缩、翻转、加边框后仍能排在前面，但外形相近的不同商品（几款手机）分数会重叠，
   所以“同款”（match）门槛 0.80 定得偏高，0.58–0.80 只当“外观相近”（similar）参考，低于 0.58 不返回；纯色、几乎空白的图片没有主体，
   直接不返回。可换成 `dashscope`（多模态 Embedding，`IMAGE_EMBEDDING_*`；图片先在本地解码校验、缩到 1024 并转 JPEG data URI，
-  不发原始字节、链接或 EXIF），阈值要先用图片评测重新标定。
+  不发原始字节、链接或 EXIF），阈值按图片评测的标定变换标定为同款 0.86、相近 0.6（`qwen3-vl-embedding` 512 维：同款最低 0.895，最像的别款最高 0.824，无关图片最高 0.463）；换模型要重新标定。
 - **解码校验**：JPG / PNG / WebP / GIF / BMP，单张 ≤ 10 MiB、边长 8–8000、像素 ≤ 4000 万（先读文件头再解码，挡住解压炸弹）。
 - **商品图索引**：Milvus 集合 `MILVUS_IMAGE_COLLECTION`（id=`<product_id>#<序号>`，带 product_id / merchant_id / image_url），每个商品
   主图在前、最多 4 张，按商品整体替换。商品图只读两类地址：`/api/v1/assets/...`（内嵌资源）和 `IMAGE_FETCH_ALLOWED_HOSTS` 白名单域名的

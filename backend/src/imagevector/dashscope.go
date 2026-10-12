@@ -54,7 +54,10 @@ func (d *DashScope) Usage() Usage {
 
 const (
 	dashScopeMaxSide = 1024
-	defaultMatch     = 0.75
+	// 阈值按 quality/data/eval/image_search.jsonl 的标定变换（不含 held_out）在 qwen3-vl-embedding 512 维下标定：
+	// 同款最低 0.895、最像的别款最高 0.824，同款阈值取两者中点 0.86（原 0.75 会把 40 条别款结果标成同款）；
+	// 无关图片最高 0.463，相近阈值 0.6 保持不变。换模型或维度要重新标定。
+	defaultMatch     = 0.86
 	defaultWeak      = 0.6
 )
 
