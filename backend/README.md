@@ -59,6 +59,10 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 
 初始密码均为 `BlinkDev#2026`（仅限本地），数据库只保存 bcrypt 哈希。数据还包括两级分类、9 个商品（可售、库存紧张、无货、下架、风控、已删除）、知识文档与分块、促销规则和优惠券。
 
+**大目录**（压测和检索用）：`go run ./cmd/import-products -generate 100000 -seed 42` 在已写入演示数据的库里追加 N 件生成商品
+（`seed.Catalog`：5 个叶子分类 × 品牌 × 系列 × 型号模板，1–3 个规格，约 5% 下架或风控；ID 前缀 `p_gen_` / `sku_gen_`），
+同一个 `-seed` 结果完全相同；每 500 件一条多行 INSERT、一个事务。`APP_ENV=production` 时拒绝运行。请写进一次性库，不要写进日常开发库。
+
 ## 启动流程
 
 `cmd/api` 的 `run()` 只做组装和生命周期：

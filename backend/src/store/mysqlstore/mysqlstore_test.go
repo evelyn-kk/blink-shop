@@ -499,3 +499,64 @@ func TestConcurrentAddCartNoDeadlock(t *testing.T) {
 		}
 	}
 }
+
+// 大目录批量写入：跨批次（batch 500）全部写入，规格齐全；在售的能搜到，下架 / 风控的搜不到。
+func TestBulkInsertGeneratedCatalog(t *testing.T) {
+	ctx := context.Background()
+	s := migrated(t)
+	data, err := seed.Dev(func(string) (string, error) { return "$2a$04$placeholder", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplySeed(ctx, data); err != nil {
+		t.Fatal(err)
+	}
+	gen := seed.Catalog(1200, 7)
+	if err := s.BulkInsertProducts(ctx, gen, 500); err != nil {
+		t.Fatal(err)
+	}
+	var products, skus int
+	if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM products WHERE product_id LIKE 'p\\_gen\\_%'").Scan(&products); err != nil || products != 1200 {
+		t.Fatalf("products = %d %v", products, err)
+	}
+	want := 0
+	for _, p := range gen {
+		want += len(p.SKUs)
+	}
+	if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM product_skus WHERE sku_id LIKE 'sku\\_gen\\_%'").Scan(&skus); err != nil || skus != want {
+		t.Fatalf("skus = %d want %d %v", skus, want, err)
+	}
+	var active, hidden *domain.Product
+	for i := range gen {
+		switch {
+		case active == nil && gen[i].Status == domain.ProductActive:
+			active = &gen[i]
+		case hidden == nil && gen[i].Status != domain.ProductActive:
+			hidden = &gen[i]
+		}
+	}
+	// 名称拆出的检索词会命中很多生成商品，翻页找
+	found := func(p *domain.Product) bool {
+		for page := 1; ; page++ {
+			items, total, err := s.SearchVisibleProducts(ctx, store.ProductSearch{Keyword: p.Name, Page: store.Page{Page: page, PageSize: 100}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, it := range items {
+				if it.ProductID == p.ProductID {
+					return len(it.SKUs) == len(p.SKUs)
+				}
+			}
+			if page*100 >= total {
+				return false
+			}
+		}
+	}
+	if !found(active) || found(hidden) {
+		t.Fatalf("active %s found=%v, hidden %s found=%v", active.ProductID, found(active), hidden.ProductID, found(hidden))
+	}
+	// 主键冲突直接报错
+	if err := s.BulkInsertProducts(ctx, gen[:1], 500); err == nil {
+		t.Fatal("duplicate insert should fail")
+	}
+}
