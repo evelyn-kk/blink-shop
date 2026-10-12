@@ -44,6 +44,13 @@ type AgentCase struct {
 	NoLeak        []string `json:"no_leak"`
 	ExpectCart    []string `json:"expect_cart"`
 	ExpectNoWrite bool     `json:"expect_no_write"`
+	// 多轮链路的业务结果（演示用户二，最后一轮之后）：订单里必须有的商品、最近一个订单的状态、购物车里商品的件数、
+	// 购物车为空、手里必须有的券（coupon_id）。
+	ExpectOrders      []string       `json:"expect_orders"`
+	ExpectOrderStatus string         `json:"expect_order_status"`
+	ExpectCartQty     map[string]int `json:"expect_cart_qty"`
+	ExpectCartEmpty   bool           `json:"expect_cart_empty"`
+	ExpectUserCoupons []string       `json:"expect_user_coupons"`
 }
 
 // AgentOptions 是端到端导购评测的输入。
@@ -247,6 +254,7 @@ func RunAgent(ctx context.Context, o AgentOptions) (Report, error) {
 				}
 			}
 		}
+		problems = append(problems, checkOutcome(ctx, sh, account, c)...)
 		if c.ExpectNoWrite {
 			noWriteCases++
 			after, err := businessState(ctx, sh)
@@ -336,6 +344,65 @@ func businessState(ctx context.Context, sh *shop.Service) (string, error) {
 		b.Write(mustJSON(coupons))
 	}
 	return b.String(), nil
+}
+
+// checkOutcome 检查多轮链路的业务结果（订单、订单状态、购物车件数、购物车为空、已领的券）。
+func checkOutcome(ctx context.Context, sh *shop.Service, account string, c AgentCase) []string {
+	var problems []string
+	page := store.Page{Page: 1, PageSize: 100}
+	if len(c.ExpectOrders) > 0 || c.ExpectOrderStatus != "" {
+		orders, _, err := sh.ListOrders(ctx, store.OrderQuery{AccountID: account, Page: page})
+		if err != nil {
+			return []string{"读取订单失败：" + err.Error()}
+		}
+		raw := string(mustJSON(orders))
+		for _, id := range c.ExpectOrders {
+			if !strings.Contains(raw, `"`+id+`"`) {
+				problems = append(problems, id+" 应在订单里")
+			}
+		}
+		if c.ExpectOrderStatus != "" {
+			if len(orders) == 0 {
+				problems = append(problems, "应有订单（状态 "+c.ExpectOrderStatus+"）")
+			} else if got := string(orders[0].Status); got != c.ExpectOrderStatus {
+				problems = append(problems, "最近的订单状态应为 "+c.ExpectOrderStatus+"，实际 "+got)
+			}
+		}
+	}
+	if len(c.ExpectCartQty) > 0 || c.ExpectCartEmpty {
+		cart, err := sh.Cart(ctx, account)
+		if err != nil {
+			return append(problems, "读取购物车失败："+err.Error())
+		}
+		qty := map[string]int{}
+		for _, it := range cart.Items {
+			qty[it.ProductID] += it.Quantity
+		}
+		for id, want := range c.ExpectCartQty {
+			if qty[id] != want {
+				problems = append(problems, fmt.Sprintf("购物车里 %s 应为 %d 件，实际 %d", id, want, qty[id]))
+			}
+		}
+		if c.ExpectCartEmpty && len(cart.Items) > 0 {
+			problems = append(problems, fmt.Sprintf("购物车应为空，实际 %d 种", len(cart.Items)))
+		}
+	}
+	if len(c.ExpectUserCoupons) > 0 {
+		coupons, _, err := sh.MyCoupons(ctx, account, "", page)
+		if err != nil {
+			return append(problems, "读取优惠券失败："+err.Error())
+		}
+		have := map[string]bool{}
+		for _, uc := range coupons {
+			have[uc.CouponID] = true
+		}
+		for _, id := range c.ExpectUserCoupons {
+			if !have[id] {
+				problems = append(problems, id+" 应已领到")
+			}
+		}
+	}
+	return problems
 }
 
 // writeTools 是会改业务数据的工具。
