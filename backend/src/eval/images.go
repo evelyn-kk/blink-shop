@@ -42,6 +42,23 @@ type ImageOptions struct {
 
 const imageEvalK = 3
 
+type usageReporter interface{ Usage() imagevector.Usage }
+
+// imageUsage 沿 Unwrap 找到能报告用量的 Embedder（如 DashScope）。
+func imageUsage(e imagevector.Embedder) (usageReporter, bool) {
+	for e != nil {
+		if u, ok := e.(usageReporter); ok {
+			return u, true
+		}
+		w, ok := e.(interface{ Unwrap() imagevector.Embedder })
+		if !ok {
+			return nil, false
+		}
+		e = w.Unwrap()
+	}
+	return nil, false
+}
+
 // timedEmbedder 记录每次图片 Embedding 的耗时（建索引和查询分开统计）。
 type timedEmbedder struct {
 	imagevector.Embedder
@@ -95,6 +112,10 @@ func RunImages(ctx context.Context, o ImageOptions) (Report, error) {
 	st, err := newSeededStore(ctx)
 	if err != nil {
 		return rep, err
+	}
+	var usage0 imagevector.Usage
+	if u, ok := imageUsage(o.Embedder); ok {
+		usage0 = u.Usage()
 	}
 	timed := &timedEmbedder{Embedder: emb}
 	svc := imagesearch.New(timed, idx, imagesearch.NewSource(nil), st, nil, nil)
@@ -176,6 +197,12 @@ func RunImages(ctx context.Context, o ImageOptions) (Report, error) {
 			map[string]any{"items": got, "held_out": slices.Contains(c.Tags, "held_out")})
 	}
 	queryLat := timed.take()
+	if u, ok := imageUsage(o.Embedder); ok {
+		after := u.Usage()
+		rep.Metrics["embed_images"] = float64(after.Images - usage0.Images)
+		rep.Metrics["embed_image_tokens"] = float64(after.ImageTokens - usage0.ImageTokens)
+		rep.Metrics["embed_total_tokens"] = float64(after.TotalTokens - usage0.TotalTokens)
+	}
 	rep.Metrics["embed_index_calls"] = float64(len(indexLat))
 	rep.Metrics["embed_query_calls"] = float64(len(queryLat))
 	rep.Metrics["embed_query_p50_ms"] = float64(percentile(queryLat, 0.50).Milliseconds())

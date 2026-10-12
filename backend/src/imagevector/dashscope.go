@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/image/draw"
@@ -34,8 +35,21 @@ type DashScopeOptions struct {
 // DashScope 调用多模态 Embedding。图片先在本地解码校验、缩到长边不超过 1024 并转成 JPEG，再以 data URI 发送：
 // 不把原始字节、链接或 EXIF 发给外部服务。
 type DashScope struct {
-	opts   DashScopeOptions
-	client *http.Client
+	opts                       DashScopeOptions
+	client                     *http.Client
+	calls, imageTokens, tokens atomic.Int64
+}
+
+// Usage 是成功调用的累计用量：图片数和服务端返回的 token（usage.image_tokens / total_tokens，计费按 token）。
+type Usage struct {
+	Images      int64 `json:"images"`
+	ImageTokens int64 `json:"image_tokens"`
+	TotalTokens int64 `json:"total_tokens"`
+}
+
+// Usage 返回本客户端创建以来的累计用量（评测算成本用）。
+func (d *DashScope) Usage() Usage {
+	return Usage{Images: d.calls.Load(), ImageTokens: d.imageTokens.Load(), TotalTokens: d.tokens.Load()}
 }
 
 const (
@@ -130,6 +144,10 @@ func (d *DashScope) once(ctx context.Context, body []byte) ([]float32, bool, err
 				Embedding []float32 `json:"embedding"`
 			} `json:"embeddings"`
 		} `json:"output"`
+		Usage struct {
+			ImageTokens int64 `json:"image_tokens"`
+			TotalTokens int64 `json:"total_tokens"`
+		} `json:"usage"`
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	}
@@ -146,6 +164,9 @@ func (d *DashScope) once(ctx context.Context, body []byte) ([]float32, bool, err
 	if len(vec) != d.opts.Dim {
 		return nil, false, fmt.Errorf("image embedding: dimension %d, want %d", len(vec), d.opts.Dim)
 	}
+	d.calls.Add(1)
+	d.imageTokens.Add(out.Usage.ImageTokens)
+	d.tokens.Add(out.Usage.TotalTokens)
 	return normalize(vec), false, nil
 }
 

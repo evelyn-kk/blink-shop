@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/evelyn-kk/blink-shop/backend/src/imagevector"
 	"github.com/evelyn-kk/blink-shop/backend/src/rag"
 	"github.com/evelyn-kk/blink-shop/backend/src/vector"
 )
@@ -131,4 +132,41 @@ func (c *countingProducts) DeleteProducts(context.Context, []string) error      
 func (c *countingProducts) SearchProducts(context.Context, string, int) ([]rag.ProductHit, error) {
 	c.searches++
 	return c.hits, nil
+}
+
+// 图片评测：Embedder 被阈值覆盖包了一层时，仍能取到用量；逐条记前几名分数。
+func TestImageUsageThroughWrapper(t *testing.T) {
+	cases := filepath.Join(t.TempDir(), "img.jsonl")
+	if err := os.WriteFile(cases, []byte(`{"id":"a","source":"catalog/products/p_seed_mouse.png","transforms":["crop:0.85"],"expect_top":"p_seed_mouse","tags":["product"]}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e := &usageLocal{}
+	rep, err := RunImages(context.Background(), ImageOptions{Cases: cases, Embedder: imagevector.WithThresholds(e, 0.99, 0.01), MinPass: 0.01})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 建索引的商品图 + 1 张查询图
+	if rep.Metrics["embed_images"] != float64(e.n) || e.n < 2 || rep.Metrics["embed_image_tokens"] != float64(100*e.n) || rep.Config["threshold_match"] != "0.99" {
+		t.Fatalf("metrics=%v config=%v n=%d", rep.Metrics, rep.Config, e.n)
+	}
+	if items, _ := rep.Cases[0].Detail["items"].([]string); len(items) == 0 {
+		t.Fatalf("detail: %+v", rep.Cases[0])
+	}
+}
+
+type usageLocal struct {
+	imagevector.Local
+	n int64
+}
+
+func (u *usageLocal) Embed(ctx context.Context, data []byte) ([]float32, error) {
+	v, err := u.Local.Embed(ctx, data)
+	if err == nil {
+		u.n++
+	}
+	return v, err
+}
+
+func (u *usageLocal) Usage() imagevector.Usage {
+	return imagevector.Usage{Images: u.n, ImageTokens: 100 * u.n, TotalTokens: 100 * u.n}
 }

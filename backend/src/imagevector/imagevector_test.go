@@ -119,7 +119,8 @@ func TestDashScope(t *testing.T) {
 		for i := range vec {
 			vec[i] = float32(i + 1)
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"output": map[string]any{"embeddings": []map[string]any{{"embedding": vec}}}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"output": map[string]any{"embeddings": []map[string]any{{"embedding": vec}}},
+			"usage": map[string]any{"input_tokens": 10, "image_tokens": 300, "total_tokens": 310}})
 	}))
 	defer srv.Close()
 
@@ -132,6 +133,10 @@ func TestDashScope(t *testing.T) {
 	}
 	if d.Name() != "dashscope:m:4" {
 		t.Fatalf("name: %s", d.Name())
+	}
+	// 只累计成功的调用（第一次 429 不算）
+	if u := d.Usage(); u != (Usage{Images: 1, ImageTokens: 300, TotalTokens: 310}) {
+		t.Fatalf("usage: %+v", u)
 	}
 	// 发送的是缩小后的 JPEG data URI
 	contents := lastBody["input"].(map[string]any)["contents"].([]any)

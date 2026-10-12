@@ -75,3 +75,6 @@ type thresholdEmbedder struct {
 }
 
 func (t thresholdEmbedder) Thresholds() (float64, float64) { return t.match, t.weak }
+
+// Unwrap 返回被包装的 Embedder（评测取用量用）。
+func (t thresholdEmbedder) Unwrap() Embedder { return t.Embedder }
