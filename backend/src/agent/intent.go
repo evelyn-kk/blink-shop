@@ -163,7 +163,7 @@ func Classify(content string, hasImage bool) Plan {
 	if inCart && containsAny(lower, cartRemoveWords...) && !containsAny(lower, orderWords...) {
 		p := base
 		p.Intent, p.Action, p.Rule = IntentCart, "remove", "cart_remove"
-		p.Query = productQuery(stripWords(text, cartRemoveWords, cartWords, []string{"商品", "那款", "这款", "里的", "中的"}))
+		p.Query = productQuery(stripWords(cartObject(text), cartRemoveWords, cartWords, []string{"商品", "那款", "这款", "里的", "中的"}))
 		return p
 	}
 	if inCart && containsAny(lower, cartSelectWords...) {
@@ -172,13 +172,13 @@ func Classify(content string, hasImage bool) Plan {
 		if containsAny(lower, "取消选中", "取消勾选", "不选", "别选") {
 			p.Action = "unselect"
 		}
-		p.Query = productQuery(stripWords(text, cartSelectWords, cartWords, []string{"商品", "那款", "这款", "里的", "中的"}))
+		p.Query = productQuery(stripWords(cartObject(text), cartSelectWords, cartWords, []string{"商品", "那款", "这款", "里的", "中的"}))
 		return p
 	}
 	if inCart && (containsAny(lower, cartQtyWords...) || base.Quantity > 0) && !containsAny(lower, checkoutWords...) && !containsAny(lower, orderWords...) {
 		p := base
 		p.Intent, p.Action, p.Rule = IntentCart, "update", "cart_update"
-		p.Query = productQuery(stripWords(text, cartQtyWords, cartWords, []string{"商品", "那款", "这款", "里的", "中的"}))
+		p.Query = productQuery(stripWords(cartObject(text), cartQtyWords, cartWords, []string{"商品", "那款", "这款", "里的", "中的"}))
 		return p
 	}
 
@@ -328,6 +328,12 @@ func stripWords(text string, groups ...[]string) string {
 		}
 	}
 	return text
+}
+
+// cartObject 去掉购物车操作句里的“从购物车（里）”和开头的“把”，留下要操作的商品：“把鼠标从购物车里删掉” → “鼠标 删掉”。
+func cartObject(text string) string {
+	text = stripWords(text, []string{"从购物车里", "从购物车中", "从购物车", "从车里"})
+	return strings.TrimPrefix(strings.TrimSpace(text), "把")
 }
 
 // productQuery 把句子压成检索词串（空格分隔）。

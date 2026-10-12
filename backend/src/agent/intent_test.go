@@ -196,3 +196,18 @@ func TestClassifyReferenceAndAfterSalesQuestions(t *testing.T) {
 		}
 	}
 }
+
+// “把鼠标从购物车里删掉”：检索词只留商品，不带“把”“从”。
+func TestClassifyCartObject(t *testing.T) {
+	for _, tc := range []struct{ text, action, query string }{
+		{"把鼠标从购物车里删掉", "remove", "鼠标"},
+		{"从购物车中移除键盘", "remove", "键盘"},
+		{"把购物车里的鼠标删掉", "remove", "鼠标"},
+		{"把购物车里的鼠标数量改成 2", "update", "鼠标"},
+	} {
+		p := Classify(tc.text, false)
+		if p.Intent != IntentCart || p.Action != tc.action || p.Query != tc.query {
+			t.Errorf("%q = %s/%s query=%q, want cart/%s %q", tc.text, p.Intent, p.Action, p.Query, tc.action, tc.query)
+		}
+	}
+}
