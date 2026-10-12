@@ -47,8 +47,15 @@ func scanPayment(row rowScanner) (domain.Payment, error) {
 func (s *Store) Checkout(ctx context.Context, accountID, idempotencyKey string, fn func(ctx context.Context, st store.CheckoutState) (store.CheckoutPlan, error)) (store.CheckoutResult, error) {
 	var out store.CheckoutResult
 	var err error
-	for attempt := 0; attempt < 3; attempt++ {
+	// 快路径（locking=false）：商品、店铺、规格先用普通读取，计价和写订单都在加热点行锁之前做完，最后才按“商品 → 店铺 → 规格”
+	// 的顺序用带条件的 UPDATE 扣库存，条件里核对读到的状态、名称、价格和库存；同一商品的结算只在这几条语句和提交期间串行。
+	// 任一条件不满足（库存被买走、商品被改或下架）就回滚，换加锁路径（locking=true，与原来一样一开始就锁定）重做，
+	// 由它按最新数据给出和以前完全相同的结果或错误。
+	locking := false
+	var newOrderIDs []string
+	for attempt := 0; attempt < 4; attempt++ {
 		out = store.CheckoutResult{}
+		newOrderIDs = nil
 		err = s.WithTx(ctx, func(ctx context.Context) error {
 			// 锁顺序：账户 → 用户券 → 购物车行 → 商品（按 ID）→ 店铺 → 规格（按 ID），全部按主键加锁。与加购（账户 → 购物车行 → 商品 → 店铺 → 规格）、
 			// 改购物车（购物车行 → 商品 → 店铺 → 规格）、商家改商品（商品 → 规格）、取消订单（结算请求 → 订单 → 支付单 → 用户券 → 商品 → 规格）都不会形成环。
@@ -78,17 +85,21 @@ func (s *Store) Checkout(ctx context.Context, accountID, idempotencyKey string, 
 				return mapErr(err)
 			}
 
-			st, err := s.lockCheckoutState(ctx, accountID)
+			st, snap, err := s.lockCheckoutState(ctx, accountID, locking)
 			if err != nil {
 				return err
 			}
 			// fn 在本事务内读取计价数据：事务的一致性读快照建立于上面的幂等键查询（已持有账户锁之后），
 			// 所以排队等锁期间已提交的活动和分类变化都能读到。
 			plan, err := fn(ctx, st)
-			if err != nil {
-				return err
+			if err == nil {
+				err = store.ValidateCheckoutPlan(st, plan)
 			}
-			if err := store.ValidateCheckoutPlan(st, plan); err != nil {
+			if err != nil {
+				if !locking && ctx.Err() == nil {
+					// 快照可能比最新数据旧（如刚补了库存）：业务错误交给加锁路径按最新数据确认，结果与以前一致
+					return errCheckoutStale
+				}
 				return err
 			}
 			requestID = domain.NewID(domain.PrefixCheckout)
@@ -109,8 +120,10 @@ func (s *Store) Checkout(ctx context.Context, accountID, idempotencyKey string, 
 					if err := s.insertOrderItem(ctx, it.OrderItem); err != nil {
 						return err
 					}
-					if err := s.adjustStock(ctx, it.ProductID, it.SkuID, -it.Quantity); err != nil {
-						return err
+					if locking {
+						if err := s.adjustStock(ctx, it.ProductID, it.SkuID, -it.Quantity); err != nil {
+							return err
+						}
 					}
 					cartItemIDs = append(cartItemIDs, it.CartItemID)
 				}
@@ -147,38 +160,150 @@ func (s *Store) Checkout(ctx context.Context, accountID, idempotencyKey string, 
 				VALUES (?, ?, ?, 'succeeded', ?, ?, ?)`, requestID, accountID, idempotencyKey, string(ids), now, now); err != nil {
 				return mapErr(err)
 			}
-			out = store.CheckoutResult{RequestID: requestID}
-			for _, id := range orderIDs {
-				d, err := s.GetOrder(ctx, id)
-				if err != nil {
+			if !locking {
+				// 最后才碰热点行：扣库存并核对快照，之后只剩提交
+				if err := s.deductCheckedStock(ctx, plan, snap); err != nil {
 					return err
 				}
-				out.Orders = append(out.Orders, d)
 			}
+			out = store.CheckoutResult{RequestID: requestID}
+			newOrderIDs = orderIDs
 			return nil
 		})
+		if errors.Is(err, errCheckoutStale) && !locking {
+			s.checkoutFallbacks.Add(1)
+			locking = true
+			continue
+		}
 		// 订单号撞车或兜底的死锁可以整体重试；同一幂等键的并发请求已被账户行锁串行化，不会走到唯一键冲突。
 		if !retryable(err) {
 			break
 		}
 		s.txRetries.Add(1)
 	}
-	return out, err
+	if err != nil {
+		return out, err
+	}
+	// 新订单在提交后读取详情（不占热点行锁）；重放的订单已在事务里读好。
+	for _, id := range newOrderIDs {
+		d, gerr := s.GetOrder(ctx, id)
+		if gerr != nil {
+			return store.CheckoutResult{}, gerr
+		}
+		out.Orders = append(out.Orders, d)
+	}
+	return out, nil
+}
+
+// errCheckoutStale 表示快路径读到的商品数据在扣库存时已变化，需要用加锁路径重做。
+var errCheckoutStale = errors.New("checkout: product snapshot changed")
+
+// checkoutSnapshot 是快路径普通读取到的商品、店铺和规格数据，扣库存时逐项核对。
+type checkoutSnapshot struct {
+	products  map[string]productSnap
+	merchants map[string]domain.EntityStatus
+	skus      map[string]skuSnap
+}
+
+type productSnap struct {
+	name, image, category, merchant string
+	status                          domain.ProductStatus
+}
+
+type skuSnap struct {
+	productID, name string
+	price           domain.Money
+}
+
+// deductCheckedStock 按“商品 → 店铺 → 规格”（各自按 ID 排序）的顺序加锁并扣库存，同时核对快照：商品状态、名称、图片、分类、店铺不变，
+// 店铺状态不变，规格名称、价格不变且库存足够。任一项不符返回 errCheckoutStale。
+func (s *Store) deductCheckedStock(ctx context.Context, plan store.CheckoutPlan, snap checkoutSnapshot) error {
+	productQty, skuQty := map[string]int{}, map[string]int{}
+	merchantIDs := map[string]bool{}
+	for _, po := range plan.Orders {
+		for _, it := range po.Items {
+			productQty[it.ProductID] += it.Quantity
+			skuQty[it.SkuID] += it.Quantity
+		}
+	}
+	productIDs := make([]string, 0, len(productQty))
+	for id := range productQty {
+		productIDs = append(productIDs, id)
+	}
+	sort.Strings(productIDs)
+	for _, id := range productIDs {
+		p, ok := snap.products[id]
+		if !ok {
+			return errCheckoutStale
+		}
+		res, err := s.q(ctx).ExecContext(ctx, `UPDATE products SET stock_quantity = stock_quantity - ?, stock_status = `+stockStatusSQL+`
+			WHERE product_id = ? AND status = ? AND name = ? AND image_url = ? AND category_id = ? AND merchant_id = ?`,
+			productQty[id], id, p.status, p.name, p.image, p.category, p.merchant)
+		if err != nil {
+			return mapErr(err)
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return errCheckoutStale
+		}
+		merchantIDs[p.merchant] = true
+	}
+	mids := make([]string, 0, len(merchantIDs))
+	for id := range merchantIDs {
+		mids = append(mids, id)
+	}
+	sort.Strings(mids)
+	for _, id := range mids {
+		var status domain.EntityStatus
+		err := s.q(ctx).QueryRowContext(ctx, `SELECT status FROM merchants WHERE merchant_id = ? FOR SHARE`, id).Scan(&status)
+		if err != nil || status != snap.merchants[id] {
+			if err != nil && !errors.Is(mapErr(err), store.ErrNotFound) {
+				return mapErr(err)
+			}
+			return errCheckoutStale
+		}
+	}
+	skuIDs := make([]string, 0, len(skuQty))
+	for id := range skuQty {
+		skuIDs = append(skuIDs, id)
+	}
+	sort.Strings(skuIDs)
+	for _, id := range skuIDs {
+		k, ok := snap.skus[id]
+		if !ok {
+			return errCheckoutStale
+		}
+		res, err := s.q(ctx).ExecContext(ctx, `UPDATE product_skus SET stock_quantity = stock_quantity - ?, stock_status = `+stockStatusSQL+`
+			WHERE sku_id = ? AND product_id = ? AND sku_name = ? AND price = ? AND stock_quantity >= ?`,
+			skuQty[id], id, k.productID, k.name, k.price, skuQty[id])
+		if err != nil {
+			return mapErr(err)
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return errCheckoutStale
+		}
+	}
+	return nil
 }
 
 // lockCheckoutState 读取并锁定结算所需的数据，调用方已持有账户行锁。
 // 用户券最先锁：取消订单退券也是“用户券 → 商品 → 规格”的顺序，两边不会互相等待。
-func (s *Store) lockCheckoutState(ctx context.Context, accountID string) (store.CheckoutState, error) {
+// locking 为 false（快路径）时，商品、店铺、规格只做普通读取，读到的值放进快照，扣库存时再加锁核对；券和购物车行照常加锁（只属于本账户，不是热点）。
+func (s *Store) lockCheckoutState(ctx context.Context, accountID string, locking bool) (store.CheckoutState, checkoutSnapshot, error) {
+	snap := checkoutSnapshot{products: map[string]productSnap{}, merchants: map[string]domain.EntityStatus{}, skus: map[string]skuSnap{}}
+	forUpdate, forShare := " FOR UPDATE", " FOR SHARE"
+	if !locking {
+		forUpdate, forShare = "", ""
+	}
 	coupons, err := s.lockUnusedCoupons(ctx, accountID)
 	if err != nil {
-		return store.CheckoutState{}, err
+		return store.CheckoutState{}, snap, err
 	}
 	// 购物车项和券都按主键加锁，不做范围加锁：范围锁会在唯一索引上留下间隙锁，挡住其他账户加购时的插入，
 	// 而加购事务已持有商品共享锁，结算随后要商品排他锁，就会死锁。候选 ID 用普通读取；本账户的加购被账户行锁挡在外面，
 	// 只有“修改选中状态”可能并发，加锁后按最新的 selected 再筛一次。
 	ids, err := s.plainIDs(ctx, `SELECT cart_item_id FROM cart_items WHERE account_id = ? AND selected = TRUE`, accountID)
 	if err != nil {
-		return store.CheckoutState{}, err
+		return store.CheckoutState{}, snap, err
 	}
 	sort.Strings(ids)
 	var items []domain.CartItem
@@ -188,7 +313,7 @@ func (s *Store) lockCheckoutState(ctx context.Context, accountID string) (store.
 			continue
 		}
 		if err != nil {
-			return store.CheckoutState{}, err
+			return store.CheckoutState{}, snap, err
 		}
 		if it.AccountID == accountID && it.Selected {
 			items = append(items, it)
@@ -221,22 +346,24 @@ func (s *Store) lockCheckoutState(ctx context.Context, accountID string) (store.
 	merchants := map[string]domain.Merchant{}
 	for _, id := range productIDs {
 		var p productRow
-		err := s.q(ctx).QueryRowContext(ctx, `SELECT name, status, image_url, category_id, merchant_id FROM products WHERE product_id = ? FOR UPDATE`, id).
+		err := s.q(ctx).QueryRowContext(ctx, `SELECT name, status, image_url, category_id, merchant_id FROM products WHERE product_id = ?`+forUpdate, id).
 			Scan(&p.name, &p.status, &p.image, &p.category, &p.merchant)
 		if errors.Is(mapErr(err), store.ErrNotFound) {
 			continue
 		}
 		if err != nil {
-			return store.CheckoutState{}, mapErr(err)
+			return store.CheckoutState{}, snap, mapErr(err)
 		}
 		products[id] = p
+		snap.products[id] = productSnap{name: p.name, image: p.image, category: p.category, merchant: p.merchant, status: p.status}
 		if _, ok := merchants[p.merchant]; !ok {
 			var m domain.Merchant
-			err := s.q(ctx).QueryRowContext(ctx, `SELECT name, status FROM merchants WHERE merchant_id = ? FOR SHARE`, p.merchant).Scan(&m.Name, &m.Status)
+			err := s.q(ctx).QueryRowContext(ctx, `SELECT name, status FROM merchants WHERE merchant_id = ?`+forShare, p.merchant).Scan(&m.Name, &m.Status)
 			if err != nil && !errors.Is(mapErr(err), store.ErrNotFound) {
-				return store.CheckoutState{}, mapErr(err)
+				return store.CheckoutState{}, snap, mapErr(err)
 			}
 			merchants[p.merchant] = m
+			snap.merchants[p.merchant] = m.Status
 		}
 	}
 	type skuRow struct {
@@ -247,15 +374,16 @@ func (s *Store) lockCheckoutState(ctx context.Context, accountID string) (store.
 	skus := map[string]skuRow{}
 	for _, id := range skuIDs {
 		var r skuRow
-		err := s.q(ctx).QueryRowContext(ctx, `SELECT product_id, sku_name, price, stock_quantity FROM product_skus WHERE sku_id = ? FOR UPDATE`, id).
+		err := s.q(ctx).QueryRowContext(ctx, `SELECT product_id, sku_name, price, stock_quantity FROM product_skus WHERE sku_id = ?`+forUpdate, id).
 			Scan(&r.productID, &r.name, &r.price, &r.stock)
 		if errors.Is(mapErr(err), store.ErrNotFound) {
 			continue
 		}
 		if err != nil {
-			return store.CheckoutState{}, mapErr(err)
+			return store.CheckoutState{}, snap, mapErr(err)
 		}
 		skus[id] = r
+		snap.skus[id] = skuSnap{productID: r.productID, name: r.name, price: r.price}
 	}
 
 	st := store.CheckoutState{Lines: []store.CartLine{}, Coupons: coupons}
@@ -271,7 +399,7 @@ func (s *Store) lockCheckoutState(ctx context.Context, accountID string) (store.
 		st.Lines = append(st.Lines, l)
 	}
 
-	return st, nil
+	return st, snap, nil
 }
 
 // lockUnusedCoupons 按主键逐张锁定账户未使用的券，同样不做范围加锁。是否已过期由调用方按事务内的时间判断。

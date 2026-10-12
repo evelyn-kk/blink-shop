@@ -23,10 +23,15 @@ type Store struct {
 	now func() time.Time
 	// txRetries 记录因唯一键冲突或死锁而重试的事务次数，用于测试确认正常并发下不需要重试。
 	txRetries atomic.Int64
+	// checkoutFallbacks 记录结算快路径发现读到的商品数据已变化、回退到加锁路径重做的次数（不是死锁或冲突重试）。
+	checkoutFallbacks atomic.Int64
 }
 
 // TxRetries 返回累计的事务重试次数。
 func (s *Store) TxRetries() int64 { return s.txRetries.Load() }
+
+// CheckoutFallbacks 返回结算从快路径回退到加锁路径的累计次数。
+func (s *Store) CheckoutFallbacks() int64 { return s.checkoutFallbacks.Load() }
 
 var _ store.Store = (*Store)(nil)
 

@@ -425,7 +425,7 @@ func sse(ctx context.Context, c *client, o options) (scenario, error) {
 		}
 		sessions[i] = s.SessionID
 	}
-	var first, total latencies
+	var first, firstText, total latencies
 	var concurrent, peak atomic.Int64
 	var wg sync.WaitGroup
 	gate := make(chan struct{})
@@ -435,7 +435,7 @@ func sse(ctx context.Context, c *client, o options) (scenario, error) {
 			defer wg.Done()
 			<-gate
 			start := time.Now()
-			f, err := c.stream(ctx, tok, sessions[i], fmt.Sprintf("lt-%d", i), questions[i%len(questions)], func() {
+			f, ft, err := c.stream(ctx, tok, sessions[i], fmt.Sprintf("lt-%d", i), questions[i%len(questions)], func() {
 				n := concurrent.Add(1)
 				for {
 					p := peak.Load()
@@ -446,24 +446,27 @@ func sse(ctx context.Context, c *client, o options) (scenario, error) {
 			})
 			concurrent.Add(-1)
 			first.add(f, err)
+			firstText.add(ft, err)
 			total.add(time.Since(start), err)
 		}()
 	}
 	close(gate)
 	wg.Wait()
-	fs, ts := first.stats(), total.stats()
+	fs, ft, ts := first.stats(), firstText.stats(), total.stats()
 	sc := scenario{Name: "sse", Target: "首个进展事件 P95 < 1.5s（规则模式），成功率 100%", Stats: &fs,
-		Extra: map[string]any{"connections": o.sse, "peak_open_streams": peak.Load(), "total_p95_ms": ts.P95, "total_max_ms": ts.Max}}
+		Extra: map[string]any{"connections": o.sse, "peak_open_streams": peak.Load(), "total_p50_ms": ts.P50, "total_p95_ms": ts.P95, "total_max_ms": ts.Max,
+			"first_text_p50_ms": ft.P50, "first_text_p95_ms": ft.P95}}
 	sc.Pass = fs.P95 < 1500 && fs.ErrorRate == 0 && fs.Count == o.sse
 	return sc, nil
 }
 
-// stream 发一条消息，返回从发出请求到第一个进展事件（thinking / text_delta / block）的时间；读到 message_done 才算成功。
-func (c *client) stream(ctx context.Context, tok, session, clientID, content string, opened func()) (time.Duration, error) {
+// stream 发一条消息，返回从发出请求到第一个进展事件（thinking / text_delta / block）的时间，以及到第一段回答文字（text_delta）的时间；
+// 读到 message_done 才算成功。
+func (c *client) stream(ctx context.Context, tok, session, clientID, content string, opened func()) (time.Duration, time.Duration, error) {
 	b, _ := json.Marshal(map[string]any{"client_message_id": clientID, "content": content})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/agent/sessions/"+session+"/messages:stream", bytes.NewReader(b))
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
@@ -471,14 +474,14 @@ func (c *client) stream(ctx context.Context, tok, session, clientID, content str
 	start := time.Now()
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return 0, &apiError{Status: resp.StatusCode}
+		return 0, 0, &apiError{Status: resp.StatusCode}
 	}
 	opened()
-	var first time.Duration
+	var first, firstText time.Duration
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	for sc.Scan() {
@@ -491,13 +494,16 @@ func (c *client) stream(ctx context.Context, tok, session, clientID, content str
 			if first == 0 {
 				first = time.Since(start)
 			}
+			if ev == "text_delta" && firstText == 0 {
+				firstText = time.Since(start)
+			}
 		case "message_done":
-			return first, nil
+			return first, firstText, nil
 		case "error":
-			return first, &apiError{Status: 200, Code: "run_failed"}
+			return first, firstText, &apiError{Status: 200, Code: "run_failed"}
 		}
 	}
-	return first, errors.New("stream ended without message_done")
+	return first, firstText, errors.New("stream ended without message_done")
 }
 
 type cartItem struct {
