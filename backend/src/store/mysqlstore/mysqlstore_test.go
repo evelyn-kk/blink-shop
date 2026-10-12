@@ -3,6 +3,7 @@ package mysqlstore_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/evelyn-kk/blink-shop/backend/src/seed"
 	"io/fs"
 	"reflect"
@@ -56,7 +57,8 @@ func TestMigrateEmptyThenAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(applied, []string{"0001_init.sql", "0002_promotion_discount_rate_check.sql",
-		"0003_knowledge_document_product.sql", "0004_backfill_knowledge_document_product.sql", "0005_admin_audit_logs.sql", "0006_agent_write_order.sql", "0007_prompt_publish_actions.sql", "0008_agent_runs_admin_index.sql"}) {
+		"0003_knowledge_document_product.sql", "0004_backfill_knowledge_document_product.sql", "0005_admin_audit_logs.sql", "0006_agent_write_order.sql", "0007_prompt_publish_actions.sql", "0008_agent_runs_admin_index.sql",
+		"0009_products_fulltext_search.sql"}) {
 		t.Fatalf("first run applied %v", applied)
 	}
 	applied, err = s.Migrate(ctx, migrations.FS)
@@ -64,7 +66,7 @@ func TestMigrateEmptyThenAgain(t *testing.T) {
 		t.Fatalf("second run applied %v, err %v; want nothing", applied, err)
 	}
 	var count int
-	if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil || count != 8 {
+	if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil || count != 9 {
 		t.Fatalf("schema_migrations rows = %d, %v", count, err)
 	}
 }
@@ -413,7 +415,8 @@ func TestMigrateUpgradeFrom0001(t *testing.T) {
 	}
 	applied, err := s.Migrate(ctx, migrations.FS)
 	want := []string{"0002_promotion_discount_rate_check.sql", "0003_knowledge_document_product.sql", "0004_backfill_knowledge_document_product.sql",
-		"0005_admin_audit_logs.sql", "0006_agent_write_order.sql", "0007_prompt_publish_actions.sql", "0008_agent_runs_admin_index.sql"}
+		"0005_admin_audit_logs.sql", "0006_agent_write_order.sql", "0007_prompt_publish_actions.sql", "0008_agent_runs_admin_index.sql",
+		"0009_products_fulltext_search.sql"}
 	if err != nil || !reflect.DeepEqual(applied, want) {
 		t.Fatalf("upgrade applied %v, %v", applied, err)
 	}
@@ -558,5 +561,93 @@ func TestBulkInsertGeneratedCatalog(t *testing.T) {
 	// 主键冲突直接报错
 	if err := s.BulkInsertProducts(ctx, gen[:1], 500); err == nil {
 		t.Fatal("duplicate insert should fail")
+	}
+}
+
+// 全文检索（迁移 0009）的结果必须包含原来逐词 LIKE 的全部结果：在生成目录上对一批关键词逐个比对。
+// 覆盖停用词敏感的英文（air、in、home）、拆不出两字段的短词（走 LIKE 兜底）、只命中分类名、只命中标签 / 卖点、数字、多词。
+func TestFulltextSearchContainsLikeResults(t *testing.T) {
+	ctx := context.Background()
+	s := migrated(t)
+	data, err := seed.Dev(func(string) (string, error) { return "$2a$04$placeholder", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplySeed(ctx, data); err != nil {
+		t.Fatal(err)
+	}
+	// 一件只有短词兜底才能找到的商品：“灯a”拆不出两字段，全文索引查不了
+	odd := seed.Catalog(1, 99)[0]
+	odd.ProductID, odd.Name, odd.Status = "p_gen_short", "小夜灯a 款", domain.ProductActive
+	for i := range odd.SKUs {
+		odd.SKUs[i].SkuID, odd.SKUs[i].ProductID = fmt.Sprintf("sku_gen_short_%d", i), odd.ProductID
+	}
+	if err := s.BulkInsertProducts(ctx, append(seed.Catalog(3000, 11), odd), 500); err != nil {
+		t.Fatal(err)
+	}
+	// 原实现：每个检索词在名称、品牌、分类名、标签、卖点上做 LIKE，任一命中
+	like := func(keyword string) map[string]bool {
+		var ors []string
+		var args []any
+		for _, term := range store.SearchTerms(keyword) {
+			l := "%" + strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(term) + "%"
+			ors = append(ors, `p.name LIKE ?`, `p.brand LIKE ?`, `c.name LIKE ?`,
+				`JSON_SEARCH(LOWER(p.tags_json), 'one', ?) IS NOT NULL`, `JSON_SEARCH(LOWER(p.selling_points_json), 'one', ?) IS NOT NULL`)
+			args = append(args, l, l, l, l, l)
+		}
+		rows, err := s.DB().QueryContext(ctx, `SELECT p.product_id FROM products p JOIN merchants m ON m.merchant_id = p.merchant_id
+			LEFT JOIN categories c ON c.category_id = p.category_id WHERE p.status = 'active' AND m.status = 'active' AND (`+strings.Join(ors, " OR ")+`)`, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		out := map[string]bool{}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			out[id] = true
+		}
+		return out
+	}
+	fts := func(keyword string) (map[string]bool, int) {
+		out := map[string]bool{}
+		total := 0
+		for page := 1; ; page++ {
+			items, n, err := s.SearchVisibleProducts(ctx, store.ProductSearch{Keyword: keyword, Page: store.Page{Page: page, PageSize: 100}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			total = n
+			for _, it := range items {
+				if it.Status != domain.ProductActive {
+					t.Fatalf("%q returned %s with status %s", keyword, it.ProductID, it.Status)
+				}
+				out[it.ProductID] = true
+			}
+			if page*100 >= n {
+				return out, total
+			}
+		}
+	}
+	for _, kw := range []string{"耳机", "降噪耳机", "Air", "air", "in", "Home", "Blink Home 台灯", "K8", "Nova 12", "5000mAh", "护眼",
+		"通勤 降噪", "电竞", "热插拔", "音箱", "照明", "台灯照明", "灯a", "a灯", "Orion", "orion k", "量子纠缠", "ip68", "IPX5 防水", "RGB"} {
+		want := like(kw)
+		if kw == "灯a" && !want["p_gen_short"] {
+			t.Fatalf("fixture: LIKE should find p_gen_short for %q", kw)
+		}
+		got, total := fts(kw)
+		if total != len(got) {
+			t.Fatalf("%q total %d != items %d", kw, total, len(got))
+		}
+		for id := range want {
+			if !got[id] {
+				t.Errorf("%q: %s matched by LIKE but not by fulltext", kw, id)
+			}
+		}
+		if len(got) > len(want) {
+			t.Logf("%q: fulltext %d, like %d", kw, len(got), len(want))
+		}
 	}
 }

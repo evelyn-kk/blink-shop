@@ -131,7 +131,10 @@ err := st.WithTx(ctx, func(ctx context.Context) error {
 ## 公开商品目录
 
 - **可见性**：商品 `active` 且所属商家 `active` 才出现在列表、详情、SKU、评价接口中；下架、风控、已删除、商家停用的商品一律 404 `product_not_found`。无货但上架的商品照常展示。内部的 `Store.GetProduct` 不过滤状态（订单快照、商家后台使用）。
-- **搜索**：`store.SearchTerms` 把关键词拆成最多 10 个检索词（完整关键词 + 汉字 2–4 字 n-gram + 字母数字片段），名称、品牌、分类名、标签、卖点包含任一词即命中；MySQL 端用 `LIKE`（转义 `%`/`_`）和 `JSON_SEARCH`，内存实现做同样的不区分大小写匹配，由契约测试保证一致。
+- **搜索**：`store.SearchTerms` 把关键词拆成最多 10 个检索词（完整关键词 + 汉字 2–4 字 n-gram + 字母数字片段），名称、品牌、分类名、标签、卖点包含任一词即命中；内存实现做不区分大小写的子串匹配，MySQL 与它由契约测试保证一致。
+  MySQL 端（迁移 0009）走全文索引：`products.search_text`（名称 + 品牌 + 标签 + 卖点，生成列）上建 ngram（二字）`FULLTEXT`，每个检索词拆成两字及以上的汉字段 / 字母数字段作为短语查询（短语要求连续出现，所以和子串匹配等价）；
+  分类名按 `LIKE` 先找分类再取商品；拆不出两字段的词（如“灯a”）按原来的 `LIKE` / `JSON_SEARCH` 兜底。三路用 `UNION` 求出商品 ID 再按可见性过滤、计数、排序（写成 `OR` 会全表扫描）。
+  `TestFulltextSearchContainsLikeResults` 在生成目录上逐个比对原来的 `LIKE` 结果，必须全部包含。10 万件商品下的前后对照见 docs/10 风险 R2。
 - **DTO**：`src/httpapi/catalog.go` 把领域对象转换成公开结构，不输出状态、排序值、内部时间戳，评价不输出账户/订单 ID、评价人名字脱敏；数组字段始终是 `[]`，属性的 `unit` 始终存在。字段集合由 `catalog_test.go` 锁定。
 - **促销**：只返回 active、在有效期内、商家营业中的促销；`?product_id=` 只返回适用于该商品的（平台/商家/商品/分类及父分类）。“当前时间”取自 `Options.Now`，测试中固定。
 - **演示图片**：`assets/catalog` 下的 PNG 由 `go run ./cmd/gen-sample-images` 生成（纯几何图形、结果确定），编译时内嵌，经 `GET /api/v1/assets/...` 公开读取，种子数据引用这些地址，不需要外网。

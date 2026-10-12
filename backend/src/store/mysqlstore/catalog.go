@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"strings"
+	"unicode"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/domain"
 	"github.com/evelyn-kk/blink-shop/backend/src/store"
@@ -173,36 +174,97 @@ const visibleProductFrom = ` FROM products p
 	LEFT JOIN categories c ON c.category_id = p.category_id
 	WHERE p.status = 'active' AND m.status = 'active'`
 
+// productHits 返回“关键词命中”的商品 ID 子查询，结果与逐词 LIKE（名称、品牌、分类名、标签、卖点，任一词命中即可）一致或更多：
+//   - 每个检索词拆成汉字段和字母数字段，两字及以上的段作为短语交给全文索引（迁移 0009，ngram 二字切分，短语要求连续出现，
+//     所以段是字段的子串时一定命中）；
+//   - 一个两字段都没有的词（如“灯a”）全文索引查不了，按原来的 LIKE 兜底；
+//   - 分类名不在全文索引里：按分类名 LIKE 找分类，再取分类下的商品。
+//
+// 不可见商品在外层按状态过滤。
+func productHits(terms []string) (string, []any) {
+	var phrases, cats []string
+	var args, catArgs, shortArgs []any
+	var short []string
+	for _, term := range terms {
+		like := "%" + likeEscape.Replace(term) + "%"
+		cats = append(cats, `c2.name LIKE ?`)
+		catArgs = append(catArgs, like)
+		runs := searchRuns(term)
+		if len(runs) == 0 {
+			short = append(short, `p3.name LIKE ?`, `p3.brand LIKE ?`,
+				`JSON_SEARCH(LOWER(p3.tags_json), 'one', ?) IS NOT NULL`, `JSON_SEARCH(LOWER(p3.selling_points_json), 'one', ?) IS NOT NULL`)
+			shortArgs = append(shortArgs, like, like, like, like)
+		}
+		for _, r := range runs {
+			phrases = append(phrases, `"`+r+`"`)
+		}
+	}
+	var parts []string
+	if len(phrases) > 0 {
+		parts = append(parts, `SELECT product_id FROM products WHERE MATCH(search_text) AGAINST (? IN BOOLEAN MODE)`)
+		args = append(args, strings.Join(phrases, " "))
+	}
+	parts = append(parts, `SELECT p2.product_id FROM categories c2 JOIN products p2 ON p2.category_id = c2.category_id WHERE `+strings.Join(cats, ` OR `))
+	args = append(args, catArgs...)
+	if len(short) > 0 {
+		parts = append(parts, `SELECT p3.product_id FROM products p3 WHERE `+strings.Join(short, ` OR `))
+		args = append(args, shortArgs...)
+	}
+	return strings.Join(parts, ` UNION `), args
+}
+
+// searchRuns 把检索词拆成汉字段和字母数字段（与 store.SearchTerms 的切分一致），只保留两字及以上的段（全文索引的 ngram 是两字）。
+func searchRuns(term string) []string {
+	var out []string
+	var run []rune
+	han := false
+	flush := func() {
+		if len(run) >= 2 {
+			out = append(out, string(run))
+		}
+		run = nil
+	}
+	for _, r := range term {
+		isHan := unicode.Is(unicode.Han, r)
+		if !isHan && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			flush()
+			continue
+		}
+		if len(run) > 0 && isHan != han {
+			flush()
+		}
+		han = isHan
+		run = append(run, r)
+	}
+	flush()
+	return out
+}
+
 // likeEscape 转义 LIKE / JSON_SEARCH 通配符，关键词里的 % 和 _ 按字面匹配。
 var likeEscape = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 func (s *Store) SearchVisibleProducts(ctx context.Context, q store.ProductSearch) ([]store.CatalogProduct, int, error) {
-	where, args := "", []any{}
-	if q.CategoryID != "" {
-		where += ` AND (p.category_id = ? OR c.parent_id = ?)`
-		args = append(args, q.CategoryID, q.CategoryID)
-	}
+	from, where, args := visibleProductFrom, "", []any{}
 	if terms := store.SearchTerms(q.Keyword); len(terms) > 0 {
-		var ors []string
-		for _, term := range terms {
-			like := "%" + likeEscape.Replace(term) + "%"
-			// 名称/品牌/分类名走列排序规则（不区分大小写）；JSON 数组转小写后按字符串值匹配，不会命中 JSON 语法字符。
-			ors = append(ors, `p.name LIKE ?`, `p.brand LIKE ?`, `c.name LIKE ?`,
-				`JSON_SEARCH(LOWER(p.tags_json), 'one', ?) IS NOT NULL`,
-				`JSON_SEARCH(LOWER(p.selling_points_json), 'one', ?) IS NOT NULL`)
-			args = append(args, like, like, like, like, like)
-		}
-		where += ` AND (` + strings.Join(ors, ` OR `) + `)`
+		// 先求命中的商品 ID，再和可见性条件连接：全文、分类名、短词兜底三路各自走索引，用 UNION 合并（写成 OR 会全表扫描）。
+		hits, hitArgs := productHits(terms)
+		from = ` FROM (` + hits + `) hit
+	JOIN products p ON p.product_id = hit.product_id` + strings.TrimPrefix(visibleProductFrom, ` FROM products p`)
+		args = append(args, hitArgs...)
 	} else if strings.TrimSpace(q.Keyword) != "" {
 		// 关键词有内容但拆不出检索词（例如单个字符），与上游一致按无结果处理。
 		return []store.CatalogProduct{}, 0, nil
 	}
+	if q.CategoryID != "" {
+		where += ` AND (p.category_id = ? OR c.parent_id = ?)`
+		args = append(args, q.CategoryID, q.CategoryID)
+	}
 
 	var total int
-	if err := s.q(ctx).QueryRowContext(ctx, `SELECT COUNT(*)`+visibleProductFrom+where, args...).Scan(&total); err != nil {
+	if err := s.q(ctx).QueryRowContext(ctx, `SELECT COUNT(*)`+from+where, args...).Scan(&total); err != nil {
 		return nil, 0, mapErr(err)
 	}
-	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+prefixed("p.", productColumns)+`, m.name`+visibleProductFrom+where+
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+prefixed("p.", productColumns)+`, m.name`+from+where+
 		` ORDER BY p.sort_order, p.product_id LIMIT ? OFFSET ?`, append(args, q.Page.PageSize, q.Page.Offset())...)
 	if err != nil {
 		return nil, 0, mapErr(err)
