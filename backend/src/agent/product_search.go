@@ -137,6 +137,7 @@ func (r *Registry) searchProducts(ctx context.Context, args map[string]any) (Pro
 
 	// 2. 过滤与打分。指定了品牌时，品牌词只用于过滤，不计入相关度（否则“Blink Home 的耳机”会因为品牌词命中而推荐台灯）。
 	scoreTerms := withoutBrandTerms(out.Terms, out.Brands)
+	strongSim := r.vectorStrongSim()
 	var cands []*candidate
 	for _, id := range order {
 		c := pool[id]
@@ -150,7 +151,9 @@ func (r *Registry) searchProducts(ctx context.Context, args map[string]any) (Pro
 			continue
 		}
 		c.keyword, c.strong = relevance(scoreTerms, strings.ToLower(c.card.Name), text)
-		if c.keyword <= 0 && c.vector <= 0 {
+		// 关键词一个都没命中的商品，只有向量相似度达到“强相似”才能单独进结果；不够像时向量只给关键词命中的商品加分。
+		// 真实 Embedding 下同一店铺的商品对任何问题都有 0.4–0.6 的相似度，否则“洗衣机”“家电”这类问题会把全部商品当相近推荐。
+		if c.keyword <= 0 && c.vector < strongSim {
 			continue
 		}
 		scoreCandidate(c, scoreTerms)
@@ -159,7 +162,6 @@ func (r *Registry) searchProducts(ctx context.Context, args map[string]any) (Pro
 		}
 		cands = append(cands, c)
 	}
-	strongSim := r.vectorStrongSim()
 	sortCandidates(cands, strongSim)
 
 	// 3. 可选模型重排（只能在规则候选里调整顺序，不能引入新商品）

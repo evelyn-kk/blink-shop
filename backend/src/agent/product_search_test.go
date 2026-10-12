@@ -182,15 +182,23 @@ func TestProductVectorOnlyOffTypeDropped(t *testing.T) {
 	}
 }
 
-// 向量“强相似”阈值可由 Deps 覆盖（评测做敏感性对照）；默认 0.78 不变。
+// 关键词没命中的商品只有向量“强相似”才能单独进结果，阈值可由 Deps 覆盖（评测做敏感性对照）；默认 0.78 不变。
+// 真实 Embedding 下所有商品对任何问题都有 0.4–0.6 的相似度：“家电”这种没有品类锚点的问题不能把它们都当相近商品给出。
 func TestProductVectorStrongSimOverride(t *testing.T) {
 	e := newEnv(t)
 	deps := e.runner.deps
-	deps.ProductIndex = &fakeProductIndex{hits: []rag.ProductHit{{ProductID: "p_seed_lamp", Score: 0.7}}}
+	deps.ProductIndex = &fakeProductIndex{hits: []rag.ProductHit{{ProductID: "p_seed_lamp", Score: 0.7}, {ProductID: "p_seed_mouse", Score: 0.45}}}
 	e.runner = NewRuleRunner(deps)
 	e.reg = e.runner.Registry()
-	if res := e.search(t, map[string]any{"query": "夜里看书"}); res.Relevance != RelevanceWeak || ids(res) != "p_seed_lamp" {
-		t.Fatalf("0.7 < default 0.78 should be weak: %s %s", res.Relevance, ids(res))
+	if res := e.search(t, map[string]any{"query": "夜里看书"}); ids(res) != "" || res.Relevance != RelevanceNone {
+		t.Fatalf("0.7 < default 0.78, vector-only should not be shown: %s %s", res.Relevance, ids(res))
+	}
+	if res := e.search(t, map[string]any{"query": "家电"}); ids(res) != "" || res.Relevance != RelevanceNone {
+		t.Fatalf("weak vector-only hits shown for generic query: %s %s", res.Relevance, ids(res))
+	}
+	// 关键词命中的商品照样可以靠向量加分
+	if res := e.search(t, map[string]any{"query": "台灯"}); ids(res) != "p_seed_lamp" || res.Relevance != RelevanceOK {
+		t.Fatalf("keyword hit: %s %s", res.Relevance, ids(res))
 	}
 	deps.VectorStrongSim = 0.65
 	e.runner = NewRuleRunner(deps)
