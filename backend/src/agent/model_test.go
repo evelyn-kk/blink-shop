@@ -413,11 +413,27 @@ func TestModelPlannerCannotGuessReferencedTarget(t *testing.T) {
 	if !strings.Contains(r.text.String(), "哪一个") || r.traceMeta("planner", "model")["dropped_query"] != "Blink Nova 12" {
 		t.Fatalf("should ask: %q %v", r.text.String(), r.traceMeta("planner", "model"))
 	}
+	// 模型给了用户没说的序号（真实模型对“把那个加入购物车”输出 ordinal=-1）
+	mock.Then(llm.Text(`{"intent":"cart","action":"add","ordinal":-1}`))
+	r = e.run(t, seed.User2ID, sid, "把那个加入购物车")
+	if c := e.cart(t, seed.User2ID); len(c.Items) != 0 || r.traceMeta("planner", "model")["dropped_ordinal"] != -1 {
+		t.Fatalf("guessed ordinal: %+v %v", c.Items, r.traceMeta("planner", "model"))
+	}
+	// 用户说了序号：照常使用
+	mock.Then(llm.Text(`{"intent":"cart","action":"add","ordinal":2}`))
+	e.run(t, seed.User2ID, sid, "把第二个加入购物车")
+	if c := e.cart(t, seed.User2ID); len(c.Items) != 1 {
+		t.Fatalf("explicit ordinal: %+v", c.Items)
+	}
 	// 用户自己说了商品名：模型的检索词照常使用
 	mock.Then(llm.Text(`{"intent":"cart","action":"add","query":"Nova 12"}`))
 	e.run(t, seed.User2ID, sid, "把那个 Nova 12 加入购物车")
-	if c := e.cart(t, seed.User2ID); len(c.Items) != 1 || c.Items[0].ProductID != "p_seed_nova" {
-		t.Fatalf("named target: %+v", c.Items)
+	found := false
+	for _, it := range e.cart(t, seed.User2ID).Items {
+		found = found || it.ProductID == "p_seed_nova"
+	}
+	if !found {
+		t.Fatalf("named target: %+v", e.cart(t, seed.User2ID).Items)
 	}
 }
 

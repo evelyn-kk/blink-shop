@@ -81,11 +81,8 @@ func (r *RuleRunner) plan(ctx context.Context, in Input, st ModelSettings, out O
 		return rule
 	}
 	merged := imagePlan(mergePlans(rule, modelPlan), rule, hasImg)
-	if dropped := guessedTarget(rule, merged, in.Content); dropped != "" {
-		// 用户只说了“这个 / 那个”，模型却从上下文里挑了一件商品当目标：不能替用户选，回到规则的指代消解（多件时先问）
-		merged.Query = rule.Query
-		meta["dropped_query"] = dropped
-	}
+	// 写操作的目标（哪件商品、第几个、哪个订单）只能来自用户原话：模型从上下文里补出来的目标一律丢弃，回到规则的指代消解（多件时先问）
+	merged = dropGuessedTargets(rule, merged, in.Content, meta)
 	meta["intent"], meta["action"], meta["rule_intent"] = string(merged.Intent), merged.Action, string(rule.Intent)
 	out.Trace("planner", "model", "ok", r.deps.Now().Sub(start), meta)
 	return merged
@@ -132,22 +129,33 @@ func (r *RuleRunner) modelPlan(ctx context.Context, in Input, st ModelSettings, 
 	return p, resp.Usage, nil
 }
 
-// guessedTarget 返回模型在指代句里自己补出来的检索词（加购、评价这类要定位具体商品的意图）；没有则返回空。
-// 判断：规则识别出指代、没有序号、规则没抽到检索词，而模型的检索词并不出现在用户原话里。
-func guessedTarget(rule, merged Plan, content string) string {
-	if merged.Intent != IntentCart && merged.Intent != IntentReview {
-		return ""
-	}
-	if !rule.Reference || rule.Ordinal != 0 || rule.Query != "" || merged.Query == "" {
-		return ""
+// dropGuessedTargets 丢弃模型在加购、评价、订单意图里自己补出来的目标，丢掉的值记进 meta（dropped_*）：
+//   - 序号：用户原话里没有“第 N 个 / 最后一个”（规则没解析出序号），模型却给了；
+//   - 订单号：原话里没有出现；
+//   - 检索词：用户只说了“这个 / 那个”（规则识别出指代、没抽到检索词），模型的检索词又不在原话里。
+func dropGuessedTargets(rule, merged Plan, content string, meta map[string]any) Plan {
+	if merged.Intent != IntentCart && merged.Intent != IntentReview && merged.Intent != IntentOrder {
+		return merged
 	}
 	text := compact(content)
-	for _, t := range strings.Fields(merged.Query) {
-		if !strings.Contains(text, compact(t)) {
-			return merged.Query
+	if rule.Ordinal == 0 && merged.Ordinal != 0 {
+		meta["dropped_ordinal"] = merged.Ordinal
+		merged.Ordinal = 0
+	}
+	if rule.OrderRef == "" && merged.OrderRef != "" && !strings.Contains(text, compact(merged.OrderRef)) {
+		meta["dropped_order_ref"] = merged.OrderRef
+		merged.OrderRef = ""
+	}
+	if merged.Intent != IntentOrder && rule.Reference && rule.Ordinal == 0 && rule.Query == "" && merged.Query != "" {
+		for _, t := range strings.Fields(merged.Query) {
+			if !strings.Contains(text, compact(t)) {
+				meta["dropped_query"] = merged.Query
+				merged.Query = rule.Query
+				break
+			}
 		}
 	}
-	return ""
+	return merged
 }
 
 // mergePlans 以模型的意图和动作为准；槽位模型给了用模型的，没给用规则抽的；指代等纯规则特征沿用规则。
