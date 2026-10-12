@@ -30,6 +30,7 @@
 | 0007 | `0007_prompt_publish_actions.sql` | `agent_prompt_publish_records` 加 `action`（publish / rollback）、`from_version`、`reason`、`detail` 和写入顺序 `seq` |
 | 0008 | `0008_agent_runs_admin_index.sql` | `agent_runs` 加 `(status, created_at)`、`(account_id, created_at)` 索引，供管理端运行列表筛选翻页 |
 | 0009 | `0009_products_fulltext_search.sql` | `products` 加生成列 `search_text`（名称 + 品牌 + 标签 + 卖点）和 ngram 全文索引 `ft_products_search`，公开商品搜索用；建索引前在同一会话关掉 InnoDB 停用词（否则含 a / in / on 等的二字词不进索引，“air”搜不到）。**以后任何会重建 `products` 的操作（`OPTIMIZE`、改列等）都要先 `SET SESSION innodb_ft_enable_stopword = OFF`** |
+| 0010 | `0010_products_status_merchant_index.sql` | `products` 加 `(status, merchant_id)` 索引：公开商品列表的计数（在售 + 商家正常）只扫索引，10 万商品时从约 0.4s 降到约 0.02s |
 
 ## 约定
 

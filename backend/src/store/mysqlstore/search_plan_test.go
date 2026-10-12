@@ -38,7 +38,7 @@ func TestKeywordSearchDrivesFromHits(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, kw := range []string{"量子纠缠", "游戏鼠标 轻量化", "K8"} {
-		hint, from, where, args, ok := visibleSearch(store.ProductSearch{Keyword: kw})
+		hint, from, _, where, args, ok := visibleSearch(store.ProductSearch{Keyword: kw})
 		if !ok {
 			t.Fatalf("%q: no terms", kw)
 		}
@@ -54,5 +54,18 @@ func TestKeywordSearchDrivesFromHits(t *testing.T) {
 				t.Errorf("%q %s: hit set is not the driving table:\n%s", kw, name, plan)
 			}
 		}
+	}
+	// 不带关键词、不按分类的计数：不连分类表，只扫 (status, merchant_id) 覆盖索引
+	hint, _, countFrom, where, args, _ := visibleSearch(store.ProductSearch{})
+	var plan string
+	if err := s.DB().QueryRowContext(ctx, "EXPLAIN FORMAT=TREE SELECT "+hint+"COUNT(*)"+countFrom+where, args...).Scan(&plan); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan, "Covering index lookup on p using idx_products_status_merchant") || strings.Contains(plan, "categories") {
+		t.Errorf("plain count plan:\n%s", plan)
+	}
+	// 按分类过滤时仍要连分类表（父分类）
+	if _, _, countFrom, _, _, _ := visibleSearch(store.ProductSearch{CategoryID: "c_digital"}); !strings.Contains(countFrom, "categories") {
+		t.Errorf("category count must join categories: %s", countFrom)
 	}
 }

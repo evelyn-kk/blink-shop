@@ -170,9 +170,11 @@ func (s *Store) GetMerchant(ctx context.Context, merchantID string) (domain.Merc
 
 // visibleProductFrom 是公开商品查询的 FROM/WHERE 公共部分。
 const visibleProductFrom = ` FROM products p
-	JOIN merchants m ON m.merchant_id = p.merchant_id
-	LEFT JOIN categories c ON c.category_id = p.category_id
+	JOIN merchants m ON m.merchant_id = p.merchant_id` + categoryJoin + `
 	WHERE p.status = 'active' AND m.status = 'active'`
+
+const categoryJoin = `
+	LEFT JOIN categories c ON c.category_id = p.category_id`
 
 // productHits 返回“关键词命中”的商品 ID 子查询，结果与逐词 LIKE（名称、品牌、分类名、标签、卖点，任一词命中即可）一致或更多：
 //   - 每个检索词拆成汉字段和字母数字段，两字及以上的段作为短语交给全文索引（迁移 0009，ngram 二字切分，短语要求连续出现，
@@ -240,8 +242,10 @@ func searchRuns(term string) []string {
 	return out
 }
 
-// visibleSearch 拼出公开商品列表 / 搜索的 FROM 和 WHERE（SELECT 之后的提示、FROM、WHERE、参数）；ok 为 false 表示关键词拆不出检索词，直接无结果。
-func visibleSearch(q store.ProductSearch) (hint, from, where string, args []any, ok bool) {
+// visibleSearch 拼出公开商品列表 / 搜索的 FROM 和 WHERE（SELECT 之后的提示、取数用的 FROM、计数用的 FROM、WHERE、参数）；
+// ok 为 false 表示关键词拆不出检索词，直接无结果。没有按分类过滤时，计数不连分类表（按主键的 LEFT JOIN 不改变行数），
+// 在售 + 商家正常的计数只扫 (status, merchant_id) 覆盖索引（迁移 0010）。
+func visibleSearch(q store.ProductSearch) (hint, from, countFrom, where string, args []any, ok bool) {
 	from = visibleProductFrom
 	if terms := store.SearchTerms(q.Keyword); len(terms) > 0 {
 		// 先求命中的商品 ID，再和可见性条件连接：全文、分类名、短词兜底三路各自走索引，用 UNION 合并（写成 OR 会全表扫描）。
@@ -253,26 +257,29 @@ func visibleSearch(q store.ProductSearch) (hint, from, where string, args []any,
 	JOIN products p ON p.product_id = hit.product_id` + strings.TrimPrefix(visibleProductFrom, ` FROM products p`)
 		args = append(args, hitArgs...)
 	} else if strings.TrimSpace(q.Keyword) != "" {
-		return "", "", "", nil, false
+		return "", "", "", "", nil, false
 	}
+	countFrom = from
 	if q.CategoryID != "" {
 		where += ` AND (p.category_id = ? OR c.parent_id = ?)`
 		args = append(args, q.CategoryID, q.CategoryID)
+	} else {
+		countFrom = strings.Replace(from, categoryJoin, "", 1)
 	}
-	return hint, from, where, args, true
+	return hint, from, countFrom, where, args, true
 }
 
 // likeEscape 转义 LIKE / JSON_SEARCH 通配符，关键词里的 % 和 _ 按字面匹配。
 var likeEscape = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 func (s *Store) SearchVisibleProducts(ctx context.Context, q store.ProductSearch) ([]store.CatalogProduct, int, error) {
-	hint, from, where, args, ok := visibleSearch(q)
+	hint, from, countFrom, where, args, ok := visibleSearch(q)
 	if !ok {
 		// 关键词有内容但拆不出检索词（例如单个字符），与上游一致按无结果处理。
 		return []store.CatalogProduct{}, 0, nil
 	}
 	var total int
-	if err := s.q(ctx).QueryRowContext(ctx, `SELECT `+hint+`COUNT(*)`+from+where, args...).Scan(&total); err != nil {
+	if err := s.q(ctx).QueryRowContext(ctx, `SELECT `+hint+`COUNT(*)`+countFrom+where, args...).Scan(&total); err != nil {
 		return nil, 0, mapErr(err)
 	}
 	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+hint+prefixed("p.", productColumns)+`, m.name`+from+where+
