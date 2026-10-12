@@ -34,6 +34,9 @@ func (m *ModelConfig) describe(cfg map[string]string) {
 	}
 	cfg["planner"] = onOff(s.PlannerEnabled, s.PlannerModel)
 	cfg["react"] = onOff(s.AgentEnabled, s.AgentModel)
+	if s.PlannerEnabled && s.AgentEnabled && s.ParallelFirstStep {
+		cfg["react"] += "+parallel_first_step"
+	}
 	cfg["rerank"] = onOff(s.RerankEnabled, s.PlannerModel)
 	cfg["summary"] = onOff(s.SummaryEnabled, s.PlannerModel)
 	cfg["max_tool_rounds"] = fmt.Sprint(s.MaxToolRounds)
@@ -118,6 +121,8 @@ type modelStats struct {
 	byModel                           map[string]*[3]int
 	// 阶段耗时：每次模型规划、每一步工具循环（含最后生成回答的那一步）、最后一轮第一段回答文字到达的时间。
 	plannerLat, reactStepLat, firstText []time.Duration
+	// 并行第一步被采用 / 丢掉的次数。
+	parallelAdopted, parallelDiscarded int
 }
 
 // addFirstText 记最后一轮的首段文字时间（没有文字时不记）。
@@ -164,6 +169,13 @@ func (s *modelStats) add(m *meter, caseLatency time.Duration, traces []traceRec)
 			} else {
 				s.plannerModelOK++
 			}
+		case tr.stage == "react" && tr.typ == "parallel":
+			if tr.status == "adopted" {
+				s.parallelAdopted++
+			} else {
+				s.parallelDiscarded++
+			}
+			detail["parallel_first_step"] = tr.status
 		case tr.stage == "react" && tr.typ == "fallback":
 			s.reactFallbacks++
 			r := fmt.Sprint(tr.meta["reason"])
@@ -241,6 +253,8 @@ func (s *modelStats) write(rep *Report, withModel bool) {
 	rep.Metrics["model_call_p50_ms"] = float64(percentile(s.callLatency, 0.50).Milliseconds())
 	rep.Metrics["model_call_p95_ms"] = float64(percentile(s.callLatency, 0.95).Milliseconds())
 	rep.Metrics["planner_model_runs"] = float64(s.plannerModelRuns)
+	rep.Metrics["parallel_adopted"] = float64(s.parallelAdopted)
+	rep.Metrics["parallel_discarded"] = float64(s.parallelDiscarded)
 	rep.Metrics["planner_fallbacks"] = float64(s.plannerFallbacks)
 	rep.Metrics["react_fallbacks"] = float64(s.reactFallbacks)
 	for r, c := range s.reactFallbackReasons {

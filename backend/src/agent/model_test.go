@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -22,10 +23,12 @@ func (e *env) withModel(mock *llm.Mock, st ModelSettings) {
 	e.reg = e.runner.Registry()
 }
 
+// settings 是模型测试的设置：规划和工具循环按顺序调用（脚本化的 mock 按调用顺序回复），专门测并行的用例自己打开 ParallelFirstStep。
 func settings(planner, agent bool) ModelSettings {
 	st := DefaultModelSettings()
 	st.PlannerEnabled, st.AgentEnabled = planner, agent
 	st.PlannerModel, st.AgentModel = "small-m", "big-m"
+	st.ParallelFirstStep = false
 	return st
 }
 
@@ -509,5 +512,82 @@ func TestModelReactCannotRelaxUserConstraints(t *testing.T) {
 	}
 	if r.traceMeta("react", "step.1")["enforced_max_price"] != 3000.0 {
 		t.Fatalf("trace: %v", r.traceMeta("react", "step.1"))
+	}
+}
+
+// parallelMock 按请求内容回复：规划（提示里没有工具清单）慢 40ms 后回 plan；工具循环第一步回 first，之后的轮次回 later。
+func parallelMock(plan func() (string, error), first, later string) *llm.Mock {
+	return &llm.Mock{Fallback: func(req llm.Request) (llm.Response, error) {
+		all := ""
+		for _, m := range req.Messages {
+			all += m.Content
+		}
+		if !strings.Contains(all, ToolSearchProducts) && !strings.Contains(all, ToolListOrders) {
+			time.Sleep(40 * time.Millisecond)
+			c, err := plan()
+			return llm.Response{Content: c, Model: req.Model}, err
+		}
+		if len(req.Messages) == 2 {
+			return llm.Response{Content: first, Model: req.Model}, nil
+		}
+		return llm.Response{Content: later, Model: req.Model}, nil
+	}}
+}
+
+func eventIndex(r *recorder, ev string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Index(r.events, ev)
+}
+
+// 规划和第一步并行（B2）：意图相同采用第一步，规划回来之前不推任何文字；意图不同丢掉第一步（它的文字和工具都不出现）；
+// 规划失败回到规则规划，意图自然相同，照样采用。
+func TestParallelFirstStep(t *testing.T) {
+	st := settings(true, true)
+	st.ParallelFirstStep = true
+	const q = "耳机可以游泳的时候戴吗"
+	rule := Classify(q, false)
+	if !usesModelAnswer(rule) {
+		t.Fatalf("rule plan %+v should use the model answer", rule)
+	}
+	samePlan := func() (string, error) { return fmt.Sprintf(`{"intent":%q}`, rule.Intent), nil }
+
+	// 采用：两次调用（规划 + 第一步），文字在规划轨迹之后才出现
+	e := newEnv(t)
+	mock := parallelMock(samePlan, `{"type":"final","text":"可以防汗防溅，但不能游泳时戴。"}`, "")
+	e.withModel(mock, st)
+	r := e.run(t, seed.User2ID, e.newSession(t, seed.User2ID), q)
+	if mock.Count() != 2 || r.text.String() != "可以防汗防溅，但不能游泳时戴。" || r.traceMeta("react", "parallel") == nil {
+		t.Fatalf("adopted: calls=%d text=%q", mock.Count(), r.text.String())
+	}
+	if pt, tx := eventIndex(r, "trace:planner.model"), eventIndex(r, "text"); pt < 0 || tx < pt {
+		t.Fatalf("text before plan: %v", r.events)
+	}
+
+	// 丢掉：规划说是查订单，第一步的回答不出现，按订单白名单重走
+	e = newEnv(t)
+	mock = parallelMock(func() (string, error) { return `{"intent":"order","action":"list"}`, nil },
+		`{"type":"final","text":"SPECULATIVE"}`, `{"type":"final","text":"你最近的订单在这里。"}`)
+	mock.Fallback = func(prev func(llm.Request) (llm.Response, error)) func(llm.Request) (llm.Response, error) {
+		return func(req llm.Request) (llm.Response, error) {
+			if len(req.Messages) == 2 && strings.Contains(req.Messages[0].Content, ToolListOrders) {
+				return llm.Response{Content: `{"type":"final","text":"你最近的订单在这里。"}`, Model: req.Model}, nil
+			}
+			return prev(req)
+		}
+	}(mock.Fallback)
+	e.withModel(mock, st)
+	r = e.run(t, seed.User2ID, e.newSession(t, seed.User2ID), q)
+	if strings.Contains(r.text.String(), "SPECULATIVE") || r.text.String() != "你最近的订单在这里。" || r.traces[slices.IndexFunc(r.traces, func(x trace) bool { return x.Stage == "react" && x.Type == "parallel" })].Status != "discarded" {
+		t.Fatalf("discarded: %q %v", r.text.String(), r.events)
+	}
+
+	// 规划失败：回到规则规划，意图相同，采用
+	e = newEnv(t)
+	mock = parallelMock(func() (string, error) { return "", context.DeadlineExceeded }, `{"type":"final","text":"不能游泳时戴。"}`, "")
+	e.withModel(mock, st)
+	r = e.run(t, seed.User2ID, e.newSession(t, seed.User2ID), q)
+	if r.text.String() != "不能游泳时戴。" || r.traces[slices.IndexFunc(r.traces, func(x trace) bool { return x.Stage == "react" && x.Type == "parallel" })].Status != "adopted" {
+		t.Fatalf("planner error: %q", r.text.String())
 	}
 }

@@ -197,7 +197,7 @@ func NewServer(opts Options) *Server {
 func ModelSettingsFrom(s configcenter.AgentSettings) agent.ModelSettings {
 	return agent.ModelSettings{PlannerEnabled: s.PlannerEnabled, AgentEnabled: s.AgentEnabled, PlannerModel: s.PlannerModel, AgentModel: s.AgentModel,
 		Timeout: s.Timeout, MaxToolRounds: s.MaxToolRounds, ToolPolicy: s.ToolPolicy, RerankEnabled: s.RerankEnabled, SummaryEnabled: s.SummaryEnabled,
-		MemoryTurns: s.MemoryTurns}
+		MemoryTurns: s.MemoryTurns, ParallelFirstStep: s.ParallelFirstStep}
 }
 
 // shop 返回购物车、结算、订单的业务层（与导购 Agent 的工具共用同一套规则）。每次按当前的 Store 和时钟构造，

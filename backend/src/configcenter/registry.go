@@ -70,9 +70,11 @@ var (
 	KeyAIAgentModel     = Key{Name: "ai.agent_model", Env: "AI_AGENT_MODEL", Default: "deepseek-chat"}
 	KeyAIPlannerEnabled = Key{Name: "ai.planner_enabled", Env: "AI_PLANNER_ENABLED", Default: "true"}
 	KeyAIAgentEnabled   = Key{Name: "ai.agent_enabled", Env: "AI_AGENT_ENABLED", Default: "true"}
-	KeyAITimeout        = Key{Name: "ai.timeout", Env: "AI_TIMEOUT", Default: "30s"}
-	KeyAIMaxRetries     = Key{Name: "ai.max_retries", Env: "AI_MAX_RETRIES", Default: "2"}
-	KeyAIMaxToolRounds  = Key{Name: "ai.max_tool_rounds", Env: "AI_MAX_TOOL_ROUNDS", Default: "6"}
+	// KeyAIParallelFirstStep：模型规划和工具循环第一步并行。
+	KeyAIParallelFirstStep = Key{Name: "ai.parallel_first_step", Env: "AI_PARALLEL_FIRST_STEP", Default: "true"}
+	KeyAITimeout           = Key{Name: "ai.timeout", Env: "AI_TIMEOUT", Default: "30s"}
+	KeyAIMaxRetries        = Key{Name: "ai.max_retries", Env: "AI_MAX_RETRIES", Default: "2"}
+	KeyAIMaxToolRounds     = Key{Name: "ai.max_tool_rounds", Env: "AI_MAX_TOOL_ROUNDS", Default: "6"}
 	// KeyAgentToolPolicy 是意图 → 可用工具的白名单（JSON 对象，值为工具名数组）；空表示用内置默认。模型只能在白名单内选工具。
 	KeyAgentToolPolicy  = Key{Name: "agent.tool_policy", Env: "AGENT_TOOL_POLICY"}
 	KeyAIRerankEnabled  = Key{Name: "ai.rerank_enabled", Env: "AI_RERANK_ENABLED", Default: "false"}

@@ -275,16 +275,20 @@ func parseJSONObject(raw string) (map[string]any, error) {
 }
 
 // answerWithModel 用大模型做工具循环并生成最终回答。返回 false 表示没有完成（已写回退轨迹），由规则处理器接管。
-func (s *session) answerWithModel(ctx context.Context, st ModelSettings) bool {
+// first 不为 nil 时是和模型规划并行发出、已经被采用的第一步（见 parallel.go）：第一轮直接用它的结果，消息沿用它发出时的内容。
+func (s *session) answerWithModel(ctx context.Context, st ModelSettings, first *firstStep) bool {
 	r := s.r
 	pending := newPendingBlocks()
-	allowed := r.reg.allowedTools(ctx, s.plan.Intent)
 	for _, id := range ParseProductIDs(s.in.Content) {
 		s.tc.Evidence[id] = true // 用户明确写出的商品 ID
 	}
-	reactPrompt, reactVersion := s.r.deps.prompt(ctx, PromptReact)
-	system := strings.Replace(reactPrompt, "{{TOOLS}}", renderTools(allowed), 1)
-	messages := []llm.Message{{Role: "system", Content: system}, {Role: "user", Content: s.reactUserPrompt()}}
+	var messages []llm.Message
+	var reactVersion int
+	if first != nil {
+		messages, reactVersion = first.messages, first.version
+	} else {
+		messages, reactVersion = r.reactMessages(ctx, s.in, s.plan, s.history)
+	}
 	parseFailures := 0
 	answerStarted := false
 	var lastUsage llm.Usage
@@ -311,7 +315,15 @@ func (s *session) answerWithModel(ctx context.Context, st ModelSettings) bool {
 			}
 			s.sayRaw(t)
 		})
-		resp, err := r.deps.LLM.Stream(callCtx, llm.Request{Model: st.AgentModel, Messages: messages, Temperature: reactTemp, MaxTokens: reactMaxTokens, JSON: true}, fs.feed)
+		var resp llm.Response
+		var err error
+		if round == 1 && first != nil {
+			// 并行发出的第一步：缓存的增量按原顺序过同一个流式过滤器（规划没回来之前不能推给用户）
+			start = first.start
+			resp, err = first.replay(fs.feed)
+		} else {
+			resp, err = r.deps.LLM.Stream(callCtx, r.reactRequest(st, messages), fs.feed)
+		}
 		cancel()
 		if !answerStarted {
 			s.out.Thinking(Step{ID: stepID, Title: "思考下一步", Status: StepDone})
@@ -409,24 +421,26 @@ func (s *session) answerWithModel(ctx context.Context, st ModelSettings) bool {
 }
 
 // reactUserPrompt 把本轮内容、规划结果和上下文里可见的商品交给模型。
-func (s *session) reactUserPrompt() string {
+func (s *session) reactUserPrompt() string { return reactUserPrompt(s.in, s.plan, s.history) }
+
+func reactUserPrompt(in Input, plan Plan, hist history) string {
 	var b strings.Builder
 	b.WriteString("用户说：")
-	b.WriteString(s.in.Content)
-	planJSON, _ := json.Marshal(planMeta(s.plan))
+	b.WriteString(in.Content)
+	planJSON, _ := json.Marshal(planMeta(plan))
 	b.WriteString("\n\n规划结果（供参考）：")
 	b.Write(planJSON)
-	if mc := s.history.promptContext(); mc != "" {
+	if mc := hist.promptContext(); mc != "" {
 		b.WriteString("\n\n相关的历史对话：\n")
 		b.WriteString(mc)
 	}
-	if len(s.history.Cards) > 0 {
+	if len(hist.Cards) > 0 {
 		b.WriteString("\n\n上一轮给用户看过的商品（按顺序，可直接加购）：")
-		for i, c := range s.history.Cards {
+		for i, c := range hist.Cards {
 			fmt.Fprintf(&b, "\n%d. %s（product_id=%s，%s）", i+1, c.Name, c.ProductID, yuan(c.Price))
 		}
 	}
-	if hasImage(s.in.Attachments) {
+	if hasImage(in.Attachments) {
 		b.WriteString("\n\n（用户附带了图片。按图找商品由系统单独处理，这一步只按文字回答，不要描述或猜测图片内容。）")
 	}
 	return b.String()
@@ -561,4 +575,15 @@ func (s *session) enforceUserConstraints(ctx context.Context, args map[string]an
 		}
 	}
 	return out
+}
+
+// reactMessages 是工具循环第一轮的消息：系统提示（按意图的工具白名单）+ 本轮内容和规划结果。
+func (r *RuleRunner) reactMessages(ctx context.Context, in Input, plan Plan, hist history) ([]llm.Message, int) {
+	reactPrompt, version := r.deps.prompt(ctx, PromptReact)
+	system := strings.Replace(reactPrompt, "{{TOOLS}}", renderTools(r.reg.allowedTools(ctx, plan.Intent)), 1)
+	return []llm.Message{{Role: "system", Content: system}, {Role: "user", Content: reactUserPrompt(in, plan, hist)}}, version
+}
+
+func (r *RuleRunner) reactRequest(st ModelSettings, messages []llm.Message) llm.Request {
+	return llm.Request{Model: st.AgentModel, Messages: messages, Temperature: reactTemp, MaxTokens: reactMaxTokens, JSON: true}
 }

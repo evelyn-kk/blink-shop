@@ -275,6 +275,8 @@ type AgentSettings struct {
 	RerankEnabled  bool
 	SummaryEnabled bool
 	MemoryTurns    int
+	// ParallelFirstStep：模型规划和工具循环第一步并行。
+	ParallelFirstStep bool
 }
 
 // AgentSettingsOf 读取并解析 Agent 配置；任一项不合法时返回错误（启动时校验用）。
@@ -286,6 +288,7 @@ func AgentSettingsOf(ctx context.Context, r *Resolver) (AgentSettings, error) {
 	s.AgentEnabled = collect(&errs, KeyAIAgentEnabled, func() (bool, error) { return parseBool(r.Get(ctx, KeyAIAgentEnabled), true) })
 	s.RerankEnabled = collect(&errs, KeyAIRerankEnabled, func() (bool, error) { return parseBool(r.Get(ctx, KeyAIRerankEnabled), false) })
 	s.SummaryEnabled = collect(&errs, KeyAISummaryEnabled, func() (bool, error) { return parseBool(r.Get(ctx, KeyAISummaryEnabled), false) })
+	s.ParallelFirstStep = collect(&errs, KeyAIParallelFirstStep, func() (bool, error) { return parseBool(r.Get(ctx, KeyAIParallelFirstStep), true) })
 	s.MemoryTurns = int(collect(&errs, KeyMemoryTurns, func() (int64, error) {
 		n, err := strconv.ParseInt(strings.TrimSpace(r.Get(ctx, KeyMemoryTurns)), 10, 64)
 		if err != nil || n < 1 || n > 50 {

@@ -56,6 +56,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	imageMinPass := fs.Float64("image-min-pass", eval.DefaultImageMinPass, "图片评测通过率下限（本地特征对外形相近的商品会混淆，不要求全对）")
 	llmMode := fs.String("llm", "off", "off / env：env 按 AI_BASE_URL、AI_API_KEY 创建模型客户端（与线上同一运行器，会产生费用）")
 	planner := fs.Bool("planner", true, "-llm=env 时是否用模型规划")
+	parallel := fs.Bool("parallel-first-step", true, "-llm=env 时模型规划和工具循环第一步是否并行（ai.parallel_first_step）")
 	react := fs.Bool("react", true, "-llm=env 时是否用模型做工具循环和最终回答")
 	rerank := fs.Bool("rerank", false, "-llm=env 时是否用模型重排商品")
 	summary := fs.Bool("summary", false, "-llm=env 时是否用模型生成会话摘要")
@@ -95,7 +96,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 			usage = oe.Usage
 		}
 	}
-	model, err := modelConfig(ctx, *llmMode, getenv, agent.ModelSettings{PlannerEnabled: *planner, AgentEnabled: *react, RerankEnabled: *rerank,
+	model, err := modelConfig(ctx, *llmMode, getenv, agent.ModelSettings{PlannerEnabled: *planner, ParallelFirstStep: *parallel, AgentEnabled: *react, RerankEnabled: *rerank,
 		SummaryEnabled: *summary, PlannerModel: *plannerModel, AgentModel: *agentModel, Timeout: *llmTimeout, MaxToolRounds: *maxRounds}, *llmRetries)
 	if err != nil {
 		return err

@@ -23,6 +23,8 @@ type ModelSettings struct {
 	SummaryEnabled bool
 	// MemoryTurns 是参与历史检索的最近轮数；0 表示默认。
 	MemoryTurns int
+	// ParallelFirstStep：模型规划和工具循环第一步并行，规划回来后意图相同就采用第一步（见 parallel.go）。
+	ParallelFirstStep bool
 }
 
 // SettingsSource 返回当前设置。
@@ -31,7 +33,7 @@ type SettingsSource func(ctx context.Context) ModelSettings
 // DefaultModelSettings 是没有配置来源时的设置：模型都打开（是否真用取决于有没有 LLM）。
 func DefaultModelSettings() ModelSettings {
 	return ModelSettings{PlannerEnabled: true, AgentEnabled: true, PlannerModel: "deepseek-chat", AgentModel: "deepseek-chat",
-		Timeout: 30 * time.Second, MaxToolRounds: 6}
+		Timeout: 30 * time.Second, MaxToolRounds: 6, ParallelFirstStep: true}
 }
 
 func (s ModelSettings) normalized() ModelSettings {

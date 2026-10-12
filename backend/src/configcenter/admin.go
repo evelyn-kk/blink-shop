@@ -145,6 +145,7 @@ var settings = []Setting{
 	{Key: KeyRiskBlockedWords, Description: "导购对话的风险词，逗号分隔，命中即拦截", Runtime: true, validate: riskWords},
 	{Key: KeyAIPlannerEnabled, Description: "导购用小模型规划意图和生成追问（未配置 API Key 时始终走规则）", Runtime: true, validate: boolValue},
 	{Key: KeyAIAgentEnabled, Description: "导购用大模型做工具循环和最终回答（关闭时回到规则回答）", Runtime: true, validate: boolValue},
+	{Key: KeyAIParallelFirstStep, Description: "模型规划和工具循环第一步同时发出（规划的意图与规则一致时采用第一步，否则丢掉重来），首字少等一次规划", Runtime: true, validate: boolValue},
 	{Key: KeyAIPlannerModel, Description: "规划 / 追问用的小模型名", Runtime: true, validate: nonEmpty},
 	{Key: KeyAIAgentModel, Description: "工具循环 / 最终回答用的大模型名", Runtime: true, validate: nonEmpty},
 	{Key: KeyAITimeout, Description: "单次模型调用超时，例如 30s", Runtime: true, validate: positiveDuration},

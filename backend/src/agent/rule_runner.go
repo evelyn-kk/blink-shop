@@ -65,8 +65,25 @@ func (r *RuleRunner) Run(ctx context.Context, in Input, out Output) error {
 	memStart := r.deps.Now()
 	hist := loadMemory(ctx, r.deps.Store, in.AccountID, in.SessionID, in.RunID, st.MemoryTurns)
 	relevant := hist.recall(in.Content)
+	// 规划和工具循环第一步并行（见 parallel.go）：只在会调模型规划、且规则规划的意图也会走工具循环时
+	var first *firstStep
+	if st.PlannerEnabled && st.AgentEnabled && st.ParallelFirstStep {
+		if base, _ := hist.inherit(Classify(in.Content, hasImage(in.Attachments)), in.Content); usesModelAnswer(base) {
+			first = r.startFirstStep(ctx, st, in, hist, base)
+		}
+	}
 	plan := r.plan(ctx, in, st, out, hist)
 	plan, inherited := hist.inherit(plan, in.Content)
+	if first != nil {
+		ruleIntent := first.plan.Intent
+		adopt := ruleIntent == plan.Intent && usesModelAnswer(plan) && ctx.Err() == nil
+		first.join(adopt)
+		status := "adopted"
+		if !adopt {
+			status, first = "discarded", nil
+		}
+		out.Trace("react", "parallel", status, 0, map[string]any{"rule_intent": string(ruleIntent), "intent": string(plan.Intent)})
+	}
 	out.Trace("memory", "retrieval", memoryStatus(hist), r.deps.Now().Sub(memStart), memoryMeta(hist, relevant, plan, inherited))
 	out.Thinking(Step{ID: "understand", Title: "理解你的问题", Status: StepDone})
 	out.Thinking(Step{ID: "plan", Title: "判断需求：" + IntentTitle(plan.Intent), Status: StepDone})
@@ -89,7 +106,7 @@ func (r *RuleRunner) Run(ctx context.Context, in Input, out Output) error {
 			}
 		}
 	}()
-	if st.AgentEnabled && usesModelAnswer(plan) && s.answerWithModel(ctx, st) {
+	if st.AgentEnabled && usesModelAnswer(plan) && s.answerWithModel(ctx, st, first) {
 		s.finish(start)
 		return ctx.Err()
 	}

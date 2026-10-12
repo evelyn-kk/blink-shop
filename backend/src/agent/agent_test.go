@@ -103,6 +103,8 @@ type recorder struct {
 	blocks    []map[string]any
 	followups []string
 	traces    []trace
+	// events 按到达顺序记文字和轨迹（"text" / "trace:阶段.类型"），检查先后顺序用。
+	events []string
 }
 
 type trace struct {
@@ -115,6 +117,7 @@ func (r *recorder) Text(d string) {
 	r.mu.Lock()
 	r.text.WriteString(d)
 	r.deltas = append(r.deltas, d)
+	r.events = append(r.events, "text")
 	r.mu.Unlock()
 }
 func (r *recorder) Block(b map[string]any) {
@@ -126,6 +129,7 @@ func (r *recorder) Followups(q []string) { r.mu.Lock(); r.followups = q; r.mu.Un
 func (r *recorder) Trace(stage, typ, status string, _ time.Duration, meta map[string]any) {
 	r.mu.Lock()
 	r.traces = append(r.traces, trace{stage, typ, status, meta})
+	r.events = append(r.events, "trace:"+stage+"."+typ)
 	r.mu.Unlock()
 }
 

@@ -597,6 +597,10 @@ boolean / array，required、additionalProperties=false、enum、minimum/maximum
   工具调用仍经 `Registry.Call`（白名单、schema、`add_cart_item` 的商品来源校验），被拒时把错误码作为观察交回模型，不执行。
   观察结果先压缩（去掉图片、属性、时间等字段，截断长文本和长数组）再喂给模型。连续两次不是合法动作、达到 `ai.max_tool_rounds`、
   模型调用出错、最终回答过滤后为空，都写一条 `react.fallback`（reason）然后交给规则处理器，循环中收集的卡片整体丢弃，不会和规则回答重复。
+- **规划和第一步并行**（`ai.parallel_first_step`，默认开）：规划约 0.9s 原来一直排在工具循环前面。现在按规则规划（加记忆继承）的意图，
+  把工具循环第一步和模型规划同时发出；规划回来后意图相同就采用第一步（白名单就是这个意图的），不同就取消第一步、按规划的意图从头走，
+  与关掉开关时完全一样。第一步的输出在采用前只缓存、不推给用户；工具在规划回来之后才执行，参数照样按模型规划改写用户约束。
+  它唯一的不同是第一步提示里的“规划结果”是规则规划。轨迹 `react.parallel` 记 `adopted` / `discarded`（`parallel.go`）。
 - **模型路径的块与规则路径一致**：商品卡按检索可靠度分开——`ok` 进“为你找到的商品”，只有弱结果时进“相近商品”（有冲突为“不太合适的商品”），
   不会把相近 / 冲突的商品当推荐；对比意图输出对比表，只放规划里点名的商品（匹配不到两件时取前三件）。
 - **用户的硬约束不能被模型放宽**：模型调用 `search_products` 时，用户原话点名的品牌没带就补上，价格上限高于用户预算就压回预算（轨迹 `react.step.N` 记 `enforced_brands` / `enforced_max_price`）；
@@ -816,6 +820,7 @@ MILVUS_ADDR=127.0.0.1:19530 go run ./cmd/eval -suite=rag -vector=env -recall=vec
 | `AI_BASE_URL` | — | `https://api.deepseek.com/v1` | OpenAI 兼容的模型服务地址（`/chat/completions`）；换别家（如千问 `https://dashscope.aliyuncs.com/compatible-mode/v1`）改这里和模型名即可 |
 | `AI_PLANNER_ENABLED` | `ai.planner_enabled` | `true` | 用小模型规划意图（失败回退规则） |
 | `AI_AGENT_ENABLED` | `ai.agent_enabled` | `true` | 用大模型做工具循环和最终回答（关闭或失败都回到规则回答） |
+| `AI_PARALLEL_FIRST_STEP` | `ai.parallel_first_step` | `true` | 模型规划和工具循环第一步并行（意图与规则一致时采用第一步） |
 | `AI_PLANNER_MODEL` / `AI_AGENT_MODEL` | `ai.planner_model` / `ai.agent_model` | `deepseek-chat` / `deepseek-chat` | 小模型 / 大模型名 |
 | `AI_TIMEOUT` | `ai.timeout` | `30s` | 单次模型调用超时 |
 | `AI_MAX_RETRIES` | `ai.max_retries` | `2` | 429 / 5xx / 网络错误的重试次数（0–5；客户端在启动时读取） |

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -51,6 +52,9 @@ func TestAgentModelThroughHTTP(t *testing.T) {
 		llm.Text(`{"type":"tool","name":"search_products","args":{"query":"降噪耳机"}}`),
 		llm.Text(`{"type":"final","text":"推荐 Blink Air 降噪耳机，通勤首选。","followups":["把第一个加入购物车"]}`))
 	ts, base := newModelServer(t, mock)
+	// 这里按调用顺序回复，规划和第一步顺序执行；并行的情况见 TestAgentParallelFirstStepThroughHTTP
+	expectStatus(t, ts.call(t, http.MethodPatch, "/api/v1/admin/configs/ai.parallel_first_step", ts.login(t, seed.AdminUsername, seed.DevPassword).Token,
+		map[string]any{"value": "false", "reason": "测试"}), http.StatusOK, "")
 	token := ts.login(t, seed.User2Username, seed.DevPassword).Token
 	sid := decodeBody[sessionView](t, ts.call(t, http.MethodPost, agentSessionsPath, token, map[string]any{})).SessionID
 	s, _ := openStream(t, base, token, sid, msgBody("m-1", "推荐一款通勤降噪耳机"))
@@ -115,5 +119,56 @@ func TestAgentModelThroughHTTP(t *testing.T) {
 	obs := mock.Requests[len(mock.Requests)-1].Messages
 	if text != "现在不能搜商品。" || !strings.Contains(obs[len(obs)-1].Content, agent.CodeToolNotAllowed) {
 		t.Fatalf("policy via admin: %q %s", text, obs[len(obs)-1].Content)
+	}
+}
+
+// 规划和第一步并行（默认打开）：规划的意图与规则一致时采用第一步，工具在规划回来后执行，回答和顺序执行时一样；
+// 规划给出不同意图时第一步被丢掉，按规划的意图重走（只用新白名单里的工具）。模型调用按请求内容回复（并行时顺序不固定）。
+func TestAgentParallelFirstStepThroughHTTP(t *testing.T) {
+	var planIntent atomic.Value
+	planIntent.Store(`{"intent":"product_search","query":"降噪耳机"}`)
+	mock := &llm.Mock{Fallback: func(req llm.Request) (llm.Response, error) {
+		all := ""
+		for _, m := range req.Messages {
+			all += m.Content
+		}
+		switch {
+		case !strings.Contains(all, "search_products") && !strings.Contains(all, "list_orders"): // 规划（提示里没有工具清单）
+			time.Sleep(30 * time.Millisecond) // 规划比第一步慢，第一步的结果要等规划回来才能用
+			return llm.Response{Content: planIntent.Load().(string), Model: req.Model}, nil
+		case len(req.Messages) == 2 && strings.Contains(all, "list_orders"): // 订单白名单
+			return llm.Response{Content: `{"type":"tool","name":"list_orders","args":{}}`, Model: req.Model}, nil
+		case len(req.Messages) == 2:
+			return llm.Response{Content: `{"type":"tool","name":"search_products","args":{"query":"降噪耳机"}}`, Model: req.Model}, nil
+		}
+		return llm.Response{Content: `{"type":"final","text":"推荐 Blink Air 降噪耳机，通勤首选。"}`, Model: req.Model}, nil
+	}}
+	ts, base := newModelServer(t, mock)
+	token := ts.login(t, seed.User2Username, seed.DevPassword).Token
+	sid := decodeBody[sessionView](t, ts.call(t, http.MethodPost, agentSessionsPath, token, map[string]any{})).SessionID
+	traceOf := func(runID string) string {
+		var stages []string
+		for _, it := range decodeBody[runTraceResponse](t, ts.call(t, http.MethodGet, "/api/v1/agent/runs/"+runID+"/trace", token, nil)).Items {
+			stages = append(stages, it.Stage+"."+it.EventType+"."+it.Status)
+		}
+		return strings.Join(stages, ",")
+	}
+	s, _ := openStream(t, base, token, sid, msgBody("p-1", "推荐一款通勤降噪耳机"))
+	start := s.next()
+	_, text, blocks := collect(t, s)
+	if text != "推荐 Blink Air 降噪耳机，通勤首选。" || blockOf(blocks, "product_list") == nil || mock.Count() != 3 {
+		t.Fatalf("adopted: %q calls=%d", text, mock.Count())
+	}
+	if got := traceOf(start.Data["run_id"].(string)); !strings.Contains(got, "planner.model.ok,react.parallel.adopted,memory.retrieval.skipped,planner.rule.ok,react.step.1.ok,tool.search_products.ok") {
+		t.Fatalf("adopted trace: %s", got)
+	}
+	// 规划说是查订单：第一步（搜商品）被丢掉，按订单白名单重走，搜商品的调用不会执行
+	planIntent.Store(`{"intent":"order","action":"list"}`)
+	s, _ = openStream(t, base, token, sid, msgBody("p-2", "推荐一款通勤降噪耳机"))
+	start = s.next()
+	collect(t, s)
+	got := traceOf(start.Data["run_id"].(string))
+	if !strings.Contains(got, "react.parallel.discarded") || strings.Contains(got, "tool.search_products") || !strings.Contains(got, "tool.list_orders.ok") {
+		t.Fatalf("discarded trace: %s", got)
 	}
 }
