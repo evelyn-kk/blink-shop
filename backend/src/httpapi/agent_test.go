@@ -342,8 +342,13 @@ func TestAgentStreamClientDisconnect(t *testing.T) {
 	if r.Status != domain.RunCancelled || r.ErrorCode != "cancelled" || r.Content != "你好，" {
 		t.Fatalf("after disconnect %+v", r)
 	}
-	if e.runs.get(runID) != nil {
-		t.Fatal("run still registered")
+	// 状态先写库、再从运行表移除：等一小会儿，避免机器繁忙时撞上两步之间的间隙
+	deadline := time.Now().Add(2 * time.Second)
+	for e.runs.get(runID) != nil {
+		if time.Now().After(deadline) {
+			t.Fatal("run still registered")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

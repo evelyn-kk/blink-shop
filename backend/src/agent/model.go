@@ -81,6 +81,11 @@ func (r *RuleRunner) plan(ctx context.Context, in Input, st ModelSettings, out O
 		return rule
 	}
 	merged := imagePlan(mergePlans(rule, modelPlan), rule, hasImg)
+	if dropped := guessedTarget(rule, merged, in.Content); dropped != "" {
+		// 用户只说了“这个 / 那个”，模型却从上下文里挑了一件商品当目标：不能替用户选，回到规则的指代消解（多件时先问）
+		merged.Query = rule.Query
+		meta["dropped_query"] = dropped
+	}
 	meta["intent"], meta["action"], meta["rule_intent"] = string(merged.Intent), merged.Action, string(rule.Intent)
 	out.Trace("planner", "model", "ok", r.deps.Now().Sub(start), meta)
 	return merged
@@ -125,6 +130,24 @@ func (r *RuleRunner) modelPlan(ctx context.Context, in Input, st ModelSettings, 
 	p.Quantity = argInt(obj, "quantity", 0)
 	p.Rating = argInt(obj, "rating", 0)
 	return p, resp.Usage, nil
+}
+
+// guessedTarget 返回模型在指代句里自己补出来的检索词（加购、评价这类要定位具体商品的意图）；没有则返回空。
+// 判断：规则识别出指代、没有序号、规则没抽到检索词，而模型的检索词并不出现在用户原话里。
+func guessedTarget(rule, merged Plan, content string) string {
+	if merged.Intent != IntentCart && merged.Intent != IntentReview {
+		return ""
+	}
+	if !rule.Reference || rule.Ordinal != 0 || rule.Query != "" || merged.Query == "" {
+		return ""
+	}
+	text := compact(content)
+	for _, t := range strings.Fields(merged.Query) {
+		if !strings.Contains(text, compact(t)) {
+			return merged.Query
+		}
+	}
+	return ""
 }
 
 // mergePlans 以模型的意图和动作为准；槽位模型给了用模型的，没给用规则抽的；指代等纯规则特征沿用规则。

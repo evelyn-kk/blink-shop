@@ -90,7 +90,10 @@ func prune(v any, depth int) any {
 // pendingBlocks 收集工具循环里产生的块：同类块只保留最新一个（购物车、订单、券），商品卡按 ID 去重累加；
 // 最终回答时一起输出；回退到规则处理时整体丢弃，避免和规则回答的卡片重复。
 type pendingBlocks struct {
-	products   []ProductCard
+	products []ProductCard
+	// weak 是只作参考的商品（检索判为相近或与用途冲突），conflict 表示其中有冲突的；有可靠结果时不展示。
+	weak       []ProductCard
+	conflict   bool
 	seen       map[string]bool
 	citations  []rag.Citation
 	cart       *shop.Cart
@@ -117,10 +120,18 @@ func (p *pendingBlocks) absorb(tool string, data any) []string {
 		}
 		for _, card := range res.Products {
 			ids = append(ids, card.ProductID)
-			if !p.seen[card.ProductID] {
-				p.seen[card.ProductID] = true
-				p.products = append(p.products, card)
+			if p.seen[card.ProductID] {
+				continue
 			}
+			p.seen[card.ProductID] = true
+			if res.Relevance == RelevanceOK {
+				p.products = append(p.products, card)
+			} else {
+				p.weak = append(p.weak, card)
+			}
+		}
+		if res.Relevance == RelevanceWeak && len(res.Conflicts) > 0 {
+			p.conflict = true
 		}
 	case ToolSearchKnowledge:
 		res := decode[KnowledgeResult](data)
@@ -189,12 +200,18 @@ func (p *pendingBlocks) action(target, label string, params map[string]string) {
 
 // emit 按固定顺序输出全部块。对比意图下商品输出为对比表（与规则路径一致），只放用户点名的商品。
 func (p *pendingBlocks) emit(s *session) {
-	if len(p.products) > 0 {
+	switch {
+	case len(p.products) > 0:
 		if cards := compareCards(s.plan, p.products); len(cards) >= 2 {
 			s.block(blockComparison(cards))
 		} else {
 			s.block(blockProducts("为你找到的商品", p.products))
 		}
+	case len(p.weak) > 0 && p.conflict:
+		// 与规则路径一致：弱结果只作参考，不当推荐
+		s.block(blockProducts("不太合适的商品", p.weak))
+	case len(p.weak) > 0:
+		s.block(blockProducts("相近商品", p.weak))
 	}
 	if len(p.citations) > 0 {
 		s.block(blockCitations(p.citations))

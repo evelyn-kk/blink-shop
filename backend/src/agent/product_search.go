@@ -34,8 +34,10 @@ type candidate struct {
 	vector   float64
 	score    float64
 	conflict bool
-	reasons  []string
-	order    int
+	// offType 表示检索词里有品类名词而商品不属于该品类，只能作相近参考。
+	offType bool
+	reasons []string
+	order   int
 }
 
 // searchProducts 执行一次商品搜索。
@@ -61,6 +63,11 @@ func (r *Registry) searchProducts(ctx context.Context, args map[string]any) (Pro
 		if ex = strings.ToLower(ex); ex != "" {
 			out.Excluded = append(out.Excluded, ex)
 		}
+	}
+	if len(out.Brands) == 0 && argString(args, "product_id") == "" {
+		// 调用方（尤其是模型）没传品牌、检索词里却写了在售品牌：按品牌过滤，品牌词不计相关度（与规则规划抽品牌的做法一致），
+		// 否则“Blink Home 耳机”里的“Blink”会让所有 Blink 商品都算命中。
+		out.Brands = r.MentionedBrands(ctx, query, out.Excluded)
 	}
 	names, err := r.categoryNames(ctx)
 	if err != nil {
@@ -168,7 +175,14 @@ func (r *Registry) searchProducts(ctx context.Context, args map[string]any) (Pro
 		}
 	}
 
-	// 4. 输出
+	// 4. 输出。问的是某个品类（如“便携音箱”）时，只靠修饰词（“便携”）命中别的品类的商品不能算可靠推荐，只作相近参考。
+	anchors := typeAnchors(query)
+	for _, c := range cands {
+		if !anchorMatches(anchors, c.card) {
+			c.offType = true
+			c.reasons = append(c.reasons, "off_type")
+		}
+	}
 	for i, c := range cands {
 		if i < rerankTopN {
 			out.Rerank.Scores = append(out.Rerank.Scores, ScoredEntry{ProductID: c.card.ProductID, Score: math.Round(c.score*100) / 100, Reasons: c.reasons})
@@ -176,6 +190,10 @@ func (r *Registry) searchProducts(ctx context.Context, args map[string]any) (Pro
 	}
 	var ok, weak []*candidate
 	for _, c := range cands {
+		if c.offType {
+			weak = append(weak, c)
+			continue
+		}
 		if !c.conflict && (c.strong || c.vector >= vectorStrongSim) {
 			ok = append(ok, c)
 		} else {
@@ -447,4 +465,47 @@ func withoutBrandTerms(terms, brands []string) []string {
 		return terms
 	}
 	return out
+}
+
+// typeGroups 是商品品类名词（同组为同义词）。检索词里出现某个品类时，可靠结果必须属于这个品类。
+var typeGroups = [][]string{
+	{"手机"}, {"耳机"}, {"音箱", "音响"}, {"键盘"}, {"鼠标"}, {"台灯", "灯"}, {"笔记本", "电脑"}, {"平板"}, {"手表"}, {"相机"},
+	{"移动电源", "充电宝"}, {"洗衣机"}, {"冰箱"}, {"电视"}, {"空调"}, {"路由器"}, {"显示器"}, {"打印机"}, {"吹风机"},
+}
+
+// typeAnchors 返回检索词里出现的品类（每组一项）。
+func typeAnchors(query string) [][]string {
+	q := strings.ToLower(query)
+	var out [][]string
+	for _, g := range typeGroups {
+		for _, w := range g {
+			if strings.Contains(q, w) {
+				out = append(out, g)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// anchorMatches 判断商品是否属于检索词里的任一品类；检索词没有品类时总是 true。看商品名、标签、卖点、属性；
+// 分类名只在它只对应一个品类时才算（“耳机音箱”这种合并分类不能替耳机认领“音箱”）。
+func anchorMatches(anchors [][]string, c ProductCard) bool {
+	if len(anchors) == 0 {
+		return true
+	}
+	own := c
+	own.CategoryName = ""
+	text := own.text()
+	if len(typeAnchors(c.CategoryName)) == 1 {
+		text += " " + strings.ToLower(c.CategoryName)
+	}
+	for _, g := range anchors {
+		for _, w := range g {
+			if strings.Contains(text, w) {
+				return true
+			}
+		}
+	}
+	return false
 }

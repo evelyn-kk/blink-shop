@@ -394,3 +394,80 @@ func TestModelReactCompareEmitsComparison(t *testing.T) {
 		t.Fatalf("fallback: %v", got)
 	}
 }
+
+// 指代不明时模型不能替用户挑商品（真实模型评测发现：看过两款手机后说“把那个加入购物车”，模型把检索词填成第一款，直接加购了）。
+func TestModelPlannerCannotGuessReferencedTarget(t *testing.T) {
+	e := newEnv(t)
+	mock := &llm.Mock{}
+	e.withModel(mock, settings(true, false))
+	sid := e.newSession(t, seed.User2ID)
+	mock.Then(llm.Text(`{"intent":"product_search","query":"手机"}`))
+	if r := e.run(t, seed.User2ID, sid, "推荐一款手机"); len(productIDs(r.block(BlockProductList))) < 2 {
+		t.Fatalf("need two phones in history: %v", r.blockTypes())
+	}
+	mock.Then(llm.Text(`{"intent":"cart","action":"add","query":"Blink Nova 12"}`))
+	r := e.run(t, seed.User2ID, sid, "把那个加入购物车")
+	if c := e.cart(t, seed.User2ID); len(c.Items) != 0 {
+		t.Fatalf("model guessed the target and wrote the cart: %+v", c.Items)
+	}
+	if !strings.Contains(r.text.String(), "哪一个") || r.traceMeta("planner", "model")["dropped_query"] != "Blink Nova 12" {
+		t.Fatalf("should ask: %q %v", r.text.String(), r.traceMeta("planner", "model"))
+	}
+	// 用户自己说了商品名：模型的检索词照常使用
+	mock.Then(llm.Text(`{"intent":"cart","action":"add","query":"Nova 12"}`))
+	e.run(t, seed.User2ID, sid, "把那个 Nova 12 加入购物车")
+	if c := e.cart(t, seed.User2ID); len(c.Items) != 1 || c.Items[0].ProductID != "p_seed_nova" {
+		t.Fatalf("named target: %+v", c.Items)
+	}
+}
+
+// 模型路径的弱结果只作参考（真实模型评测发现：游泳耳机、电竞鼠标、便携音箱的相近 / 冲突结果被当成“为你找到的商品”推荐）。
+func TestModelReactWeakResultsAreReferenceOnly(t *testing.T) {
+	e := newEnv(t)
+	mock := &llm.Mock{}
+	e.withModel(mock, settings(false, true))
+	sid := e.newSession(t, seed.User2ID)
+	mock.Then(tool(ToolSearchProducts, `{"query":"游泳 耳机"}`), final("这款耳机不支持游泳佩戴，不建议。"))
+	r := e.run(t, seed.User2ID, sid, "推荐游泳用的耳机")
+	pl := r.block(BlockProductList)
+	if pl == nil || pl["title"] != "不太合适的商品" {
+		t.Fatalf("conflict should be reference only: %v", pl)
+	}
+	mock.Then(tool(ToolSearchProducts, `{"query":"便携 音箱"}`), final("没有找到音箱。"))
+	r = e.run(t, seed.User2ID, sid, "便携音箱推荐")
+	if pl := r.block(BlockProductList); pl != nil && pl["title"] == "为你找到的商品" {
+		t.Fatalf("off-type result recommended: %v", pl)
+	}
+	// 有可靠结果时照常推荐，弱结果不展示
+	mock.Then(tool(ToolSearchProducts, `{"query":"降噪 耳机"}`), tool(ToolSearchProducts, `{"query":"便携 音箱"}`), final("推荐这款降噪耳机。"))
+	r = e.run(t, seed.User2ID, sid, "推荐降噪耳机，顺便看看音箱")
+	if pl := r.block(BlockProductList); pl == nil || pl["title"] != "为你找到的商品" || strings.Join(productIDs(pl), ",") != "p_seed_earbuds" {
+		t.Fatalf("ok results: %v", pl)
+	}
+}
+
+// 用户要的数量超出上限时，模型不能自作主张改成上限（真实模型评测发现：“鼠标数量改成 99999 件”被改成了 99 件并写入购物车）。
+func TestModelReactCannotClampQuantity(t *testing.T) {
+	e := newEnv(t)
+	mock := &llm.Mock{}
+	e.withModel(mock, settings(false, false))
+	sid := e.newSession(t, seed.User2ID)
+	e.run(t, seed.User2ID, sid, "把 Blink 静音无线鼠标 M2 加到购物车")
+	c := e.cart(t, seed.User2ID)
+	if len(c.Items) != 1 {
+		t.Fatalf("setup: %+v", c.Items)
+	}
+	e.withModel(mock, settings(false, true))
+	mock.Then(tool(ToolGetCart, `{}`), tool(ToolUpdateCartItem, fmt.Sprintf(`{"cart_item_id":%q,"quantity":99}`, c.Items[0].CartItemID)),
+		final("数量上限是 99 件，要改成 99 件吗？"))
+	r := e.run(t, seed.User2ID, sid, "鼠标数量改成 99999 件")
+	if got := e.cart(t, seed.User2ID); got.Items[0].Quantity != 1 {
+		t.Fatalf("quantity changed without the user's consent: %d", got.Items[0].Quantity)
+	}
+	if !strings.Contains(fmt.Sprint(r.traceMeta("tool", ToolUpdateCartItem)), CodeQuantityOutOfRange) {
+		t.Fatalf("trace: %v", r.traceMeta("tool", ToolUpdateCartItem))
+	}
+	if ParseQuantity("鼠标数量改成 99999 件") != 99999 {
+		t.Fatalf("parse: %d", ParseQuantity("鼠标数量改成 99999 件"))
+	}
+}

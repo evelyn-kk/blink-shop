@@ -80,6 +80,8 @@ const (
 	CodeImageNotAttached  = "image_not_attached"
 	CodeInvalidImage      = "invalid_image"
 	CodeInternal          = "internal_error"
+	// CodeQuantityOutOfRange：用户说的件数超过单件上限，本轮不改数量。
+	CodeQuantityOutOfRange = "quantity_out_of_range"
 )
 
 // ToolError 是工具层拒绝调用的原因（可展示）。
@@ -102,6 +104,9 @@ type ToolContext struct {
 	Evidence map[string]bool
 	// Images 是本轮用户消息附带的图片 file_id（已在接口层校验为本人上传）。search_image_products 只接受这些文件。
 	Images map[string]bool
+	// RequestedQuantity 是用户这句话里说的件数（0 表示没说）。超出单件上限时，本轮不允许任何改数量的写操作：
+	// 不能替用户把 99999 件“改成上限 99 件”，要先告诉用户上限、由用户决定。
+	RequestedQuantity int
 }
 
 // ImageSearcher 用本人上传的图片检索商品（imagesearch.Service 实现）。
@@ -303,6 +308,10 @@ func (r *Registry) call(ctx context.Context, tc *ToolContext, name string, args 
 		if fid := argString(args, "file_id"); !tc.Images[fid] {
 			return Observation{Code: CodeImageNotAttached, Field: "file_id", Message: "只能用本轮消息附带的图片搜索"}
 		}
+	}
+	if (name == ToolAddCartItem || name == ToolUpdateCartItem) && args["quantity"] != nil && tc.RequestedQuantity > shop.MaxLineQuantity {
+		return Observation{Code: CodeQuantityOutOfRange, Field: "quantity",
+			Message: fmt.Sprintf("用户要的数量 %d 超过单件上限 %d，不能自动改成别的数量；请告诉用户上限，由用户决定", tc.RequestedQuantity, shop.MaxLineQuantity)}
 	}
 	if name == ToolAddCartItem {
 		if pid := argString(args, "product_id"); !tc.Evidence[pid] {

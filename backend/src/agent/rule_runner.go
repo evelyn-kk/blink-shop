@@ -170,7 +170,8 @@ type session struct {
 func newSession(r *RuleRunner, in Input, out Output, plan Plan) *session {
 	return &session{r: r, in: in, out: out, plan: plan, followupSource: "rule",
 		tc: &ToolContext{AccountID: in.AccountID, SessionID: in.SessionID, RunID: in.RunID, Intent: plan.Intent, Evidence: map[string]bool{},
-			Images: imageIDs(in.Attachments)}}
+			RequestedQuantity: ParseQuantity(in.Content),
+			Images:            imageIDs(in.Attachments)}}
 }
 
 // say 按句子流式输出一段话。

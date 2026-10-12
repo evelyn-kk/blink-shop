@@ -162,3 +162,44 @@ func TestProductVectorRecall(t *testing.T) {
 	}
 	_ = domain.StockInStock
 }
+
+// 检索词带品类名词时，只靠修饰词命中别的品类不算可靠推荐（真实模型规划把“便携音箱”拆成“便携 音箱”后，曾把降噪耳机当可靠结果推荐）。
+func TestProductSearchTypeAnchor(t *testing.T) {
+	e := newEnv(t)
+	res := e.search(t, map[string]any{"query": "便携 音箱"})
+	if res.Relevance == RelevanceOK {
+		t.Fatalf("off-type product recommended: %s %+v", ids(res), res.Rerank.Scores)
+	}
+	if len(res.Rerank.Scores) > 0 && !containsStr(res.Rerank.Scores[0].Reasons, "off_type") {
+		t.Fatalf("reason: %+v", res.Rerank.Scores)
+	}
+	if res := e.search(t, map[string]any{"query": "便携 降噪 耳机"}); res.Relevance != RelevanceOK || ids(res) != "p_seed_earbuds" {
+		t.Fatalf("same type should stay ok: %s %s", res.Relevance, ids(res))
+	}
+	if res := e.search(t, map[string]any{"query": "护眼灯"}); res.Relevance != RelevanceOK || ids(res) != "p_seed_lamp" {
+		t.Fatalf("synonym group: %s %s", res.Relevance, ids(res))
+	}
+	if res := e.search(t, map[string]any{"query": "手机"}); res.Relevance != RelevanceOK || ids(res) == "" {
+		t.Fatalf("single-type category counts: %s %s", res.Relevance, ids(res))
+	}
+	if !anchorMatches(nil, ProductCard{}) || anchorMatches(typeAnchors("充电宝"), ProductCard{Name: "降噪耳机", CategoryName: "耳机音箱"}) ||
+		!anchorMatches(typeAnchors("充电宝"), ProductCard{Name: "快充移动电源"}) || anchorMatches(typeAnchors("音箱"), ProductCard{Name: "Air", CategoryName: "耳机音箱"}) {
+		t.Fatal("anchor helpers")
+	}
+}
+
+// 检索词里写了品牌但没传 brands（模型常这样调用）：按品牌过滤，品牌词不计相关度。
+func TestProductSearchBrandInQuery(t *testing.T) {
+	e := newEnv(t)
+	res := e.search(t, map[string]any{"query": "Blink Home 耳机"})
+	if res.Relevance == RelevanceOK || len(res.Brands) != 1 || res.Brands[0] != "Blink Home" {
+		t.Fatalf("brand in query: %s %s %v", res.Relevance, ids(res), res.Brands)
+	}
+	if res := e.search(t, map[string]any{"query": "Blink Home 台灯"}); ids(res) != "p_seed_lamp" || res.Relevance != RelevanceOK {
+		t.Fatalf("matching brand: %s %s", ids(res), res.Relevance)
+	}
+	// 显式传了 brands 时以参数为准
+	if res := e.search(t, map[string]any{"query": "Blink Home 耳机", "brands": []any{"Blink"}}); ids(res) != "p_seed_earbuds" {
+		t.Fatalf("explicit brands win: %s", ids(res))
+	}
+}
