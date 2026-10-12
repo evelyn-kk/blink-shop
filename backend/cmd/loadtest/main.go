@@ -1,5 +1,6 @@
 // Command loadtest 对运行中的 Blink API 做压测，输出 JSON + Markdown 报告：
 //   - catalog：匿名并发浏览商品列表、详情、SKU、评价、分类树，统计 P50 / P95 / P99、错误率和吞吐；
+//   - search：只打带关键词的商品搜索，20 个关键词轮流（品类、品牌、型号、数字、多词、查不到的词），按关键词分别统计；
 //   - api：登录用户并发读购物车、订单、会话列表；
 //   - sse：N 个用户同时发起导购流式对话（同时保持 N 条 SSE 连接），统计首个进展事件时间、整段耗时和成功率；
 //   - checkout：M 个用户各买 1 件库存充足的商品并发结算（成功率）；K 个用户抢库存只有 S 件的商品（只能成功 S 单、库存不为负）；
@@ -21,6 +22,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -79,6 +81,9 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		"sse": o.sse, "checkout": o.checkout, "contention": o.contention}}
 	if o.scenarios["catalog"] {
 		rep.Scenarios = append(rep.Scenarios, catalog(ctx, c, o))
+	}
+	if o.scenarios["search"] {
+		rep.Scenarios = append(rep.Scenarios, search(ctx, c, o))
 	}
 	if o.scenarios["api"] {
 		s, err := userAPI(ctx, c, o)
@@ -380,6 +385,27 @@ func catalog(ctx context.Context, c *client, o options) scenario {
 	})
 	s := all.stats()
 	sc := scenario{Name: "catalog", Target: "P95 < 300ms，错误率 < 0.1%", Stats: &s, RPS: rps, ByRoute: map[string]stats{}}
+	for k, l := range by {
+		sc.ByRoute[k] = l.stats()
+	}
+	sc.Pass = s.P95 < 300 && s.ErrorRate < 0.001 && s.Count > 0
+	return sc
+}
+
+// searchKeywords 是 search 场景轮流使用的关键词：品类、品牌、型号、两字词、数字、多词组合、只命中少数商品的词和查不到的词。
+var searchKeywords = []string{"耳机", "降噪耳机", "手机", "台灯", "机械键盘", "鼠标", "Blink", "Orion", "K8", "Nova 12", "静音",
+	"护眼", "通勤 降噪", "拍照手机", "蓝牙音箱", "热插拔", "5000mAh", "游戏鼠标 轻量化", "落地灯", "量子纠缠"}
+
+// search 只打公开商品搜索（带关键词的列表），关键词轮流取 searchKeywords，按关键词分路由统计。
+func search(ctx context.Context, c *client, o options) scenario {
+	all, by, rps := loop(ctx, o, func(ctx context.Context, w, i int) (string, time.Duration, error) {
+		kw := searchKeywords[(w*3+i)%len(searchKeywords)]
+		path := "/products?page_size=12&keyword=" + url.QueryEscape(kw)
+		d, err := timed(func() error { _, err := c.do(ctx, http.MethodGet, path, "", nil, nil); return err })
+		return "search:" + kw, d, err
+	})
+	s := all.stats()
+	sc := scenario{Name: "search", Target: "P95 < 300ms，错误率 < 0.1%", Stats: &s, RPS: rps, ByRoute: map[string]stats{}}
 	for k, l := range by {
 		sc.ByRoute[k] = l.stats()
 	}
