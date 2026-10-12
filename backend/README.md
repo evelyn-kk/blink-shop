@@ -656,7 +656,7 @@ boolean / array，required、additionalProperties=false、enum、minimum/maximum
 | `rag` | `rag.jsonl`（38 条） | 1 | recall@3、MRR、held-out recall、无结果正确率；每条 citation 的 chunk_id 都要能回查 |
 | `products` | `product_search.jsonl`（28 条） | 1 | 经导购运行器端到端执行：top1、推荐卡包含 / 不包含、不推荐（无结果、相近、冲突）、负向约束和追问继承 |
 | `images` | `image_search.jsonl`（231 条） | 0.98 | 商品图按变换生成查询图，另有不可售商品和无关图片：recall@1/3、MRR、held-out、无关图片不返回、同款准确率、不可售泄漏数 |
-| `agent` | `agent.jsonl`（26 条） | 1 | 端到端导购：每条在全新演示数据上跑完对话，检查意图、结构化块、商品卡、不编造商品、下架 / 风控 / 删除商品不出现、知识引用、工具调用、购物车副作用、风险拦截轨迹、联系方式脱敏 |
+| `agent` | `agent.jsonl`（63 条，多轮 20） | 1 | 端到端导购：每条在全新演示数据上跑完对话，检查意图、结构化块、商品卡、不编造商品、下架 / 风控 / 删除商品不出现、知识引用、工具调用、购物车副作用、多轮链路的订单 / 状态 / 件数 / 领券、风险拦截轨迹、联系方式脱敏；`expect_meaning` 语义断言由裁判判定（`-judge=env`） |
 
 意图门槛不是 1：开发集要求全对（`TestIntentSuite`），留出集是没参考过的说法，用来看规则的泛化（当前 11/16，没覆盖的说法如
 “台灯怎么调亮度”“现在付款买下来”，不针对它们调规则）；测试要求留出集准确率不低于 0.6 防退化。端到端评测首次运行发现提问里的手机号

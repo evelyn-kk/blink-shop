@@ -8,7 +8,7 @@
 {"id": "ps_011", "query": "预算三千左右的手机", "expect_top": "p_seed_nova", "absent": ["p_seed_vista"], "tags": ["budget", "negative"]}
 {"id": "ps_012", "query": "1000 到 3500 的手机", "expect_top": "p_seed_nova", "absent": ["p_seed_vista"], "tags": ["range", "negative"]}
 {"id": "ps_013", "query": "4000 以上的手机", "expect_top": "p_seed_vista", "absent": ["p_seed_nova"], "tags": ["range", "negative"]}
-{"id": "ps_014", "query": "200 以内的手机", "expect_none": true, "expect_text": ["没有找到符合条件"], "tags": ["budget", "negative", "no_result"]}
+{"id": "ps_014", "query": "200 以内的手机", "expect_none": true, "tags": ["budget", "negative", "no_result"], "expect_meaning": ["告诉用户没有符合预算的手机"]}
 {"id": "ps_015", "query": "100 块以内的鼠标", "expect_none": true, "tags": ["budget", "negative", "no_result"]}
 {"id": "ps_020", "query": "拍照好的手机，不要 Vista", "expect_top": "p_seed_nova", "absent": ["p_seed_vista"], "tags": ["exclude", "negative"]}
 {"id": "ps_021", "query": "推荐手机，不要 Nova", "expect_top": "p_seed_vista", "absent": ["p_seed_nova"], "tags": ["exclude", "negative"]}
@@ -17,7 +17,7 @@
 {"id": "ps_030", "query": "旅行拍照用的手机", "expect_top": "p_seed_vista", "tags": ["use"]}
 {"id": "ps_031", "query": "学生用的手机", "expect_top": "p_seed_nova", "tags": ["use"]}
 {"id": "ps_032", "query": "宿舍里用的安静鼠标", "expect_top": "p_seed_mouse", "tags": ["use"]}
-{"id": "ps_040", "query": "推荐游泳用的耳机", "expect_none": true, "expect_text": ["不太合适"], "tags": ["conflict", "negative"]}
+{"id": "ps_040", "query": "推荐游泳用的耳机", "expect_none": true, "tags": ["conflict", "negative"], "expect_meaning": ["说明店里的耳机不适合游泳时使用"]}
 {"id": "ps_041", "query": "高强度电竞用的鼠标", "expect_none": true, "tags": ["conflict", "negative"]}
 {"id": "ps_050", "query": "推荐一台洗衣机", "expect_none": true, "tags": ["no_result", "negative"]}
 {"id": "ps_051", "query": "便携音箱推荐", "expect_none": true, "absent": ["p_seed_speaker"], "tags": ["inactive", "negative"]}

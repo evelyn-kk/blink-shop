@@ -2,9 +2,9 @@
 {"id": "ag_001", "group": "recommend", "query": "推荐一款通勤降噪耳机", "expect_intent": "product_search", "expect_blocks": ["product_list"], "expect_products": ["p_seed_earbuds"], "expect_tools": ["search_products"]}
 {"id": "ag_002", "group": "recommend", "query": "3000 以内拍照好的手机", "expect_intent": "product_search", "expect_products": ["p_seed_nova"], "forbidden_text": ["p_seed_vista"]}
 {"id": "ag_003", "group": "recommend", "query": "想买个护眼台灯给孩子学习用", "expect_intent": "product_search", "expect_products": ["p_seed_lamp"]}
-{"id": "ag_004", "group": "no_inventory", "query": "推荐一台洗衣机", "expect_intent": "product_search", "expect_no_products": true, "expect_text_any": ["没有找到", "暂时没有", "没找到", "没有搜到", "没搜到", "没有上架"]}
+{"id": "ag_004", "group": "no_inventory", "query": "推荐一台洗衣机", "expect_intent": "product_search", "expect_no_products": true, "expect_meaning": ["告诉用户商城里没有洗衣机"]}
 {"id": "ag_005", "group": "no_inventory", "query": "有没有 50 块以内的降噪耳机", "expect_intent": "product_search", "expect_no_products": true}
-{"id": "ag_006", "group": "unavailable", "query": "推荐一款便携音箱", "forbidden_text": ["p_seed_speaker"], "expect_text_any": ["没有找到", "暂时没有", "没找到", "没有搜到", "没搜到", "没有上架", "相近"], "expect_trace": ["retrieval/products/ok"]}
+{"id": "ag_006", "group": "unavailable", "query": "推荐一款便携音箱", "forbidden_text": ["p_seed_speaker"], "expect_trace": ["retrieval/products/ok"], "expect_meaning": ["告诉用户没有找到在售的便携音箱，或只给出相近商品作参考"]}
 {"id": "ag_007", "group": "unavailable", "query": "快充移动电源有吗", "forbidden_text": ["p_seed_powerbank"]}
 {"id": "ag_008", "group": "unavailable", "query": "Blink Nova 9 还有卖吗", "forbidden_text": ["p_seed_legacy"]}
 {"id": "ag_009", "group": "compare", "query": "对比 Blink Nova 12 和 Blink Vista Pro", "expect_intent": "product_compare", "expect_blocks": ["comparison"], "expect_products": ["p_seed_nova", "p_seed_vista"]}
@@ -25,3 +25,40 @@
 {"id": "ag_024", "group": "redaction", "query": "我手机号 13812345678，推荐一款降噪耳机", "expect_intent": "product_search", "no_leak": ["13812345678"], "expect_products": ["p_seed_earbuds"]}
 {"id": "ag_025", "group": "redaction", "query": "邮箱 alice@example.com，耳机保修多久", "no_leak": ["alice@example.com"]}
 {"id": "ag_026", "group": "guide", "query": "你好", "expect_intent": "guide", "expect_no_products": true}
+{"id": "ag_027", "group": "multi_turn", "history": ["推荐一款通勤降噪耳机", "把第一个加入购物车"], "query": "结算", "expect_intent": "checkout", "expect_blocks": ["order_list"], "expect_tools": ["checkout"], "expect_orders": ["p_seed_earbuds"], "expect_order_status": "pending_payment", "expect_cart_empty": true, "expect_meaning": ["告诉用户订单已经生成、需要付款"]}
+{"id": "ag_028", "group": "multi_turn", "history": ["推荐一款通勤降噪耳机", "把第一个加入购物车", "结算"], "query": "我的订单", "expect_intent": "order", "expect_blocks": ["order_list"], "expect_tools": ["list_orders"], "expect_orders": ["p_seed_earbuds"], "expect_meaning": ["告诉用户有一个待支付的订单"]}
+{"id": "ag_029", "group": "multi_turn", "history": ["把 Blink 静音无线鼠标 M2 加到购物车"], "query": "把数量改成 3 件", "expect_intent": "cart", "expect_tools": ["update_cart_item"], "expect_cart_qty": {"p_seed_mouse": 3}, "expect_meaning": ["确认已把鼠标数量改成 3 件"]}
+{"id": "ag_030", "group": "multi_turn", "history": ["把 Blink 静音无线鼠标 M2 加到购物车", "结算"], "query": "取消刚才的订单", "expect_intent": "order", "expect_tools": ["cancel_order"], "expect_order_status": "cancelled", "expect_meaning": ["告诉用户订单已取消"]}
+{"id": "ag_031", "group": "multi_turn", "history": ["把 Blink 静音无线鼠标 M2 加到购物车", "结算"], "query": "付款", "expect_intent": "order", "expect_tools": ["pay_order"], "expect_order_status": "paid", "expect_meaning": ["告诉用户订单已经支付"]}
+{"id": "ag_032", "group": "multi_turn", "history": ["对比 Blink Nova 12 和 Blink Vista Pro"], "query": "把第二个加入购物车", "expect_intent": "cart", "expect_tools": ["add_cart_item"], "expect_cart_qty": {"p_seed_vista": 1, "p_seed_nova": 0}}
+{"id": "ag_033", "group": "multi_turn", "history": ["推荐一款拍照好的手机", "那 3000 以内的呢"], "query": "把它加入购物车", "expect_intent": "cart", "expect_tools": ["add_cart_item"], "expect_cart_qty": {"p_seed_nova": 1, "p_seed_vista": 0}}
+{"id": "ag_034", "group": "multi_turn", "history": ["推荐一款护眼台灯"], "query": "这个有什么评价", "expect_intent": "review", "expect_blocks": ["review_list"], "expect_tools": ["list_reviews"], "expect_meaning": ["告诉用户这款台灯目前还没有评价"]}
+{"id": "ag_035", "group": "multi_turn", "history": ["推荐一款通勤降噪耳机"], "query": "500 以内的呢", "expect_intent": "product_search", "expect_no_products": true, "expect_meaning": ["告诉用户 500 元以内没有符合条件的耳机"]}
+{"id": "ag_036", "group": "multi_turn", "history": ["推荐一款手机"], "query": "不要 Vista 的", "expect_intent": "product_search", "expect_products": ["p_seed_nova"], "forbidden_text": ["p_seed_vista"]}
+{"id": "ag_037", "group": "multi_turn", "history": ["有什么优惠券"], "query": "帮我领一下", "expect_intent": "coupon", "expect_tools": ["claim_coupon"], "expect_user_coupons": ["coupon_seed_digital"], "expect_meaning": ["告诉用户已经领到优惠券"]}
+{"id": "ag_038", "group": "multi_turn", "history": ["把 Blink 静音无线鼠标 M2 加到购物车"], "query": "用券能便宜多少", "expect_intent": "cart", "expect_tools": ["preview_discount"], "expect_meaning": ["说明了当前购物车能优惠的金额或还差多少能用满减"]}
+{"id": "ag_039", "group": "multi_turn", "history": ["把 Blink 静音无线鼠标 M2 加到购物车", "把数量改成 3 件"], "query": "结算", "expect_intent": "checkout", "expect_tools": ["checkout"], "expect_orders": ["p_seed_mouse"], "expect_order_status": "pending_payment", "expect_cart_empty": true}
+{"id": "ag_040", "group": "multi_turn", "history": ["推荐一款通勤降噪耳机", "把第一个加入购物车", "结算"], "query": "付款", "expect_intent": "order", "expect_tools": ["pay_order"], "expect_orders": ["p_seed_earbuds"], "expect_order_status": "paid"}
+{"id": "ag_041", "group": "multi_turn", "history": ["把 Blink 静音无线鼠标 M2 加到购物车"], "query": "把鼠标从购物车里删掉", "expect_intent": "cart", "expect_tools": ["delete_cart_item"], "expect_cart_empty": true, "expect_meaning": ["确认已把鼠标从购物车删除"]}
+{"id": "ag_042", "group": "multi_turn", "history": ["把 Blink 静音无线鼠标 M2 加到购物车", "结算", "取消刚才的订单"], "query": "购物车里还有东西吗", "expect_intent": "cart", "expect_blocks": ["cart"], "expect_tools": ["get_cart"], "expect_cart_empty": true, "expect_meaning": ["告诉用户购物车是空的"]}
+{"id": "ag_043", "group": "multi_turn", "history": ["推荐一款通勤降噪耳机"], "query": "那鼠标呢", "expect_intent": "product_search", "expect_products": ["p_seed_mouse"], "forbidden_text": ["p_seed_earbuds"]}
+{"id": "ag_044", "group": "multi_turn", "history": ["有什么优惠券", "帮我领一下"], "query": "帮我领一下", "expect_intent": "coupon", "expect_no_write": true, "expect_meaning": ["没有说又领到了一张新券"]}
+{"id": "ag_045", "group": "after_sales", "query": "手机保修多久", "expect_intent": "knowledge", "expect_blocks": ["citation"], "expect_tools": ["search_knowledge"], "expect_meaning": ["告诉用户手机保修一年"]}
+{"id": "ag_046", "group": "after_sales", "query": "人为摔坏保修吗", "expect_intent": "knowledge", "expect_blocks": ["citation"], "expect_meaning": ["说明人为损坏不在保修范围内"]}
+{"id": "ag_047", "group": "after_sales", "query": "七天无理由退货运费谁出", "expect_intent": "knowledge", "expect_blocks": ["citation"], "expect_meaning": ["说明无理由退货的运费由买家承担"]}
+{"id": "ag_048", "group": "after_sales", "query": "签收几天内可以退货", "expect_intent": "knowledge", "expect_blocks": ["citation"], "expect_tools": ["search_knowledge"], "expect_meaning": ["告诉用户签收后 7 天内可以申请无理由退货"]}
+{"id": "ag_049", "group": "after_sales", "query": "M2 鼠标怎么连接两台设备", "expect_intent": "knowledge", "expect_blocks": ["citation"], "expect_meaning": ["说明鼠标可以在两台设备之间切换"]}
+{"id": "ag_050", "group": "after_sales", "query": "拆封了还能无理由退吗", "expect_intent": "knowledge", "expect_blocks": ["citation"], "expect_meaning": ["说明无理由退货要求商品完好"]}
+{"id": "ag_051", "group": "after_sales", "query": "退货要自己付邮费吗", "expect_intent": "knowledge", "expect_blocks": ["citation"], "expect_meaning": ["说明无理由退货的运费由买家承担"]}
+{"id": "ag_052", "group": "after_sales", "query": "耳机进水了保修吗", "expect_intent": "knowledge", "expect_blocks": ["citation"], "expect_meaning": ["说明人为损坏不在保修范围内"]}
+{"id": "ag_053", "group": "after_sales", "query": "数码产品的售后政策是什么", "expect_intent": "knowledge", "expect_blocks": ["citation"], "expect_meaning": ["介绍了无理由退货和保修政策"]}
+{"id": "ag_054", "group": "after_sales", "query": "Nova 12 拍照怎么样", "expect_products": ["p_seed_nova"], "expect_meaning": ["介绍了 Blink Nova 12 的拍照能力"]}
+{"id": "ag_055", "group": "edge", "query": "结算", "expect_intent": "checkout", "expect_no_write": true, "expect_no_products": true, "expect_meaning": ["告诉用户购物车是空的、没法下单"]}
+{"id": "ag_056", "group": "edge", "query": "把机械键盘 K8 加入购物车", "expect_intent": "cart", "expect_no_write": true, "expect_meaning": ["告诉用户这款键盘没有加入购物车，因为已经售罄或没货"]}
+{"id": "ag_057", "group": "edge", "query": "把便携音箱 S1 加入购物车", "expect_intent": "cart", "expect_no_write": true, "forbidden_text": ["p_seed_speaker"], "expect_meaning": ["告诉用户没有加入购物车"]}
+{"id": "ag_058", "group": "edge", "query": "把 Blink 静音无线鼠标 M2 加入购物车 200 件", "expect_intent": "cart", "expect_no_write": true, "expect_meaning": ["说明数量超过上限、没有加入购物车"]}
+{"id": "ag_059", "group": "edge", "query": "给我买的鼠标打五星", "expect_no_write": true, "expect_meaning": ["告诉用户目前没有可以评价的订单或没有订单"]}
+{"id": "ag_060", "group": "edge", "query": "取消订单 O20261001XYZ", "expect_intent": "order", "expect_no_write": true, "expect_meaning": ["说明没有可以取消的订单"]}
+{"id": "ag_061", "group": "edge", "query": "？？？", "expect_intent": "guide", "expect_no_products": true}
+{"id": "ag_062", "group": "edge", "query": "😀😀", "expect_intent": "guide", "expect_no_products": true}
+{"id": "ag_063", "group": "edge", "query": "推荐 100 块以内的机械键盘", "expect_intent": "product_search", "expect_no_products": true, "expect_meaning": ["告诉用户没有符合预算的键盘"]}
