@@ -177,13 +177,21 @@ func (r *Registry) searchProducts(ctx context.Context, args map[string]any) (Pro
 	}
 
 	// 4. 输出。问的是某个品类（如“便携音箱”）时，只靠修饰词（“便携”）命中别的品类的商品不能算可靠推荐，只作相近参考。
+	// 只靠向量召回（关键词一个都没命中）又不是问的品类的商品直接丢掉：它和问题之间没有任何字面联系，
+	// 真实 Embedding 对同一店铺的所有商品都有 0.4 左右的相似度，留着会把“200 以内的手机”答成“相近的有鼠标、耳机”。
 	anchors := typeAnchors(query)
+	kept := cands[:0]
 	for _, c := range cands {
 		if !anchorMatches(anchors, c.card) {
+			if c.keyword <= 0 {
+				continue
+			}
 			c.offType = true
 			c.reasons = append(c.reasons, "off_type")
 		}
+		kept = append(kept, c)
 	}
+	cands = kept
 	for i, c := range cands {
 		if i < rerankTopN {
 			out.Rerank.Scores = append(out.Rerank.Scores, ScoredEntry{ProductID: c.card.ProductID, Score: math.Round(c.score*100) / 100, Reasons: c.reasons})

@@ -163,6 +163,25 @@ func TestProductVectorRecall(t *testing.T) {
 	_ = domain.StockInStock
 }
 
+// 只有向量召回、又不是问的品类的商品不进结果（真实 Embedding 下“200 以内的手机”把手机按价格滤掉后，向量召回的鼠标、耳机被当成相近商品）；
+// 关键词命中修饰词的别品类商品照旧作相近参考，没有品类锚点的问题照旧接受向量结果。
+func TestProductVectorOnlyOffTypeDropped(t *testing.T) {
+	e := newEnv(t)
+	deps := e.runner.deps
+	deps.ProductIndex = &fakeProductIndex{hits: []rag.ProductHit{{ProductID: "p_seed_mouse", Score: 0.47}, {ProductID: "p_seed_earbuds", Score: 0.45},
+		{ProductID: "p_seed_nova", Score: 0.66}}}
+	e.runner = NewRuleRunner(deps)
+	e.reg = e.runner.Registry()
+	res := e.search(t, map[string]any{"query": "手机", "max_price": 200.0})
+	if ids(res) != "" || res.Relevance != RelevanceNone {
+		t.Fatalf("vector-only off-type kept: %s %s %+v", ids(res), res.Relevance, res.Rerank.Scores)
+	}
+	// 关键词命中修饰词（“便携”）的别品类商品仍作相近参考
+	if res := e.search(t, map[string]any{"query": "便携 音箱"}); res.Relevance != RelevanceWeak {
+		t.Fatalf("keyword off-type should stay weak: %s %s", res.Relevance, ids(res))
+	}
+}
+
 // 向量“强相似”阈值可由 Deps 覆盖（评测做敏感性对照）；默认 0.78 不变。
 func TestProductVectorStrongSimOverride(t *testing.T) {
 	e := newEnv(t)
