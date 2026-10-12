@@ -240,31 +240,42 @@ func searchRuns(term string) []string {
 	return out
 }
 
-// likeEscape 转义 LIKE / JSON_SEARCH 通配符，关键词里的 % 和 _ 按字面匹配。
-var likeEscape = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-
-func (s *Store) SearchVisibleProducts(ctx context.Context, q store.ProductSearch) ([]store.CatalogProduct, int, error) {
-	from, where, args := visibleProductFrom, "", []any{}
+// visibleSearch 拼出公开商品列表 / 搜索的 FROM 和 WHERE（SELECT 之后的提示、FROM、WHERE、参数）；ok 为 false 表示关键词拆不出检索词，直接无结果。
+func visibleSearch(q store.ProductSearch) (hint, from, where string, args []any, ok bool) {
+	from = visibleProductFrom
 	if terms := store.SearchTerms(q.Keyword); len(terms) > 0 {
 		// 先求命中的商品 ID，再和可见性条件连接：全文、分类名、短词兜底三路各自走索引，用 UNION 合并（写成 OR 会全表扫描）。
+		// STRAIGHT_JOIN 固定从命中集合开始连接：分类名的 LIKE 一多，优化器会把命中集合估成好几万行，改成扫全部在售商品再逐行
+		// 查命中集合（10 万商品时“量子纠缠”这种查不到的词也要 0.3s）；从命中集合开始，命中少时几乎不花时间，命中多时也不更慢。
+		hint = "STRAIGHT_JOIN "
 		hits, hitArgs := productHits(terms)
 		from = ` FROM (` + hits + `) hit
 	JOIN products p ON p.product_id = hit.product_id` + strings.TrimPrefix(visibleProductFrom, ` FROM products p`)
 		args = append(args, hitArgs...)
 	} else if strings.TrimSpace(q.Keyword) != "" {
-		// 关键词有内容但拆不出检索词（例如单个字符），与上游一致按无结果处理。
-		return []store.CatalogProduct{}, 0, nil
+		return "", "", "", nil, false
 	}
 	if q.CategoryID != "" {
 		where += ` AND (p.category_id = ? OR c.parent_id = ?)`
 		args = append(args, q.CategoryID, q.CategoryID)
 	}
+	return hint, from, where, args, true
+}
 
+// likeEscape 转义 LIKE / JSON_SEARCH 通配符，关键词里的 % 和 _ 按字面匹配。
+var likeEscape = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+func (s *Store) SearchVisibleProducts(ctx context.Context, q store.ProductSearch) ([]store.CatalogProduct, int, error) {
+	hint, from, where, args, ok := visibleSearch(q)
+	if !ok {
+		// 关键词有内容但拆不出检索词（例如单个字符），与上游一致按无结果处理。
+		return []store.CatalogProduct{}, 0, nil
+	}
 	var total int
-	if err := s.q(ctx).QueryRowContext(ctx, `SELECT COUNT(*)`+from+where, args...).Scan(&total); err != nil {
+	if err := s.q(ctx).QueryRowContext(ctx, `SELECT `+hint+`COUNT(*)`+from+where, args...).Scan(&total); err != nil {
 		return nil, 0, mapErr(err)
 	}
-	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+prefixed("p.", productColumns)+`, m.name`+from+where+
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+hint+prefixed("p.", productColumns)+`, m.name`+from+where+
 		` ORDER BY p.sort_order, p.product_id LIMIT ? OFFSET ?`, append(args, q.Page.PageSize, q.Page.Offset())...)
 	if err != nil {
 		return nil, 0, mapErr(err)
