@@ -34,7 +34,9 @@
      docker stop <一个旧实例容器> && docker rm <它>                                       # SIGTERM：/ready 先 503，SHUTDOWN_DRAIN 内被摘掉，再关闭
      # 重复以上两步直到旧实例都换掉
      ```
-     nginx 的上游按 Docker DNS 每 10 秒重新解析，下线实例的请求连不上时自动换下一个实例（`proxy_next_upstream` 默认 error / timeout），
+     nginx 的上游按 Docker DNS 每 10 秒重新解析，下线实例的请求连不上时自动换下一个实例（`proxy_next_upstream` 默认 error / timeout，
+     连接都没建立的写请求也会换）。下线期间 API 的响应都带 `Connection: close`，nginx 的上游空闲连接 4 秒过期（`keepalive_timeout 4s`），
+     所以 `SHUTDOWN_DRAIN` 必须大于 4 秒（默认模板 5s）：否则 API 关闭时 nginx 可能正用一条被关掉的长连接发写请求，返回 502。
      演练记录见 `docs/10-release-readiness.md`。回滚同样按实例逐个替换成上一版本镜像。
 6. **发布后 15 分钟**：看 5xx 比例、接口 P95、结算成功率、导购失败率、熔断状态；任何一项告警就按“回滚”处理。
 

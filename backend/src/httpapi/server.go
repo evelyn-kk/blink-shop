@@ -344,7 +344,19 @@ func (s *Server) Handler() http.Handler {
 	h = s.withRecover(h)
 	h = s.withAccessLog(h)
 	h = s.withRequestContext(h)
+	h = s.withDrainClose(h)
 	return h
+}
+
+// withDrainClose：下线期间每个响应都带 Connection: close，连接在响应后关闭、反向代理不再复用。否则下线时进程关闭的空闲长连接
+// 可能正被代理拿去发请求，代理收到“连接被提前关闭”，GET 会换实例重试，POST 不会重试，用户看到 502（多实例滚动替换时实测出现）。
+func (s *Server) withDrainClose(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.draining.Load() {
+			w.Header().Set("Connection", "close")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // dispatch 交给 ServeMux 路由；未命中的路径和方法统一输出 JSON 错误，而不是 ServeMux 默认的纯文本。
@@ -415,4 +427,5 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 }
 
 // BeginDrain 让 /ready 返回 503（实例正在下线），负载均衡摘掉实例后不再有新请求；进行中的请求不受影响。
+// 下线期间的响应都带 Connection: close（见 withDrainClose），到真正关闭时代理手里没有可复用的长连接。
 func (s *Server) BeginDrain() { s.draining.Store(true) }

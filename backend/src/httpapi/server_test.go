@@ -570,3 +570,26 @@ func (b *lockedBuffer) String() string {
 	defer b.mu.Unlock()
 	return b.buf.String()
 }
+
+// 下线期间每个响应都带 Connection: close，真实连接在响应后被关闭（代理不再复用，关闭进程时没有空闲长连接可撞）。
+func TestDrainClosesConnections(t *testing.T) {
+	ts := newTestServer(t, nil, nil, nil)
+	srv := httptest.NewServer(ts.handler)
+	t.Cleanup(srv.Close)
+	get := func() *http.Response {
+		resp, err := srv.Client().Get(srv.URL + "/api/v1/health")
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		return resp
+	}
+	if r := get(); r.Close || r.Header.Get("Connection") == "close" {
+		t.Fatalf("keep-alive expected before drain: %v %v", r.Close, r.Header)
+	}
+	ts.BeginDrain()
+	if r := get(); !r.Close {
+		t.Fatalf("connection should close during drain: %v", r.Header)
+	}
+}
