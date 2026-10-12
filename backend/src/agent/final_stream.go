@@ -111,7 +111,7 @@ func (f *finalStream) onRune(r rune) {
 		return
 	}
 	f.sentence.WriteRune(r)
-	if r == '。' || r == '！' || r == '？' || r == '；' {
+	if isStreamBreak(r) {
 		f.flushSentence("")
 	}
 }
@@ -134,7 +134,7 @@ func (f *finalStream) decideLine() {
 	}
 	for _, r := range head {
 		f.sentence.WriteRune(r)
-		if r == '。' || r == '！' || r == '？' || r == '；' {
+		if isStreamBreak(r) {
 			f.flushSentence("")
 		}
 	}
@@ -258,4 +258,13 @@ func (d *jsonStringDecoder) next(r rune) (string, bool) {
 		return "", true
 	}
 	return string(r), false
+}
+
+// isStreamBreak 是流式推送的切分点：句末和逗号、顿号（商品 ID、内部标签、内部规则标记里都不含这些标点，按段过滤不会漏）。
+func isStreamBreak(r rune) bool {
+	switch r {
+	case '。', '！', '？', '；', '，', '、':
+		return true
+	}
+	return false
 }
