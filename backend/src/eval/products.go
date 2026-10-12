@@ -141,6 +141,7 @@ func RunProducts(ctx context.Context, o ProductOptions) (Report, error) {
 			traces = append(traces, last.traces...)
 		}
 		detail := stats.add(o2, time.Since(caseStart), traces)
+		stats.addFirstText(detail, last.firstText)
 		rec := last.recommended()
 		var problems []string
 		if c.ExpectTop != "" {
@@ -214,10 +215,20 @@ type capture struct {
 	blocks []map[string]any
 	follow []string
 	traces []traceRec
+	// start 是这一轮开始运行的时间，firstText 是第一段回答文字到达的时刻（相对 start，0 表示没有文字）。
+	start     time.Time
+	firstText time.Duration
 }
 
 func (c *capture) Thinking(agent.Step) {}
-func (c *capture) Text(d string)       { c.mu.Lock(); c.text.WriteString(d); c.mu.Unlock() }
+func (c *capture) Text(d string) {
+	c.mu.Lock()
+	if c.firstText == 0 && d != "" {
+		c.firstText = time.Since(c.start)
+	}
+	c.text.WriteString(d)
+	c.mu.Unlock()
+}
 func (c *capture) Block(b map[string]any) {
 	c.mu.Lock()
 	c.blocks = append(c.blocks, b)
@@ -226,13 +237,16 @@ func (c *capture) Block(b map[string]any) {
 func (c *capture) Followups(q []string) { c.mu.Lock(); c.follow = q; c.mu.Unlock() }
 func (c *capture) Trace(stage, typ, status string, _ time.Duration, meta map[string]any) {
 	c.mu.Lock()
-	c.traces = append(c.traces, traceRec{stage: stage, typ: typ, status: status, meta: meta})
+	c.traces = append(c.traces, traceRec{stage: stage, typ: typ, status: status, at: time.Since(c.start), meta: meta})
 	c.mu.Unlock()
 }
 
 // traceRec 是运行器写出的一条轨迹（端到端评测检查阶段、工具和脱敏）。
+//
+// at 是轨迹写出的时刻（相对这一轮开始，墙钟）：评测用固定时钟，轨迹自带的耗时都是 0，阶段耗时按相邻轨迹的时刻差算。
 type traceRec struct {
 	stage, typ, status string
+	at                 time.Duration
 	meta               map[string]any
 }
 
@@ -260,7 +274,7 @@ func runOnce(ctx context.Context, st *memstore.Store, runner *agent.RuleRunner, 
 	if err != nil {
 		return nil, err
 	}
-	c := &capture{}
+	c := &capture{start: time.Now()}
 	if err := runner.Run(ctx, agent.Input{AccountID: account, SessionID: session, RunID: started.Run.RunID, TraceID: started.Run.TraceID, Content: content}, c); err != nil {
 		return nil, err
 	}

@@ -116,6 +116,17 @@ type modelStats struct {
 	plannerModelOK, plannerModelRuns  int
 	models                            map[string]int
 	byModel                           map[string]*[3]int
+	// 阶段耗时：每次模型规划、每一步工具循环（含最后生成回答的那一步）、最后一轮第一段回答文字到达的时间。
+	plannerLat, reactStepLat, firstText []time.Duration
+}
+
+// addFirstText 记最后一轮的首段文字时间（没有文字时不记）。
+func (s *modelStats) addFirstText(detail map[string]any, d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	s.firstText = append(s.firstText, d)
+	detail["first_text_ms"] = d.Milliseconds()
 }
 
 // add 记一条用例：m 为 nil（纯规则）时只记耗时；traces 是这条用例所有轮次的轨迹。返回写进逐条结果的明细。
@@ -129,9 +140,23 @@ func (s *modelStats) add(m *meter, caseLatency time.Duration, traces []traceRec)
 	}
 	detail := map[string]any{"latency_ms": caseLatency.Milliseconds()}
 	var reasons []string
+	// 阶段耗时：模型规划是这一轮最早的耗时步骤，取它的时刻；规则规划结束后开始工具循环，每一步取与上一步（或规则规划）的时刻差。
+	var prev time.Duration
 	for _, tr := range traces {
 		switch {
+		case tr.stage == "planner" && tr.typ == "rule":
+			prev = tr.at
+		case tr.stage == "react" && strings.HasPrefix(tr.typ, "step."):
+			d := tr.at - prev
+			prev = tr.at
+			s.reactStepLat = append(s.reactStepLat, d)
+			steps, _ := detail["react_step_ms"].([]int64)
+			detail["react_step_ms"] = append(steps, d.Milliseconds())
+		}
+		switch {
 		case tr.stage == "planner" && tr.typ == "model":
+			s.plannerLat = append(s.plannerLat, tr.at)
+			detail["planner_ms"] = tr.at.Milliseconds()
 			s.plannerModelRuns++
 			if tr.status == "error" {
 				s.plannerFallbacks++
@@ -189,8 +214,21 @@ func (s *modelStats) add(m *meter, caseLatency time.Duration, traces []traceRec)
 func (s *modelStats) write(rep *Report, withModel bool) {
 	rep.Metrics["case_latency_p50_ms"] = float64(percentile(s.caseLatency, 0.50).Milliseconds())
 	rep.Metrics["case_latency_p95_ms"] = float64(percentile(s.caseLatency, 0.95).Milliseconds())
+	if len(s.firstText) > 0 {
+		rep.Metrics["first_text_p50_ms"] = float64(percentile(s.firstText, 0.50).Milliseconds())
+		rep.Metrics["first_text_p95_ms"] = float64(percentile(s.firstText, 0.95).Milliseconds())
+	}
 	if !withModel || s.cases == 0 {
 		return
+	}
+	if len(s.plannerLat) > 0 {
+		rep.Metrics["planner_call_p50_ms"] = float64(percentile(s.plannerLat, 0.50).Milliseconds())
+		rep.Metrics["planner_call_p95_ms"] = float64(percentile(s.plannerLat, 0.95).Milliseconds())
+	}
+	if len(s.reactStepLat) > 0 {
+		rep.Metrics["react_step_p50_ms"] = float64(percentile(s.reactStepLat, 0.50).Milliseconds())
+		rep.Metrics["react_step_p95_ms"] = float64(percentile(s.reactStepLat, 0.95).Milliseconds())
+		rep.Metrics["react_steps_per_case"] = round(float64(len(s.reactStepLat)) / float64(s.cases))
 	}
 	n := float64(s.cases)
 	rep.Metrics["model_calls"] = float64(s.calls)

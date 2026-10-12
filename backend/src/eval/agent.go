@@ -140,6 +140,7 @@ func RunAgent(ctx context.Context, o AgentOptions) (Report, error) {
 			allTraces = append(allTraces, last.traces...)
 		}
 		detail := stats.add(mt, time.Since(caseStart), allTraces)
+		stats.addFirstText(detail, last.firstText)
 		text := last.text.String()
 		blocksJSON, _ := json.Marshal(last.blocks)
 		var problems []string

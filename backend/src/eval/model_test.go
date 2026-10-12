@@ -114,3 +114,31 @@ func TestTokensByModel(t *testing.T) {
 		t.Fatalf("metrics: %v", rep.Metrics)
 	}
 }
+
+// 阶段耗时：模型规划、每一步工具循环、首段文字都进报告（模型调用各慢 50ms，按墙钟算，评测的固定时钟不影响）。
+// 每一步只算这一步（约 50ms），不是从开始累计。
+func TestStageLatency(t *testing.T) {
+	slow := func(content string) llm.Reply {
+		return llm.Reply{Fn: func(req llm.Request) (llm.Response, error) {
+			time.Sleep(50 * time.Millisecond)
+			return llm.Response{Content: content, FinishReason: "stop", Model: req.Model, Attempts: 1}, nil
+		}}
+	}
+	m := (&llm.Mock{}).Then(
+		slow(`{"intent":"product_search","query":"降噪耳机"}`),
+		slow(`{"type":"tool","name":"search_products","args":{"query":"降噪耳机"}}`),
+		slow(`{"type":"final","text":"推荐这款耳机。"}`),
+	)
+	rep, err := RunAgent(context.Background(), AgentOptions{Cases: writeCases(t, `{"id":"x","query":"推荐一款通勤降噪耳机"}`), Model: mockModel(m)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mt := rep.Metrics
+	if mt["planner_call_p50_ms"] < 50 || mt["react_step_p50_ms"] < 50 || mt["react_steps_per_case"] != 2 || mt["first_text_p50_ms"] < 150 {
+		t.Fatalf("metrics: %v", mt)
+	}
+	d := rep.Cases[0].Detail
+	if steps, _ := d["react_step_ms"].([]int64); len(steps) != 2 || steps[1] > 90 || d["planner_ms"].(int64) < 50 || d["first_text_ms"].(int64) < 150 {
+		t.Fatalf("detail: %v", d)
+	}
+}
