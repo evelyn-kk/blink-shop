@@ -96,3 +96,21 @@ func TestCardAudit(t *testing.T) {
 		t.Fatalf("audit: %+v %v", a, bad)
 	}
 }
+
+// 按模型拆分 token：规划用小模型、工具循环用大模型时成本分开算。
+func TestTokensByModel(t *testing.T) {
+	m := (&llm.Mock{}).Then(
+		llm.Reply{Content: `{"intent":"product_search","query":"降噪耳机"}`, Usage: llm.Usage{PromptTokens: 100, CachedPromptTokens: 60, CompletionTokens: 10}},
+		llm.Reply{Content: `{"type":"tool","name":"search_products","args":{"query":"降噪耳机"}}`, Usage: llm.Usage{PromptTokens: 1000, CachedPromptTokens: 800, CompletionTokens: 20}},
+		llm.Reply{Content: `{"type":"final","text":"推荐这款耳机。"}`, Usage: llm.Usage{PromptTokens: 1500, CachedPromptTokens: 1000, CompletionTokens: 30}},
+	)
+	cases := writeCases(t, `{"id":"x","query":"推荐一款通勤降噪耳机"}`)
+	rep, err := RunAgent(context.Background(), AgentOptions{Cases: cases, Model: mockModel(m)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Metrics["tokens_in:small-m"] != 100 || rep.Metrics["tokens_in_cached:small-m"] != 60 || rep.Metrics["tokens_in:big-m"] != 2500 ||
+		rep.Metrics["tokens_in_cached:big-m"] != 1800 || rep.Metrics["tokens_out:big-m"] != 50 || rep.Metrics["cached_prompt_tokens"] != 1860 {
+		t.Fatalf("metrics: %v", rep.Metrics)
+	}
+}

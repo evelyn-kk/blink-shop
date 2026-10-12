@@ -57,13 +57,15 @@ type meter struct {
 	calls, errors, promptTokens, completionTokens, cachedTokens int
 	latencies                                                   []time.Duration
 	models                                                      map[string]int
+	// byModel 按模型累计 token（成本按模型单价计算）：[输入, 其中命中缓存, 输出]
+	byModel map[string]*[3]int
 }
 
 func newMeter(p llm.Provider) *meter {
 	if p == nil {
 		return nil
 	}
-	return &meter{inner: p, models: map[string]int{}}
+	return &meter{inner: p, models: map[string]int{}, byModel: map[string]*[3]int{}}
 }
 
 func (m *meter) record(req llm.Request, resp llm.Response, err error, d time.Duration) {
@@ -75,6 +77,14 @@ func (m *meter) record(req llm.Request, resp llm.Response, err error, d time.Dur
 	m.promptTokens += resp.Usage.PromptTokens
 	m.completionTokens += resp.Usage.CompletionTokens
 	m.cachedTokens += resp.Usage.CachedPromptTokens
+	t := m.byModel[req.Model]
+	if t == nil {
+		t = &[3]int{}
+		m.byModel[req.Model] = t
+	}
+	t[0] += resp.Usage.PromptTokens
+	t[1] += resp.Usage.CachedPromptTokens
+	t[2] += resp.Usage.CompletionTokens
 	if err != nil {
 		m.errors++
 	}
@@ -105,6 +115,7 @@ type modelStats struct {
 	removedProductIDs                 int
 	plannerModelOK, plannerModelRuns  int
 	models                            map[string]int
+	byModel                           map[string]*[3]int
 }
 
 // add 记一条用例：m 为 nil（纯规则）时只记耗时；traces 是这条用例所有轮次的轨迹。返回写进逐条结果的明细。
@@ -114,6 +125,7 @@ func (s *modelStats) add(m *meter, caseLatency time.Duration, traces []traceRec)
 	if s.reactFallbackReasons == nil {
 		s.reactFallbackReasons = map[string]int{}
 		s.models = map[string]int{}
+		s.byModel = map[string]*[3]int{}
 	}
 	detail := map[string]any{"latency_ms": caseLatency.Milliseconds()}
 	var reasons []string
@@ -158,6 +170,16 @@ func (s *modelStats) add(m *meter, caseLatency time.Duration, traces []traceRec)
 	for k, v := range m.models {
 		s.models[k] += v
 	}
+	for k, v := range m.byModel {
+		t := s.byModel[k]
+		if t == nil {
+			t = &[3]int{}
+			s.byModel[k] = t
+		}
+		for i := range v {
+			t[i] += v[i]
+		}
+	}
 	detail["model_calls"], detail["prompt_tokens"], detail["completion_tokens"], detail["model_errors"] = m.calls, m.promptTokens, m.completionTokens, m.errors
 	detail["cached_prompt_tokens"] = m.cachedTokens
 	return detail
@@ -193,6 +215,11 @@ func (s *modelStats) write(rep *Report, withModel bool) {
 	}
 	slices.Sort(models)
 	rep.Config["model_calls_by_model"] = strings.Join(models, ",")
+	for k, t := range s.byModel {
+		rep.Metrics["tokens_in:"+k] = float64(t[0])
+		rep.Metrics["tokens_in_cached:"+k] = float64(t[1])
+		rep.Metrics["tokens_out:"+k] = float64(t[2])
+	}
 }
 
 // percentile 用最近秩法取分位数；空切片为 0。
