@@ -173,3 +173,26 @@ func TestClassifyStripsPII(t *testing.T) {
 		t.Errorf("order number stripped: %q", got)
 	}
 }
+
+// 扩充端到端集时发现的两处规则误判：“这个”里的“个”被当成量词（“这个有什么评价”判成看购物车）；
+// “签收几天内可以退货”里的“签收”被当成确认收货。原来能识别的说法不受影响。
+func TestClassifyReferenceAndAfterSalesQuestions(t *testing.T) {
+	for _, tc := range []struct {
+		text           string
+		intent, action string
+	}{
+		{"这个有什么评价", string(IntentReview), "list"},
+		{"签收几天内可以退货", string(IntentKnowledge), ""},
+		{"签收后多久可以申请换货", string(IntentKnowledge), ""},
+		{"我已经签收了", string(IntentOrder), "confirm"},
+		{"确认收货", string(IntentOrder), "confirm"},
+		{"把第二个商品删掉", string(IntentCart), "remove"},
+		{"把这件商品删掉", string(IntentCart), "remove"},
+		{"这个数量改成 2", string(IntentCart), "update"},
+	} {
+		p := Classify(tc.text, false)
+		if string(p.Intent) != tc.intent || p.Action != tc.action {
+			t.Errorf("%q = %s/%s (rule %s), want %s/%s", tc.text, p.Intent, p.Action, p.Rule, tc.intent, tc.action)
+		}
+	}
+}

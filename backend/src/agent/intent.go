@@ -73,6 +73,7 @@ var (
 	promoWords      = []string{"促销", "活动", "满减", "打折", "折扣", "有什么优惠", "有啥优惠", "优惠活动", "特价", "降价"}
 	reviewCreate    = []string{"写评价", "发评价", "发表评价", "发布评价", "提交评价", "写个评价", "评价一下", "给个好评", "打五星", "打5星", "评个分", "我要评价", "我想评价", "评价：", "评价:", "评论：", "评论:"}
 	reviewWords     = []string{"评价", "评论", "口碑", "好评", "差评", "评分", "买过的人", "用过的人", "用户反馈", "风评"}
+	afterSalesWords = []string{"退货", "退款", "换货", "保修", "运费", "无理由", "售后", "质保"}
 	knowledgeWords  = []string{"退货", "退款", "售后", "保修", "换货", "运费", "发票", "无理由", "政策", "规则", "怎么用", "怎么连", "怎么连接", "怎么配对", "怎么充电", "怎么清洗", "怎么保养", "怎么安装", "支持吗", "能用吗", "可以用吗", "防水吗", "保修期", "质保", "几天", "多久", "什么时候发", "包邮", "配送", "快递费", "七天", "保价", "说明书", "参数", "材质", "续航多久", "怎么办", "可以退", "能退"}
 	compareWords    = []string{"对比", "比较", "区别", "差别", "哪个好", "哪款好", "哪个更", "哪款更", "哪个值", "有什么不同", "有啥不同", "差在哪", "怎么选", " vs ", "vs", "pk"}
 	searchWords     = []string{"推荐", "想买", "要买", "买个", "买一", "来一", "来个", "找", "有没有", "有什么", "有哪些", "哪款", "哪个", "适合", "预算", "多少钱", "价格", "便宜", "性价比", "好用", "选", "挑", "想要", "需要", "介绍", "看看", "有卖", "卖不卖", "有货", "库存", "型号", "规格", "颜色", "多少", "送", "礼物", "新款", "热销", "爆款"}
@@ -153,7 +154,8 @@ func Classify(content string, hasImage bool) Plan {
 		return p
 	}
 	// “数量改成 2”没提购物车，但改数量只会是购物车里的商品。
-	inCart := containsAny(lower, cartWords...) || ((base.Ordinal != 0 || base.Reference) && containsAny(lower, "商品", "件", "个")) ||
+	// 指代词自己带的“个”（这个 / 那个）不算量词：“这个有什么评价”不是在说购物车里的商品。
+	inCart := containsAny(lower, cartWords...) || ((base.Ordinal != 0 || base.Reference) && containsAny(referenceRe.ReplaceAllString(lower, ""), "商品", "件", "个")) ||
 		containsAny(lower, "数量改", "数量调", "数量换", "改数量", "调数量")
 	if inCart && containsAny(lower, "清空", "全部删", "都删", "全删") {
 		return Plan{Intent: IntentCart, Action: "clear", Rule: "cart_clear"}
@@ -191,7 +193,8 @@ func Classify(content string, hasImage bool) Plan {
 		p.Intent, p.Action, p.Rule = IntentOrder, "cancel", "order_cancel"
 		return p
 	}
-	if containsAny(lower, orderConfirm...) {
+	// “签收几天内可以退货”问的是售后规则，不是要确认收货。
+	if containsAny(lower, orderConfirm...) && !containsAny(lower, afterSalesWords...) {
 		p := base
 		p.Intent, p.Action, p.Rule = IntentOrder, "confirm", "order_confirm"
 		return p
