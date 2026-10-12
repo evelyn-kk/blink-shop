@@ -286,6 +286,7 @@ func (s *session) answerWithModel(ctx context.Context, st ModelSettings) bool {
 	system := strings.Replace(reactPrompt, "{{TOOLS}}", renderTools(allowed), 1)
 	messages := []llm.Message{{Role: "system", Content: system}, {Role: "user", Content: s.reactUserPrompt()}}
 	parseFailures := 0
+	answerStarted := false
 	var lastUsage llm.Usage
 	fallback := func(reason string, rounds int) bool {
 		s.out.Trace("react", "fallback", "ok", 0, map[string]any{"reason": reason, "rounds": rounds, "model": st.AgentModel})
@@ -301,12 +302,35 @@ func (s *session) answerWithModel(ctx context.Context, st ModelSettings) bool {
 		s.out.Thinking(Step{ID: stepID, Title: "思考下一步", Status: StepRunning})
 		start := r.deps.Now()
 		callCtx, cancel := context.WithTimeout(ctx, st.Timeout)
-		resp, err := r.deps.LLM.Complete(callCtx, llm.Request{Model: st.AgentModel, Messages: messages, Temperature: reactTemp, MaxTokens: reactMaxTokens, JSON: true})
+		// 流式调用：这一轮如果是最终回答，text 边生成边过滤推送（首字不必等整段生成完）；工具调用照旧整段处理。
+		fs := newFinalStream(s.tc.Evidence, func(t string) {
+			if !answerStarted {
+				answerStarted = true
+				s.out.Thinking(Step{ID: stepID, Title: "思考下一步", Status: StepDone})
+				s.out.Thinking(Step{ID: "answer", Title: "整理回答", Status: StepRunning})
+			}
+			s.sayRaw(t)
+		})
+		resp, err := r.deps.LLM.Stream(callCtx, llm.Request{Model: st.AgentModel, Messages: messages, Temperature: reactTemp, MaxTokens: reactMaxTokens, JSON: true}, fs.feed)
 		cancel()
-		s.out.Thinking(Step{ID: stepID, Title: "思考下一步", Status: StepDone})
+		if !answerStarted {
+			s.out.Thinking(Step{ID: stepID, Title: "思考下一步", Status: StepDone})
+		}
 		meta := map[string]any{"model": st.AgentModel, "prompt": PromptReact, "prompt_version": reactVersion, "round": round,
 			"prompt_chars": promptChars(messages), "prompt_hash": promptHash(messages), "prompt_tokens": resp.Usage.PromptTokens, "completion_tokens": resp.Usage.CompletionTokens}
 		if err != nil {
+			if fs.emittedAny() {
+				// 已经推给用户一部分回答：不能再交给规则重答（会重复），说明中断后照常结束
+				meta["error"] = errorClass(err)
+				s.out.Trace("react", fmt.Sprintf("step.%d", round), "error", r.deps.Now().Sub(start), meta)
+				s.sayRaw("\n（回答中断了，可以再问一次。）")
+				s.out.Thinking(Step{ID: "answer", Title: "整理回答", Status: StepDone})
+				pending.emit(s)
+				_, removed := fs.finish()
+				s.out.Trace("answer", "model", "error", 0, map[string]any{"model": st.AgentModel, "rounds": round, "removed_product_ids": removed,
+					"streamed": true, "error": "stream_interrupted"})
+				return true
+			}
 			if ctx.Err() != nil {
 				return false
 			}
@@ -316,6 +340,24 @@ func (s *session) answerWithModel(ctx context.Context, st ModelSettings) bool {
 		}
 		lastUsage = resp.Usage
 		action, perr := parseAction(resp.Content)
+		if fs.streaming() {
+			// 流式推送的最终回答：正文已经边生成边推出去了，这里只补卡片、追问和轨迹
+			text, removed := fs.finish()
+			meta["raw_runes"], meta["action"], meta["streamed"] = utf8.RuneCountInString(resp.Content), "final", true
+			s.out.Trace("react", fmt.Sprintf("step.%d", round), "ok", r.deps.Now().Sub(start), meta)
+			if text == "" {
+				return fallback("empty_final", round)
+			}
+			s.out.Thinking(Step{ID: "answer", Title: "整理回答", Status: StepDone})
+			pending.emit(s)
+			if perr == nil && len(action.Followups) > 0 {
+				s.followupSource = "model"
+				s.followups(action.Followups...)
+			}
+			s.out.Trace("answer", "model", "ok", 0, map[string]any{"model": st.AgentModel, "rounds": round, "removed_product_ids": removed,
+				"prompt_tokens": lastUsage.PromptTokens, "completion_tokens": lastUsage.CompletionTokens, "streamed": true})
+			return true
+		}
 		meta["raw_runes"] = utf8.RuneCountInString(resp.Content)
 		if perr != nil {
 			parseFailures++

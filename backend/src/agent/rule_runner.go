@@ -195,6 +195,16 @@ func (s *session) say(text string) {
 	}
 }
 
+// sayRaw 原样推送一段已经过滤过的文本（流式回答用），不再按句切分。
+func (s *session) sayRaw(text string) {
+	if text == "" {
+		return
+	}
+	s.runes += utf8.RuneCountInString(text)
+	s.answer.WriteString(text)
+	s.out.Text(text)
+}
+
 // sayf 格式化后输出。
 func (s *session) sayf(format string, args ...any) { s.say(fmt.Sprintf(format, args...)) }
 
