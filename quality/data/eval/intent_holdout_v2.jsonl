@@ -1,0 +1,49 @@
+# 意图留出集 v2（48 条，2026-10-11 冻结）：12 个意图各 4 条，在规则和模型评测之前写好，不针对它改规则或 Prompt，用来衡量规划的泛化。字段同 intent.jsonl；只检查意图（个别带预算上限）。
+{"id": "ho_001", "query": "早上好呀", "expect_intent": "guide", "held_out": true}
+{"id": "ho_002", "query": "你都能帮我做些什么事", "expect_intent": "guide", "held_out": true}
+{"id": "ho_003", "query": "嗯嗯知道了", "expect_intent": "guide", "held_out": true}
+{"id": "ho_004", "query": "在不在，有人吗", "expect_intent": "guide", "held_out": true}
+{"id": "ho_005", "query": "想给爸妈买个大屏一点的手机，两千块上下", "expect_intent": "product_search", "held_out": true}
+{"id": "ho_006", "query": "办公室用的不吵的鼠标有没有", "expect_intent": "product_search", "held_out": true}
+{"id": "ho_007", "query": "1500 以内的蓝牙耳机推荐几个", "expect_intent": "product_search", "expect_budget": "1500.00", "held_out": true}
+{"id": "ho_008", "query": "晚上看书用的灯哪款好", "expect_intent": "product_search", "held_out": true}
+{"id": "ho_009", "query": "Nova 12 跟 Vista Pro 差在哪", "expect_intent": "product_compare", "held_out": true}
+{"id": "ho_010", "query": "这两个手机哪个拍照更强", "expect_intent": "product_compare", "held_out": true}
+{"id": "ho_011", "query": "K8 键盘和 M2 鼠标放一起比比参数", "expect_intent": "product_compare", "held_out": true}
+{"id": "ho_012", "query": "Vista Pro 相比 Nova 12 值不值得多花钱", "expect_intent": "product_compare", "held_out": true}
+{"id": "ho_013", "query": "耳机进水了还能保修吗", "expect_intent": "knowledge", "held_out": true}
+{"id": "ho_014", "query": "退货运费谁出", "expect_intent": "knowledge", "held_out": true}
+{"id": "ho_015", "query": "鼠标蓝牙配对一直失败怎么办", "expect_intent": "knowledge", "held_out": true}
+{"id": "ho_016", "query": "多久能发货", "expect_intent": "knowledge", "held_out": true}
+{"id": "ho_017", "query": "购物车里那个键盘不要了", "expect_intent": "cart", "held_out": true}
+{"id": "ho_018", "query": "鼠标再来一个", "expect_intent": "cart", "held_out": true}
+{"id": "ho_019", "query": "我购物车现在都有啥", "expect_intent": "cart", "held_out": true}
+{"id": "ho_020", "query": "把刚才那款耳机放进购物车", "expect_intent": "cart", "held_out": true}
+{"id": "ho_021", "query": "购物车里的东西都买了吧", "expect_intent": "checkout", "held_out": true}
+{"id": "ho_022", "query": "就这些，帮我提交订单", "expect_intent": "checkout", "held_out": true}
+{"id": "ho_023", "query": "去结账", "expect_intent": "checkout", "held_out": true}
+{"id": "ho_024", "query": "选好了，下单吧", "expect_intent": "checkout", "held_out": true}
+{"id": "ho_025", "query": "我上周买的东西发货没", "expect_intent": "order", "held_out": true}
+{"id": "ho_026", "query": "那笔还没付钱的订单帮我付掉", "expect_intent": "order", "held_out": true}
+{"id": "ho_027", "query": "不想要了，把待付款的订单取消", "expect_intent": "order", "held_out": true}
+{"id": "ho_028", "query": "快递到了，帮我点确认收货", "expect_intent": "order", "held_out": true}
+{"id": "ho_029", "query": "现在下单有没有能用的券", "expect_intent": "coupon", "held_out": true}
+{"id": "ho_030", "query": "最近有什么打折", "expect_intent": "coupon", "held_out": true}
+{"id": "ho_031", "query": "把能领的券都帮我领了", "expect_intent": "coupon", "held_out": true}
+{"id": "ho_032", "query": "我手上还有几张优惠券", "expect_intent": "coupon", "held_out": true}
+{"id": "ho_033", "query": "买过台灯的人怎么评价的", "expect_intent": "review", "held_out": true}
+{"id": "ho_034", "query": "这款鼠标口碑好不好", "expect_intent": "review", "held_out": true}
+{"id": "ho_035", "query": "给我买的鼠标打个四星，手感不错", "expect_intent": "review", "held_out": true}
+{"id": "ho_036", "query": "看看 Vista Pro 的买家评论", "expect_intent": "review", "held_out": true}
+{"id": "ho_037", "query": "带我去订单列表", "expect_intent": "navigation", "held_out": true}
+{"id": "ho_038", "query": "回到商品首页", "expect_intent": "navigation", "held_out": true}
+{"id": "ho_039", "query": "进设置页面", "expect_intent": "navigation", "held_out": true}
+{"id": "ho_040", "query": "切到历史会话", "expect_intent": "navigation", "held_out": true}
+{"id": "ho_041", "query": "图上这个耳机有同款吗", "expect_intent": "image_search", "has_image": true, "held_out": true}
+{"id": "ho_042", "query": "照着这张照片找", "expect_intent": "image_search", "has_image": true, "held_out": true}
+{"id": "ho_043", "query": "有没有长得差不多但便宜点的", "expect_intent": "image_search", "has_image": true, "held_out": true}
+{"id": "ho_044", "query": "这是啥牌子的台灯，商城里有卖吗", "expect_intent": "image_search", "has_image": true, "held_out": true}
+{"id": "ho_045", "query": "帮我翻译一句英文", "expect_intent": "non_guide", "held_out": true}
+{"id": "ho_046", "query": "明天会下雨吗", "expect_intent": "non_guide", "held_out": true}
+{"id": "ho_047", "query": "推荐几部好看的电影", "expect_intent": "non_guide", "held_out": true}
+{"id": "ho_048", "query": "1 加 1 等于几", "expect_intent": "non_guide", "held_out": true}
