@@ -49,6 +49,10 @@ func TestIntentWithModel(t *testing.T) {
 	if rep.Metrics["model_calls"] != 2 || rep.Metrics["model_errors"] != 1 || rep.Metrics["planner_fallbacks"] != 1 || rep.Metrics["prompt_tokens"] != 100 {
 		t.Fatalf("metrics: %v", rep.Metrics)
 	}
+	// 规划耗时按这一轮开始算（曾经漏设开始时间，得到 int64 上限）
+	if p := rep.Metrics["planner_call_p95_ms"]; p < 0 || p > 5000 {
+		t.Fatalf("planner latency: %v", p)
+	}
 	if d := rep.Cases[1].Detail; d == nil || !slices.Contains(d["fallbacks"].([]string), "planner:timeout") {
 		t.Fatalf("detail: %v", rep.Cases[1].Detail)
 	}

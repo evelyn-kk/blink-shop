@@ -62,7 +62,7 @@ func RunIntent(ctx context.Context, o IntentOptions) (Report, error) {
 		} else {
 			mt := newMeter(o.Model.LLM)
 			runner := agent.NewRuleRunner(o.Model.deps(agent.Deps{}, mt))
-			cp := &capture{}
+			cp := &capture{start: time.Now()}
 			caseStart := time.Now()
 			p = runner.PlanOnly(ctx, c.Query, c.HasImage, cp)
 			detail = stats.add(mt, time.Since(caseStart), cp.traces)
