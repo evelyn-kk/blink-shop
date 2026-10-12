@@ -372,9 +372,13 @@ func (s *session) answerWithModel(ctx context.Context, st ModelSettings) bool {
 		parseFailures = 0
 		meta["action"] = action.Type
 		if action.Type == "tool" {
+			args := action.Args
+			if action.Name == ToolSearchProducts {
+				args = s.enforceUserConstraints(ctx, args, meta)
+			}
 			meta["tool"] = action.Name
 			s.out.Trace("react", fmt.Sprintf("step.%d", round), "ok", r.deps.Now().Sub(start), meta)
-			obs := s.call(ctx, toolTitle(action.Name), action.Name, action.Args)
+			obs := s.call(ctx, toolTitle(action.Name), action.Name, args)
 			if obs.OK {
 				for _, id := range pending.absorb(action.Name, obs.Data) {
 					s.tc.Evidence[id] = true
@@ -530,4 +534,31 @@ func errorClass(err error) string {
 		return "invalid_output"
 	}
 	return "error"
+}
+
+// enforceUserConstraints 把用户原话里的硬约束补进模型的商品搜索参数：没带品牌就补上用户点名的品牌，价格上限高于用户预算就压回预算。
+// 模型可以如实说“没找到”，但不能自己放宽条件再搜（真实模型评测发现：没搜到 Blink Home 的耳机，就去掉品牌搜出 Blink 的耳机当推荐）。
+func (s *session) enforceUserConstraints(ctx context.Context, args map[string]any, meta map[string]any) map[string]any {
+	out := make(map[string]any, len(args)+2)
+	for k, v := range args {
+		out[k] = v
+	}
+	if len(argStrings(out, "brands")) == 0 {
+		if brands := s.r.reg.MentionedBrands(ctx, s.in.Content, s.plan.Exclude); len(brands) > 0 {
+			list := make([]any, len(brands))
+			for i, b := range brands {
+				list[i] = b
+			}
+			out["brands"] = list
+			meta["enforced_brands"] = brands
+		}
+	}
+	if budget := ParseBudget(s.in.Content); budget > 0 {
+		limit := float64(budget) / 100 // Money 以分为单位
+		if f, ok := argFloat(out, "max_price"); !ok || f <= 0 || f > limit {
+			out["max_price"] = limit
+			meta["enforced_max_price"] = limit
+		}
+	}
+	return out
 }

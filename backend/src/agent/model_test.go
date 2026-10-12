@@ -487,3 +487,27 @@ func TestModelReactCannotClampQuantity(t *testing.T) {
 		t.Fatalf("parse: %d", ParseQuantity("鼠标数量改成 99999 件"))
 	}
 }
+
+// 用户原话里的品牌和预算是硬约束：模型搜索时漏掉品牌、放宽预算，系统补回去（真实模型去掉品牌后把 Blink 的耳机当成 Blink Home 的推荐）。
+func TestModelReactCannotRelaxUserConstraints(t *testing.T) {
+	e := newEnv(t)
+	mock := &llm.Mock{}
+	e.withModel(mock, settings(false, true))
+	sid := e.newSession(t, seed.User2ID)
+	mock.Then(tool(ToolSearchProducts, `{"query":"耳机"}`), final("推荐 Blink Air 降噪耳机。"))
+	r := e.run(t, seed.User2ID, sid, "推荐一款 Blink Home 的耳机")
+	if pl := r.block(BlockProductList); pl != nil && pl["title"] == "为你找到的商品" {
+		t.Fatalf("brand constraint relaxed: %v", pl)
+	}
+	if fmt.Sprint(r.traceMeta("react", "step.1")["enforced_brands"]) != "[Blink Home]" {
+		t.Fatalf("trace: %v", r.traceMeta("react", "step.1"))
+	}
+	mock.Then(tool(ToolSearchProducts, `{"query":"手机","max_price":5000}`), final("推荐这款手机。"))
+	r = e.run(t, seed.User2ID, sid, "3000 以内拍照好的手机")
+	if pl := r.block(BlockProductList); pl == nil || strings.Join(productIDs(pl), ",") != "p_seed_nova" {
+		t.Fatalf("budget: %v", pl)
+	}
+	if r.traceMeta("react", "step.1")["enforced_max_price"] != 3000.0 {
+		t.Fatalf("trace: %v", r.traceMeta("react", "step.1"))
+	}
+}
