@@ -3,6 +3,8 @@
 //	go run ./cmd/eval                       # 纯关键词 / 规则，图片用本地特征 + 内存索引，报告写到 ../quality/reports/eval-<时间>/
 //	go run ./cmd/eval -vector=hash          # 本地演示：散列向量 + Milvus 临时集合（MILVUS_ADDR），跑完删除
 //	go run ./cmd/eval -vector=env           # 用 MILVUS_ADDR + EMBEDDING_* 的真实向量（临时集合，跑完删除）
+//	go run ./cmd/eval -suite=rag -vector=env -recall=vector       # 召回方式对照：keyword / vector / hybrid
+//	go run ./cmd/eval -suite=rag -vector=env -rag-cases=../quality/data/eval/rag_paraphrase_holdout.jsonl
 //	go run ./cmd/eval -suite=images -image-index=milvus           # 商品图写进 Milvus 临时集合（跑完删除）
 //	go run ./cmd/eval -suite=images -image-embedder=env           # 用 IMAGE_EMBEDDING_* 配置的图片 Embedder（如 dashscope）
 //	go run ./cmd/eval -suite=agent -llm=env                       # 用 AI_* 配置的真实模型跑规划和工具循环（会产生费用）
@@ -65,6 +67,12 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	intentCases := fs.String("intent-cases", "", "意图用例文件，默认 <data>/intent.jsonl")
 	productCases := fs.String("product-cases", "", "商品搜索用例文件，默认 <data>/product_search.jsonl")
 	agentCases := fs.String("agent-cases", "", "端到端用例文件，默认 <data>/agent.jsonl")
+	ragCases := fs.String("rag-cases", "", "知识检索用例文件，默认 <data>/rag.jsonl")
+	recall := fs.String("recall", "", "keyword / vector / hybrid：知识检索和商品搜索的召回方式；空表示接了向量时 hybrid、否则 keyword")
+	vectorWeight := fs.Float64("vector-weight", 0, "知识检索混合打分的向量权重（0 表示线上默认 0.35），只用于敏感性对照")
+	strongSim := fs.Float64("vector-strong-sim", 0, "商品向量相似度达到多少可直接推荐（0 表示线上默认 0.78），只用于敏感性对照")
+	imageMatch := fs.Float64("image-match", 0, "覆盖图片 Embedder 的同款阈值（0 表示用 Embedder 自己的），只用于标定")
+	imageWeak := fs.Float64("image-weak", 0, "覆盖图片 Embedder 的相近阈值（0 表示用 Embedder 自己的），只用于标定")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -73,15 +81,19 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	}
 	cfg := map[string]string{"vector": *vec}
 	var knowledge rag.VectorIndex
-	var products rag.ProductIndex
+	var products *seedingProductIndex
+	var usage func() vector.EmbedUsage
 	if *vec != "off" {
-		k, p, name, cleanup, err := openVectors(ctx, *vec, getenv)
+		k, p, e, cleanup, err := openVectors(ctx, *vec, getenv)
 		if err != nil {
 			return err
 		}
 		defer cleanup()
 		knowledge, products = k, p
-		cfg["embedder"] = name
+		cfg["embedder"] = e.Name()
+		if oe, ok := e.(*vector.OpenAIEmbedder); ok {
+			usage = oe.Usage
+		}
 	}
 	model, err := modelConfig(ctx, *llmMode, getenv, agent.ModelSettings{PlannerEnabled: *planner, AgentEnabled: *react, RerankEnabled: *rerank,
 		SummaryEnabled: *summary, PlannerModel: *plannerModel, AgentModel: *agentModel, Timeout: *llmTimeout, MaxToolRounds: *maxRounds}, *llmRetries)
@@ -103,14 +115,24 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 		reports = append(reports, r)
 	}
 	if *suite == "all" || *suite == "rag" {
-		r, err := eval.RunRAG(ctx, eval.RAGOptions{Cases: filepath.Join(*data, "rag.jsonl"), Corpus: *corpus, K: 3, Vector: knowledge, Version: *version, Config: cfg, MinPass: *minPass})
+		r, err := eval.RunRAG(ctx, eval.RAGOptions{Cases: pick(*ragCases, "rag.jsonl"), Corpus: *corpus, K: 3, Vector: knowledge, Recall: *recall,
+			VectorWeight: *vectorWeight, Usage: usage, Version: *version, Config: cfg, MinPass: *minPass})
 		if err != nil {
 			return err
 		}
 		reports = append(reports, r)
 	}
 	if *suite == "all" || *suite == "products" {
-		r, err := eval.RunProducts(ctx, eval.ProductOptions{Cases: pick(*productCases, "product_search.jsonl"), ProductIndex: products, Version: *version, Config: cfg, MinPass: *minPass, Model: model})
+		po := eval.ProductOptions{Cases: pick(*productCases, "product_search.jsonl"), Recall: *recall, VectorStrongSim: *strongSim,
+			Version: *version, Config: cfg, MinPass: *minPass, Model: model}
+		if products != nil {
+			// 先把种子商品写进临时集合，报告里的 Embedding 用量只算检索
+			if err := products.seed(ctx); err != nil {
+				return err
+			}
+			po.ProductIndex, po.Usage = products, usage
+		}
+		r, err := eval.RunProducts(ctx, po)
 		if err != nil {
 			return err
 		}
@@ -121,6 +143,12 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 		if err != nil {
 			return err
 		}
+		if *imageMatch > 0 || *imageWeak > 0 {
+			if opts.Embedder == nil {
+				opts.Embedder = imagevector.Local{}
+			}
+			opts.Embedder = imagevector.WithThresholds(opts.Embedder, *imageMatch, *imageWeak)
+		}
 		defer cleanup()
 		opts.Cases, opts.Version, opts.MinPass = filepath.Join(*data, "image_search.jsonl"), *version, *imageMinPass
 		r, err := eval.RunImages(ctx, opts)
@@ -130,7 +158,11 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 		reports = append(reports, r)
 	}
 	if *suite == "all" || *suite == "agent" {
-		r, err := eval.RunAgent(ctx, eval.AgentOptions{Cases: pick(*agentCases, "agent.jsonl"), Version: *version, Config: cfg, MinPass: *minPass, Model: model})
+		ao := eval.AgentOptions{Cases: pick(*agentCases, "agent.jsonl"), Version: *version, Config: cfg, MinPass: *minPass, Model: model}
+		if products != nil {
+			ao.ProductIndex, ao.Vector = products, knowledge
+		}
+		r, err := eval.RunAgent(ctx, ao)
 		if err != nil {
 			return err
 		}
@@ -157,15 +189,15 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 }
 
 // openVectors 建两个临时集合（跑完删除），不碰正式集合。
-func openVectors(ctx context.Context, mode string, getenv func(string) string) (rag.VectorIndex, rag.ProductIndex, string, func(), error) {
+func openVectors(ctx context.Context, mode string, getenv func(string) string) (rag.VectorIndex, *seedingProductIndex, vector.Embedder, func(), error) {
 	resolver := configcenter.NewResolver(getenv, nil)
 	cfg, err := configcenter.Load(ctx, resolver)
 	if err != nil {
-		return nil, nil, "", nil, err
+		return nil, nil, nil, nil, err
 	}
 	m := vector.NewMilvus(cfg.MilvusAddr, cfg.MilvusToken, 30*time.Second)
 	if m == nil {
-		return nil, nil, "", nil, errors.New("需要 MILVUS_ADDR")
+		return nil, nil, nil, nil, errors.New("需要 MILVUS_ADDR")
 	}
 	var e vector.Embedder
 	switch mode {
@@ -174,11 +206,11 @@ func openVectors(ctx context.Context, mode string, getenv func(string) string) (
 	case "env":
 		oe := vector.NewOpenAIEmbedder(vector.EmbedOptions{BaseURL: cfg.EmbeddingBaseURL, APIKey: cfg.EmbeddingAPIKey, Model: cfg.EmbeddingModel, Dim: cfg.EmbeddingDim})
 		if oe == nil {
-			return nil, nil, "", nil, errors.New("需要 EMBEDDING_API_KEY")
+			return nil, nil, nil, nil, errors.New("需要 EMBEDDING_API_KEY")
 		}
 		e = oe
 	default:
-		return nil, nil, "", nil, fmt.Errorf("未知的 -vector %q", mode)
+		return nil, nil, nil, nil, fmt.Errorf("未知的 -vector %q", mode)
 	}
 	suffix := fmt.Sprintf("%d_%d", time.Now().Unix(), rand.Intn(1e6))
 	kname, pname := "blink_shop_eval_text_"+suffix, "blink_shop_eval_products_"+suffix
@@ -187,7 +219,7 @@ func openVectors(ctx context.Context, mode string, getenv func(string) string) (
 		_ = m.DropCollection(context.Background(), kname)
 		_ = m.DropCollection(context.Background(), pname)
 	}
-	return k, &seedingProductIndex{ProductIndex: p}, e.Name(), cleanup, nil
+	return k, &seedingProductIndex{ProductIndex: p}, e, cleanup, nil
 }
 
 // seedingProductIndex 在第一次检索前把种子商品写进临时集合（评测的 Store 是进程内的）。
@@ -196,12 +228,20 @@ type seedingProductIndex struct {
 	seeded bool
 }
 
+func (s *seedingProductIndex) seed(ctx context.Context) error {
+	if s.seeded {
+		return nil
+	}
+	if err := eval.SeedProducts(ctx, s.ProductIndex); err != nil {
+		return err
+	}
+	s.seeded = true
+	return nil
+}
+
 func (s *seedingProductIndex) SearchProducts(ctx context.Context, text string, topN int) ([]rag.ProductHit, error) {
-	if !s.seeded {
-		if err := eval.SeedProducts(ctx, s.ProductIndex); err != nil {
-			return nil, err
-		}
-		s.seeded = true
+	if err := s.seed(ctx); err != nil {
+		return nil, err
 	}
 	return s.ProductIndex.SearchProducts(ctx, text, topN)
 }

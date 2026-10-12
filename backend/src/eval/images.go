@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/evelyn-kk/blink-shop/backend/assets"
@@ -41,6 +42,32 @@ type ImageOptions struct {
 
 const imageEvalK = 3
 
+// timedEmbedder 记录每次图片 Embedding 的耗时（建索引和查询分开统计）。
+type timedEmbedder struct {
+	imagevector.Embedder
+	mu  sync.Mutex
+	lat []time.Duration
+}
+
+func (t *timedEmbedder) Embed(ctx context.Context, data []byte) ([]float32, error) {
+	t0 := time.Now()
+	v, err := t.Embedder.Embed(ctx, data)
+	if err == nil {
+		t.mu.Lock()
+		t.lat = append(t.lat, time.Since(t0))
+		t.mu.Unlock()
+	}
+	return v, err
+}
+
+func (t *timedEmbedder) take() []time.Duration {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := t.lat
+	t.lat = nil
+	return out
+}
+
 // RunImages 跑图片搜索用例。指标：recall@1、recall@3、MRR、held-out recall@3、无关图片的不返回率、同款（match 级）的准确率、
 // 不可售商品泄漏次数。
 func RunImages(ctx context.Context, o ImageOptions) (Report, error) {
@@ -69,12 +96,14 @@ func RunImages(ctx context.Context, o ImageOptions) (Report, error) {
 	if err != nil {
 		return rep, err
 	}
-	svc := imagesearch.New(emb, idx, imagesearch.NewSource(nil), st, nil, nil)
+	timed := &timedEmbedder{Embedder: emb}
+	svc := imagesearch.New(timed, idx, imagesearch.NewSource(nil), st, nil, nil)
 	stats, err := svc.Bootstrap(ctx)
 	if err != nil {
 		return rep, err
 	}
 	rep.Config["indexed_images"] = fmt.Sprint(stats.Images)
+	indexLat := timed.take()
 
 	var positives, hit1, hit3, heldOut, heldOutHit, negatives, negOK, matchTop, matchTopOK, leaks int
 	var rr float64
@@ -142,8 +171,15 @@ func RunImages(ctx context.Context, o ImageOptions) (Report, error) {
 				}
 			}
 		}
-		rep.record(firstTag(c.Tags), Failure{ID: c.ID, Query: c.Source + " " + strings.Join(c.Transforms, "+"), Problems: problems, Got: got})
+		// 逐条记前几名的分数和级别，用于按分布标定阈值（got 也写进通过的用例）
+		rep.recordDetail(firstTag(c.Tags), Failure{ID: c.ID, Query: c.Source + " " + strings.Join(c.Transforms, "+"), Problems: problems, Got: got},
+			map[string]any{"items": got, "held_out": slices.Contains(c.Tags, "held_out")})
 	}
+	queryLat := timed.take()
+	rep.Metrics["embed_index_calls"] = float64(len(indexLat))
+	rep.Metrics["embed_query_calls"] = float64(len(queryLat))
+	rep.Metrics["embed_query_p50_ms"] = float64(percentile(queryLat, 0.50).Milliseconds())
+	rep.Metrics["embed_query_p95_ms"] = float64(percentile(queryLat, 0.95).Milliseconds())
 	ratio := func(a, b int) float64 {
 		if b == 0 {
 			return 1

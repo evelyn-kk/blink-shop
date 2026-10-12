@@ -15,7 +15,9 @@ import (
 	"github.com/evelyn-kk/blink-shop/backend/src/risk"
 	"github.com/evelyn-kk/blink-shop/backend/src/seed"
 	"github.com/evelyn-kk/blink-shop/backend/src/shop"
+	"github.com/evelyn-kk/blink-shop/backend/src/store"
 	"github.com/evelyn-kk/blink-shop/backend/src/store/memstore"
+	"github.com/evelyn-kk/blink-shop/backend/src/vector"
 )
 
 // ProductCase 是一条商品搜索用例，经导购运行器端到端执行（每条用例一个新会话）。History 是先发的几句话（多轮用例）。
@@ -44,6 +46,23 @@ type ProductOptions struct {
 	Now          func() time.Time
 	// Model 不为 nil 时用模型跑规划 / 工具循环 / 重排（与线上同一运行器），并统计调用、token 和回退。
 	Model *ModelConfig
+	// Recall 是召回方式：keyword（不用 ProductIndex）/ vector（只用向量召回，关键词召回关掉，打分规则不变）/ hybrid（线上做法）；
+	// 空表示有 ProductIndex 时 hybrid、否则 keyword。
+	Recall string
+	// VectorStrongSim 覆盖“向量相似度够高可直接推荐”的阈值，0 表示线上默认（0.78）。
+	VectorStrongSim float64
+	// Usage 返回 Embedding 累计用量（可为 nil），报告记本套件检索的调用数与 token。
+	Usage func() vector.EmbedUsage
+}
+
+// noKeywordRecall 让商品搜索的关键词召回返回空（只看向量召回）；不带关键词的列表查询照常。
+type noKeywordRecall struct{ *memstore.Store }
+
+func (s noKeywordRecall) SearchVisibleProducts(ctx context.Context, q store.ProductSearch) ([]store.CatalogProduct, int, error) {
+	if strings.TrimSpace(q.Keyword) != "" {
+		return nil, 0, nil
+	}
+	return s.Store.SearchVisibleProducts(ctx, q)
 }
 
 // RunProducts 跑商品搜索用例。指标：通过率、top1 准确率、无结果正确率（不推荐不相关商品）、负向约束正确率（排除词 / 价格 / 冲突）。
@@ -53,8 +72,18 @@ func RunProducts(ctx context.Context, o ProductOptions) (Report, error) {
 	for k, v := range o.Config {
 		rep.Config[k] = v
 	}
-	if o.ProductIndex != nil {
+	mode, err := recallMode(o.Recall, o.ProductIndex != nil)
+	if err != nil {
+		return rep, err
+	}
+	switch mode {
+	case rag.RecallHybrid:
 		rep.Config["recall"] = "keyword+vector"
+	case rag.RecallVector:
+		rep.Config["recall"] = "vector"
+	}
+	if o.VectorStrongSim > 0 {
+		rep.Config["vector_strong_sim"] = fmt.Sprint(o.VectorStrongSim)
 	}
 	o.Model.describe(rep.Config)
 	cases, err := readJSONL[ProductCase](o.Cases)
@@ -72,7 +101,17 @@ func RunProducts(ctx context.Context, o ProductOptions) (Report, error) {
 		now = func() time.Time { return fixed }
 	}
 	base := agent.Deps{Store: st, Shop: shop.New(st, now, 0), Retriever: rag.NewRetriever(st, nil, nil),
-		Risk: risk.Static("违法", "违禁", "假货", "绕过风控"), ProductIndex: o.ProductIndex, Now: now}
+		Risk: risk.Static("违法", "违禁", "假货", "绕过风控"), ProductIndex: o.ProductIndex, VectorStrongSim: o.VectorStrongSim, Now: now}
+	switch mode {
+	case rag.RecallKeyword:
+		base.ProductIndex = nil
+	case rag.RecallVector:
+		base.Store = noKeywordRecall{st}
+	}
+	var u0 vector.EmbedUsage
+	if o.Usage != nil {
+		u0 = o.Usage()
+	}
 	visible, err := visibleProducts(ctx, st)
 	if err != nil {
 		return rep, err
@@ -152,6 +191,9 @@ func RunProducts(ctx context.Context, o ProductOptions) (Report, error) {
 	}
 	stats.write(&rep, o.Model != nil)
 	audit.write(&rep)
+	if o.Usage != nil {
+		writeUsage(rep.Metrics, "embed_query", o.Usage().Sub(u0))
+	}
 	if topCases > 0 {
 		rep.Metrics["top1_accuracy"] = round(float64(topOK) / float64(topCases))
 	}

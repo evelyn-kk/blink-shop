@@ -153,3 +153,16 @@ func TestDashScope(t *testing.T) {
 		t.Fatalf("junk image: %v", err)
 	}
 }
+
+func TestWithThresholdsOverridesOnlyGivenValues(t *testing.T) {
+	e := WithThresholds(Local{}, 0.9, 0)
+	if m, w := e.Thresholds(); m != 0.9 || w != 0.58 {
+		t.Fatalf("thresholds = %v %v", m, w)
+	}
+	if e.Name() != (Local{}).Name() || e.Dim() != (Local{}).Dim() {
+		t.Fatal("wrapper must keep name and dim")
+	}
+	if m, w := WithThresholds(Local{}, 0, 0.3).Thresholds(); m != 0.8 || w != 0.3 {
+		t.Fatalf("thresholds = %v %v", m, w)
+	}
+}

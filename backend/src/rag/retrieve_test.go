@@ -98,6 +98,58 @@ func TestHybridSearch(t *testing.T) {
 	}
 }
 
+// 召回方式和向量权重（评测对照用）：keyword 不调向量；vector 不做关键词召回、分数就是相似度；hybrid 的权重可调，默认值不变。
+func TestRetrieverScoringModes(t *testing.T) {
+	st := memstore.New()
+	ids := loadCorpus(t, st)
+	ctx := context.Background()
+	battery := chunkOf(t, st, ids["vista_battery"], 0)
+	camera := chunkOf(t, st, ids["vista_camera"], 0)
+	vec := &fakeVector{hits: []rag.VectorHit{{ChunkID: battery, Score: 0.6}, {ChunkID: camera, Score: 0.5}}}
+	q := rag.Query{Text: "长焦 演唱会", TopK: 5}
+	base := rag.NewRetriever(st, vec, nil)
+
+	kw, err := base.WithScoring(rag.Scoring{Mode: rag.RecallKeyword}).Search(ctx, q)
+	if err != nil || kw.Mode != rag.RecallKeyword || len(kw.Citations) == 0 || kw.Citations[0].ChunkID != camera {
+		t.Fatalf("keyword mode = %+v %v", kw, err)
+	}
+	for _, c := range kw.Citations {
+		if c.ChunkID == battery || slices.Contains(c.MatchedBy, "vector") {
+			t.Fatalf("keyword mode used vector hit: %+v", c)
+		}
+	}
+
+	// 只用向量：分数就是相似度，关键词强命中的影像说明（0.5）排在电池说明（0.6）之后
+	vo, err := base.WithScoring(rag.Scoring{Mode: rag.RecallVector}).Search(ctx, q)
+	if err != nil || vo.Mode != rag.RecallVector || len(vo.Citations) != 2 || vo.Citations[0].ChunkID != battery || vo.Citations[0].Score != 0.6 ||
+		vo.Citations[1].ChunkID != camera || vo.Citations[1].Score != 0.5 {
+		t.Fatalf("vector mode = %+v %v", vo, err)
+	}
+
+	// 混合：默认 0.35 时向量单独召回的分块得 0.35×0.6 = 0.21；权重 0.5 时得 0.3。
+	score := func(r *rag.Retriever) float64 {
+		res, err := r.Search(ctx, q)
+		if err != nil || res.Mode != rag.RecallHybrid {
+			t.Fatalf("hybrid = %+v %v", res, err)
+		}
+		for _, c := range res.Citations {
+			if c.ChunkID == battery {
+				return c.Score
+			}
+		}
+		return 0
+	}
+	if got := score(base); got != 0.21 {
+		t.Fatalf("default hybrid score = %v", got)
+	}
+	if got := score(base.WithScoring(rag.Scoring{VectorWeight: 0.5})); got != 0.3 {
+		t.Fatalf("weighted hybrid score = %v", got)
+	}
+	if got := score(base); got != 0.21 {
+		t.Fatalf("WithScoring must not change the original: %v", got)
+	}
+}
+
 func TestVectorFailureFallsBackToKeyword(t *testing.T) {
 	st := memstore.New()
 	loadCorpus(t, st)

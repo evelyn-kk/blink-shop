@@ -14,6 +14,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -42,8 +43,27 @@ type EmbedOptions struct {
 
 // OpenAIEmbedder 调用 POST {base}/embeddings。
 type OpenAIEmbedder struct {
-	opts EmbedOptions
-	http *http.Client
+	opts                           EmbedOptions
+	http                           *http.Client
+	calls, requests, texts, tokens atomic.Int64
+}
+
+// EmbedUsage 是累计用量：Embed 调用次数、HTTP 请求数（按批）、文本条数和服务端返回的 token 数（usage.total_tokens）。
+type EmbedUsage struct {
+	Calls    int64 `json:"calls"`
+	Requests int64 `json:"requests"`
+	Texts    int64 `json:"texts"`
+	Tokens   int64 `json:"tokens"`
+}
+
+// Sub 返回 u − before（同一个 Embedder 两次快照之间的用量）。
+func (u EmbedUsage) Sub(before EmbedUsage) EmbedUsage {
+	return EmbedUsage{Calls: u.Calls - before.Calls, Requests: u.Requests - before.Requests, Texts: u.Texts - before.Texts, Tokens: u.Tokens - before.Tokens}
+}
+
+// Usage 返回本客户端创建以来成功调用的累计用量（评测算成本用）。
+func (e *OpenAIEmbedder) Usage() EmbedUsage {
+	return EmbedUsage{Calls: e.calls.Load(), Requests: e.requests.Load(), Texts: e.texts.Load(), Tokens: e.tokens.Load()}
 }
 
 // NewOpenAIEmbedder 创建客户端；APIKey 或 Model 为空、维度不合法时返回 nil（表示未配置）。
@@ -83,6 +103,7 @@ func (e *OpenAIEmbedder) Embed(ctx context.Context, texts []string) (_ [][]float
 		}
 		out = append(out, vecs...)
 	}
+	e.calls.Add(1)
 	return out, nil
 }
 
@@ -117,6 +138,9 @@ func (e *OpenAIEmbedder) batch(ctx context.Context, texts []string) ([][]float32
 			Index     int       `json:"index"`
 			Embedding []float32 `json:"embedding"`
 		} `json:"data"`
+		Usage struct {
+			TotalTokens int64 `json:"total_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, fmt.Errorf("embedding: bad response: %w", err)
@@ -136,6 +160,9 @@ func (e *OpenAIEmbedder) batch(ctx context.Context, texts []string) ([][]float32
 			return nil, fmt.Errorf("embedding: missing vector %d", i)
 		}
 	}
+	e.requests.Add(1)
+	e.texts.Add(int64(len(texts)))
+	e.tokens.Add(parsed.Usage.TotalTokens)
 	return out, nil
 }
 

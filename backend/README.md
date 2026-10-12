@@ -658,7 +658,18 @@ go run ./cmd/eval -suite=images -image-embedder=env       # 用 IMAGE_EMBEDDING_
 go run ./cmd/eval -suite=agent -agent-cases=../quality/data/eval/agent_adversarial.jsonl  # 越权 / 对抗集
 go run ./cmd/eval -suite=agent -llm=env                   # 真实模型（AI_BASE_URL / AI_API_KEY），会产生费用
 go run ./cmd/eval -suite=intent -llm=env -react=false     # 只开模型规划
+MILVUS_ADDR=127.0.0.1:19530 go run ./cmd/eval -suite=rag -vector=env -recall=vector \
+  -rag-cases=../quality/data/eval/rag_paraphrase_holdout.jsonl  # 召回方式对照（keyword / vector / hybrid）
 ```
+
+**召回方式对照**（`-recall`，默认接了向量时 `hybrid`、否则 `keyword`）：知识检索的 `vector` 只用向量召回、分数就是相似度；商品搜索的 `vector`
+关掉关键词召回、规则打分不变（`ProductOptions.Recall`）。`-vector-weight`（知识检索混合打分的向量权重，默认 0.35）和 `-vector-strong-sim`
+（商品向量相似度可直接推荐的阈值，默认 0.78）、`-image-match` / `-image-weak`（覆盖图片 Embedder 的阈值）只用于敏感性对照和标定，线上默认值不变。
+接了向量时报告记 Embedding 用量：`embed_index_*`（建索引）和 `embed_query_*`（检索）的调用数、请求数、文本数、token（服务端 `usage.total_tokens`）；
+知识检索另记每条检索耗时（`search_p50_ms` / `search_p95_ms`，逐条在 `detail.search_ms`），图片评测记每张图 Embedding 耗时（`embed_query_p50_ms`）
+和逐条前几名的分数（`detail.items`，用于按分布标定阈值）。端到端套件接了 `-vector` 时，商品和知识检索都走向量（种子数据开始前写一次索引）。
+`rag_paraphrase_holdout.jsonl`（44 条）是改写留出集：把知识问题换成与期望文档几乎不重字的说法（`quality/tools/paraphrase_overlap.py` 核对二元组重合率 ≤ 20%），
+只用来衡量向量召回的收益，不针对它调规则、权重或阈值。
 
 **真实模型评测**（`-llm=env`）：与线上同一个运行器，只是把 `AI_*` 配置的客户端和下面的开关交给它，不加熔断（要看到每一次失败）。
 开关：`-planner` / `-react`（默认开）、`-rerank` / `-summary`（默认关）、`-planner-model` / `-agent-model`（默认 `AI_PLANNER_MODEL` /

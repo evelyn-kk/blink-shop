@@ -46,7 +46,7 @@ func TestOpenAIEmbedderBatchesAndValidates(t *testing.T) {
 		for i := len(req.Input) - 1; i >= 0; i-- { // 乱序返回，按 index 归位
 			data = append(data, item{Index: i, Embedding: []float32{float32(len(req.Input[i])), 0, 1}})
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data, "usage": map[string]int{"prompt_tokens": 5 * len(req.Input), "total_tokens": 5 * len(req.Input)}})
 	}))
 	defer srv.Close()
 	if NewOpenAIEmbedder(EmbedOptions{APIKey: "", Model: "m", Dim: 3}) != nil || NewOpenAIEmbedder(EmbedOptions{APIKey: "k", Model: "m"}) != nil {
@@ -60,6 +60,17 @@ func TestOpenAIEmbedderBatchesAndValidates(t *testing.T) {
 	if e.Name() != "openai-compatible:emb:3" {
 		t.Fatal(e.Name())
 	}
+	// 用量：1 次 Embed、按批 2 个请求、3 条文本、服务端返回的 token 累加
+	before := e.Usage()
+	if want := (EmbedUsage{Calls: 1, Requests: 2, Texts: 3, Tokens: 15}); before != want {
+		t.Fatalf("usage = %+v, want %+v", before, want)
+	}
+	if _, err := e.Embed(context.Background(), []string{"d"}); err != nil {
+		t.Fatal(err)
+	}
+	if d := e.Usage().Sub(before); d != (EmbedUsage{Calls: 1, Requests: 1, Texts: 1, Tokens: 5}) {
+		t.Fatalf("usage delta = %+v", d)
+	}
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"index": 0, "embedding": []float32{1}}}})
 	}))
@@ -67,6 +78,9 @@ func TestOpenAIEmbedderBatchesAndValidates(t *testing.T) {
 	e2 := NewOpenAIEmbedder(EmbedOptions{BaseURL: bad.URL, APIKey: "k", Model: "emb", Dim: 3})
 	if _, err := e2.Embed(context.Background(), []string{"x"}); err == nil || !strings.Contains(err.Error(), "dim") {
 		t.Fatalf("dim check: %v", err)
+	}
+	if u := e2.Usage(); u != (EmbedUsage{}) {
+		t.Fatalf("failed call must not count: %+v", u)
 	}
 	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(503) }))
 	defer down.Close()

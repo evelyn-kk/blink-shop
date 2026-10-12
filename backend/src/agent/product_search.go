@@ -159,7 +159,8 @@ func (r *Registry) searchProducts(ctx context.Context, args map[string]any) (Pro
 		}
 		cands = append(cands, c)
 	}
-	sortCandidates(cands)
+	strongSim := r.vectorStrongSim()
+	sortCandidates(cands, strongSim)
 
 	// 3. 可选模型重排（只能在规则候选里调整顺序，不能引入新商品）
 	if st := r.settings(ctx); st.RerankEnabled && r.deps.LLM != nil && len(cands) > 1 {
@@ -194,7 +195,7 @@ func (r *Registry) searchProducts(ctx context.Context, args map[string]any) (Pro
 			weak = append(weak, c)
 			continue
 		}
-		if !c.conflict && (c.strong || c.vector >= vectorStrongSim) {
+		if !c.conflict && (c.strong || c.vector >= strongSim) {
 			ok = append(ok, c)
 		} else {
 			weak = append(weak, c)
@@ -276,13 +277,21 @@ func coverage(term, text string) float64 {
 	return float64(hit) / float64(len(grams))
 }
 
-func sortCandidates(cands []*candidate) {
+// vectorStrongSim 返回“向量相似度够高、可以直接推荐”的阈值：Deps.VectorStrongSim 未设置时用默认 0.78。
+func (r *Registry) vectorStrongSim() float64 {
+	if s := r.deps.VectorStrongSim; s > 0 && s <= 1 {
+		return s
+	}
+	return vectorStrongSim
+}
+
+func sortCandidates(cands []*candidate, strongSim float64) {
 	sort.SliceStable(cands, func(i, j int) bool {
 		a, b := cands[i], cands[j]
 		if a.conflict != b.conflict {
 			return !a.conflict
 		}
-		sa, sb := a.strong || a.vector >= vectorStrongSim, b.strong || b.vector >= vectorStrongSim
+		sa, sb := a.strong || a.vector >= strongSim, b.strong || b.vector >= strongSim
 		if sa != sb {
 			return sa
 		}

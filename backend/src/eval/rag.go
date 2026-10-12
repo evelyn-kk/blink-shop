@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/rag"
+	"github.com/evelyn-kk/blink-shop/backend/src/vector"
 )
 
 // RAGCase 是一条检索用例：expect 中的文档（语料 key 或种子文档 ID）必须出现在前 k 条；absent 不能出现；expect_none 表示不应返回结果。
@@ -30,8 +31,38 @@ type RAGOptions struct {
 	Corpus  string // 固定语料 JSON
 	K       int
 	Vector  rag.VectorIndex
+	// Recall 是召回方式：keyword / vector / hybrid；空表示有 Vector 时 hybrid、否则 keyword。vector / hybrid 需要 Vector。
+	Recall string
+	// VectorWeight 是混合打分的向量权重，0 表示线上默认（0.35）。
+	VectorWeight float64
+	// Usage 返回 Embedding 累计用量（可为 nil）；报告记建索引和检索两段的调用数与 token。
+	Usage   func() vector.EmbedUsage
 	Version string
 	Config  map[string]string
+}
+
+// recallMode 校验并补全召回方式。
+func recallMode(recall string, hasVector bool) (string, error) {
+	switch recall {
+	case "":
+		if hasVector {
+			return rag.RecallHybrid, nil
+		}
+		return rag.RecallKeyword, nil
+	case rag.RecallKeyword:
+		return recall, nil
+	case rag.RecallVector, rag.RecallHybrid:
+		if !hasVector {
+			return "", fmt.Errorf("召回方式 %s 需要向量索引（-vector）", recall)
+		}
+		return recall, nil
+	}
+	return "", fmt.Errorf("未知的召回方式 %q（keyword / vector / hybrid）", recall)
+}
+
+// writeUsage 把 Embedding 用量写进指标：prefix_calls / _requests / _texts / _tokens。
+func writeUsage(m map[string]float64, prefix string, u vector.EmbedUsage) {
+	m[prefix+"_calls"], m[prefix+"_requests"], m[prefix+"_texts"], m[prefix+"_tokens"] = float64(u.Calls), float64(u.Requests), float64(u.Texts), float64(u.Tokens)
 }
 
 // RunRAG 在“开发种子 + 固定语料”上跑检索用例，指标：recall@k、MRR、held-out 召回、空结果正确率。
@@ -42,8 +73,13 @@ func RunRAG(ctx context.Context, o RAGOptions) (Report, error) {
 	for k, v := range o.Config {
 		rep.Config[k] = v
 	}
-	if o.Vector != nil {
-		rep.Config["mode"] = "hybrid"
+	mode, err := recallMode(o.Recall, o.Vector != nil)
+	if err != nil {
+		return rep, err
+	}
+	rep.Config["mode"] = mode
+	if mode == rag.RecallHybrid && o.VectorWeight > 0 {
+		rep.Config["vector_weight"] = strconv.FormatFloat(o.VectorWeight, 'f', -1, 64)
 	}
 	cases, err := readJSONL[RAGCase](o.Cases)
 	if err != nil {
@@ -57,23 +93,42 @@ func RunRAG(ctx context.Context, o RAGOptions) (Report, error) {
 	if err != nil {
 		return rep, err
 	}
-	if o.Vector != nil {
+	usage := func() vector.EmbedUsage {
+		if o.Usage == nil {
+			return vector.EmbedUsage{}
+		}
+		return o.Usage()
+	}
+	u0 := usage()
+	if o.Vector != nil && mode != rag.RecallKeyword {
 		// 语料是用不带向量的入库流程写入的，评测前补写向量
 		if err := indexCorpus(ctx, st, o.Vector); err != nil {
 			return rep, err
 		}
 	}
+	u1 := usage()
 	keyOf := map[string]string{}
 	for k, id := range ids {
 		keyOf[id] = k
 	}
-	r := rag.NewRetriever(st, o.Vector, nil)
-	expected, found, heldExp, heldFound, noneCases, noneOK := 0, 0, 0, 0, 0, 0
+	vec := o.Vector
+	if mode == rag.RecallKeyword {
+		vec = nil
+	}
+	r := rag.NewRetriever(st, vec, nil).WithScoring(rag.Scoring{Mode: mode, VectorWeight: o.VectorWeight})
+	expected, found, heldExp, heldFound, noneCases, noneOK, vectorErrors := 0, 0, 0, 0, 0, 0, 0
 	var rr float64
+	var lat []time.Duration
 	for _, c := range cases {
+		t0 := time.Now()
 		res, err := r.Search(ctx, rag.Query{Text: c.Query, MerchantIDs: c.MerchantIDs, DocTypes: c.DocTypes, TopK: o.K})
 		if err != nil {
 			return rep, err
+		}
+		took := time.Since(t0)
+		lat = append(lat, took)
+		if res.VectorError != "" {
+			vectorErrors++
 		}
 		var got, chunkIDs []string
 		for _, cit := range res.Citations {
@@ -118,7 +173,24 @@ func RunRAG(ctx context.Context, o RAGOptions) (Report, error) {
 				problems = append(problems, "citation 的 chunk_id 不能全部回查")
 			}
 		}
-		rep.record(ragGroup(c), Failure{ID: c.ID, Query: c.Query, Problems: problems, Got: got})
+		if res.VectorError != "" {
+			problems = append(problems, "向量检索失败："+res.VectorError)
+		}
+		var scores []float64
+		for _, cit := range res.Citations {
+			scores = append(scores, cit.Score)
+		}
+		rep.recordDetail(ragGroup(c), Failure{ID: c.ID, Query: c.Query, Problems: problems, Got: got},
+			map[string]any{"search_ms": float64(took.Microseconds()) / 1000, "got": got, "scores": scores})
+	}
+	rep.Metrics["search_p50_ms"] = float64(percentile(lat, 0.50).Microseconds()) / 1000
+	rep.Metrics["search_p95_ms"] = float64(percentile(lat, 0.95).Microseconds()) / 1000
+	if o.Usage != nil {
+		writeUsage(rep.Metrics, "embed_index", u1.Sub(u0))
+		writeUsage(rep.Metrics, "embed_query", usage().Sub(u1))
+	}
+	if mode != rag.RecallKeyword {
+		rep.Metrics["vector_errors"] = float64(vectorErrors)
 	}
 	if expected > 0 {
 		rep.Metrics["recall_at_k"] = round(float64(found) / float64(expected))

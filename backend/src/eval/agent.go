@@ -53,6 +53,10 @@ type AgentOptions struct {
 	Now     func() time.Time
 	// Model 不为 nil 时用模型跑规划 / 工具循环（与线上同一运行器），并统计调用、token、回退和商品卡出处。
 	Model *ModelConfig
+	// ProductIndex / Vector 是商品和知识的向量索引（可为 nil，表示只用关键词）。种子数据的商品和分块 ID 固定，
+	// 两个索引在开始前写一次种子数据，所有用例共用；每条用例的 Store 仍是新的，检索结果照样按它的可见性过滤。
+	ProductIndex rag.ProductIndex
+	Vector       rag.VectorIndex
 }
 
 var productIDRe = regexp.MustCompile(`\bp_seed_[a-z0-9_]+\b`)
@@ -72,6 +76,18 @@ func RunAgent(ctx context.Context, o AgentOptions) (Report, error) {
 	o.Model.describe(rep.Config)
 	if o.Model != nil {
 		rep.Config["runner"] = "rule+model"
+	}
+	if o.ProductIndex != nil || o.Vector != nil {
+		rep.Config["recall"] = "keyword+vector"
+	}
+	if o.Vector != nil {
+		st, err := newSeededStore(ctx)
+		if err != nil {
+			return rep, err
+		}
+		if err := indexCorpus(ctx, st, o.Vector); err != nil {
+			return rep, err
+		}
 	}
 	var stats modelStats
 	var audit cardAudit
@@ -96,8 +112,8 @@ func RunAgent(ctx context.Context, o AgentOptions) (Report, error) {
 		if o.Model != nil {
 			mt = newMeter(o.Model.LLM)
 		}
-		runner := agent.NewRuleRunner(o.Model.deps(agent.Deps{Store: st, Shop: sh, Retriever: rag.NewRetriever(st, nil, nil),
-			Risk: risk.Static("违法", "违禁", "假货", "绕过风控"), Now: now}, mt))
+		runner := agent.NewRuleRunner(o.Model.deps(agent.Deps{Store: st, Shop: sh, Retriever: rag.NewRetriever(st, o.Vector, nil),
+			ProductIndex: o.ProductIndex, Risk: risk.Static("违法", "违禁", "假货", "绕过风控"), Now: now}, mt))
 		visible, err := visibleProducts(ctx, st)
 		if err != nil {
 			return rep, err

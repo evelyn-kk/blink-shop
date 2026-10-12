@@ -163,6 +163,24 @@ func TestProductVectorRecall(t *testing.T) {
 	_ = domain.StockInStock
 }
 
+// 向量“强相似”阈值可由 Deps 覆盖（评测做敏感性对照）；默认 0.78 不变。
+func TestProductVectorStrongSimOverride(t *testing.T) {
+	e := newEnv(t)
+	deps := e.runner.deps
+	deps.ProductIndex = &fakeProductIndex{hits: []rag.ProductHit{{ProductID: "p_seed_lamp", Score: 0.7}}}
+	e.runner = NewRuleRunner(deps)
+	e.reg = e.runner.Registry()
+	if res := e.search(t, map[string]any{"query": "夜里看书"}); res.Relevance != RelevanceWeak || ids(res) != "p_seed_lamp" {
+		t.Fatalf("0.7 < default 0.78 should be weak: %s %s", res.Relevance, ids(res))
+	}
+	deps.VectorStrongSim = 0.65
+	e.runner = NewRuleRunner(deps)
+	e.reg = e.runner.Registry()
+	if res := e.search(t, map[string]any{"query": "夜里看书"}); res.Relevance != RelevanceOK || ids(res) != "p_seed_lamp" {
+		t.Fatalf("0.7 >= 0.65 should be ok: %s %s", res.Relevance, ids(res))
+	}
+}
+
 // 检索词带品类名词时，只靠修饰词命中别的品类不算可靠推荐（真实模型规划把“便携音箱”拆成“便携 音箱”后，曾把降噪耳机当可靠结果推荐）。
 func TestProductSearchTypeAnchor(t *testing.T) {
 	e := newEnv(t)

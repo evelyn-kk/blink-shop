@@ -56,3 +56,22 @@ func Decode(data []byte) (image.Image, string, error) {
 	}
 	return img, format, nil
 }
+
+// WithThresholds 返回阈值被覆盖的 e（0 表示沿用 e 自己的）。只用于评测标定：线上阈值由 Embedder 自己决定。
+func WithThresholds(e Embedder, match, weak float64) Embedder {
+	m, w := e.Thresholds()
+	if match > 0 {
+		m = match
+	}
+	if weak > 0 {
+		w = weak
+	}
+	return thresholdEmbedder{Embedder: e, match: m, weak: w}
+}
+
+type thresholdEmbedder struct {
+	Embedder
+	match, weak float64
+}
+
+func (t thresholdEmbedder) Thresholds() (float64, float64) { return t.match, t.weak }

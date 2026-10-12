@@ -17,10 +17,9 @@ const (
 	SnippetRunes = 160
 	// MinScore 低于此分数的候选不返回：只命中一个两字片段、和问题关系很弱的分块会被过滤。
 	MinScore = 0.2
-	// 混合检索时关键词分与向量相似度的权重。
-	keywordWeight = 0.65
-	vectorWeight  = 0.35
-	vectorTopN    = 50
+	// 混合检索时向量相似度的默认权重（关键词分的权重为 1 − 它，即 0.65）。
+	vectorWeight = 0.35
+	vectorTopN   = 50
 )
 
 // Query 是一次检索请求。过滤条件为空表示不限制；MerchantIDs 中的空串表示平台资料。
@@ -81,9 +80,40 @@ type VectorIndex interface {
 
 // Retriever 组合关键词召回和（可选的）向量召回，统一打分排序后输出引用。
 type Retriever struct {
-	store  store.Store
-	vector VectorIndex
-	logger *slog.Logger
+	store   store.Store
+	vector  VectorIndex
+	logger  *slog.Logger
+	scoring Scoring
+}
+
+// 召回方式（Scoring.Mode）。线上只用默认的 hybrid（没有配置向量时自动退成 keyword）；keyword / vector 用于评测对照。
+const (
+	RecallHybrid  = "hybrid"
+	RecallKeyword = "keyword"
+	RecallVector  = "vector"
+)
+
+// Scoring 是召回方式和混合权重。零值即线上默认：hybrid，向量权重 0.35。
+type Scoring struct {
+	// Mode：hybrid（关键词 + 向量）/ keyword（忽略向量）/ vector（只用向量召回，分数 = 相似度，需要 VectorIndex）。
+	Mode string
+	// VectorWeight 是混合打分中向量相似度的权重（关键词权重 = 1 − VectorWeight）；0 表示默认 0.35。
+	VectorWeight float64
+}
+
+// WithScoring 返回使用 s 的检索器副本（评测对照召回方式和权重用）。
+func (r *Retriever) WithScoring(s Scoring) *Retriever {
+	cp := *r
+	cp.scoring = s
+	return &cp
+}
+
+func (r *Retriever) weights() (kw, vec float64) {
+	vec = vectorWeight
+	if w := r.scoring.VectorWeight; w > 0 && w < 1 {
+		vec = w
+	}
+	return 1 - vec, vec
 }
 
 // NewRetriever 创建检索器；vector 为 nil 表示只用关键词。
@@ -120,26 +150,34 @@ func (r *Retriever) Search(ctx context.Context, q Query) (Result, error) {
 		return res, nil
 	}
 
-	hits, err := r.store.SearchKnowledge(ctx, store.KnowledgeQuery{
-		Terms: termTexts(terms), MerchantIDs: q.MerchantIDs, ProductIDs: q.ProductIDs, DocTypes: q.DocTypes,
-	})
-	if err != nil {
-		return Result{}, err
+	mode := r.scoring.Mode
+	if mode == "" {
+		mode = RecallHybrid
 	}
 	cands := map[string]*candidate{}
-	for _, h := range hits {
-		cands[h.ChunkID] = &candidate{hit: h, matchedBy: []string{"keyword"}}
+	if mode != RecallVector {
+		hits, err := r.store.SearchKnowledge(ctx, store.KnowledgeQuery{
+			Terms: termTexts(terms), MerchantIDs: q.MerchantIDs, ProductIDs: q.ProductIDs, DocTypes: q.DocTypes,
+		})
+		if err != nil {
+			return Result{}, err
+		}
+		for _, h := range hits {
+			cands[h.ChunkID] = &candidate{hit: h, matchedBy: []string{"keyword"}}
+		}
 	}
 
-	if r.vector != nil {
+	if r.vector != nil && mode != RecallKeyword {
 		if err := r.addVectorCandidates(ctx, q, terms, cands); err != nil {
 			if ctx.Err() != nil {
 				return Result{}, ctx.Err()
 			}
 			r.logger.WarnContext(ctx, "vector search failed, fallback to keyword", "error", err)
 			res.VectorError = "向量检索暂不可用，已使用关键词检索"
+		} else if mode == RecallVector {
+			res.Mode = RecallVector
 		} else {
-			res.Mode = "hybrid"
+			res.Mode = RecallHybrid
 		}
 	}
 
@@ -147,12 +185,16 @@ func (r *Retriever) Search(ctx context.Context, q Query) (Result, error) {
 	for _, c := range cands {
 		c.keyword = keywordScore(q.Text, terms, idf, c.hit)
 	}
+	kw, vw := r.weights()
 	var ranked []Citation
 	for _, c := range cands {
 		score := c.keyword
-		if res.Mode == "hybrid" {
+		switch res.Mode {
+		case RecallHybrid:
 			// 向量只能加分：相似度低时不能把本来够格的关键词结果拉到阈值以下
-			score = math.Max(c.keyword, keywordWeight*c.keyword+vectorWeight*c.vector)
+			score = math.Max(c.keyword, kw*c.keyword+vw*c.vector)
+		case RecallVector:
+			score = c.vector
 		}
 		if score < MinScore {
 			continue
