@@ -4,6 +4,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -30,6 +31,33 @@ type Request struct {
 type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
+	// CachedPromptTokens 是命中服务端前缀缓存的输入 token（计入 PromptTokens，按缓存价计费）：
+	// DeepSeek 返回 prompt_cache_hit_tokens，OpenAI 返回 prompt_tokens_details.cached_tokens。
+	CachedPromptTokens int `json:"cached_prompt_tokens,omitempty"`
+}
+
+// UnmarshalJSON 兼容两种缓存字段。
+func (u *Usage) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		PromptTokens        int  `json:"prompt_tokens"`
+		CompletionTokens    int  `json:"completion_tokens"`
+		CachedPromptTokens  int  `json:"cached_prompt_tokens"`
+		CacheHit            *int `json:"prompt_cache_hit_tokens"`
+		PromptTokensDetails *struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	u.PromptTokens, u.CompletionTokens, u.CachedPromptTokens = raw.PromptTokens, raw.CompletionTokens, raw.CachedPromptTokens
+	switch {
+	case raw.CacheHit != nil:
+		u.CachedPromptTokens = *raw.CacheHit
+	case raw.PromptTokensDetails != nil:
+		u.CachedPromptTokens = raw.PromptTokensDetails.CachedTokens
+	}
+	return nil
 }
 
 // Response 是补全结果。

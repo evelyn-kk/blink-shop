@@ -52,11 +52,11 @@ func (m *ModelConfig) deps(d agent.Deps, mt *meter) agent.Deps {
 
 // meter 包住 Provider，统计一条用例里的模型调用次数、token、耗时和错误。
 type meter struct {
-	inner                                         llm.Provider
-	mu                                            sync.Mutex
-	calls, errors, promptTokens, completionTokens int
-	latencies                                     []time.Duration
-	models                                        map[string]int
+	inner                                                       llm.Provider
+	mu                                                          sync.Mutex
+	calls, errors, promptTokens, completionTokens, cachedTokens int
+	latencies                                                   []time.Duration
+	models                                                      map[string]int
 }
 
 func newMeter(p llm.Provider) *meter {
@@ -74,6 +74,7 @@ func (m *meter) record(req llm.Request, resp llm.Response, err error, d time.Dur
 	m.latencies = append(m.latencies, d)
 	m.promptTokens += resp.Usage.PromptTokens
 	m.completionTokens += resp.Usage.CompletionTokens
+	m.cachedTokens += resp.Usage.CachedPromptTokens
 	if err != nil {
 		m.errors++
 	}
@@ -97,6 +98,7 @@ func (m *meter) Stream(ctx context.Context, req llm.Request, onDelta func(string
 type modelStats struct {
 	cases                             int
 	calls, errors, prompt, completion int
+	cached                            int
 	callLatency, caseLatency          []time.Duration
 	plannerFallbacks, reactFallbacks  int
 	reactFallbackReasons              map[string]int
@@ -151,11 +153,13 @@ func (s *modelStats) add(m *meter, caseLatency time.Duration, traces []traceRec)
 	s.errors += m.errors
 	s.prompt += m.promptTokens
 	s.completion += m.completionTokens
+	s.cached += m.cachedTokens
 	s.callLatency = append(s.callLatency, m.latencies...)
 	for k, v := range m.models {
 		s.models[k] += v
 	}
 	detail["model_calls"], detail["prompt_tokens"], detail["completion_tokens"], detail["model_errors"] = m.calls, m.promptTokens, m.completionTokens, m.errors
+	detail["cached_prompt_tokens"] = m.cachedTokens
 	return detail
 }
 
@@ -172,6 +176,7 @@ func (s *modelStats) write(rep *Report, withModel bool) {
 	rep.Metrics["model_calls_per_case"] = round(float64(s.calls) / n)
 	rep.Metrics["prompt_tokens"] = float64(s.prompt)
 	rep.Metrics["completion_tokens"] = float64(s.completion)
+	rep.Metrics["cached_prompt_tokens"] = float64(s.cached)
 	rep.Metrics["tokens_per_case"] = round(float64(s.prompt+s.completion) / n)
 	rep.Metrics["model_call_p50_ms"] = float64(percentile(s.callLatency, 0.50).Milliseconds())
 	rep.Metrics["model_call_p95_ms"] = float64(percentile(s.callLatency, 0.95).Milliseconds())
