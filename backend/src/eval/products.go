@@ -42,6 +42,8 @@ type ProductOptions struct {
 	Version      string
 	Config       map[string]string
 	Now          func() time.Time
+	// Model 不为 nil 时用模型跑规划 / 工具循环 / 重排（与线上同一运行器），并统计调用、token 和回退。
+	Model *ModelConfig
 }
 
 // RunProducts 跑商品搜索用例。指标：通过率、top1 准确率、无结果正确率（不推荐不相关商品）、负向约束正确率（排除词 / 价格 / 冲突）。
@@ -54,6 +56,7 @@ func RunProducts(ctx context.Context, o ProductOptions) (Report, error) {
 	if o.ProductIndex != nil {
 		rep.Config["recall"] = "keyword+vector"
 	}
+	o.Model.describe(rep.Config)
 	cases, err := readJSONL[ProductCase](o.Cases)
 	if err != nil {
 		return rep, err
@@ -68,8 +71,14 @@ func RunProducts(ctx context.Context, o ProductOptions) (Report, error) {
 		fixed := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
 		now = func() time.Time { return fixed }
 	}
-	runner := agent.NewRuleRunner(agent.Deps{Store: st, Shop: shop.New(st, now, 0), Retriever: rag.NewRetriever(st, nil, nil),
-		Risk: risk.Static("违法", "违禁", "假货", "绕过风控"), ProductIndex: o.ProductIndex, Now: now})
+	base := agent.Deps{Store: st, Shop: shop.New(st, now, 0), Retriever: rag.NewRetriever(st, nil, nil),
+		Risk: risk.Static("违法", "违禁", "假货", "绕过风控"), ProductIndex: o.ProductIndex, Now: now}
+	visible, err := visibleProducts(ctx, st)
+	if err != nil {
+		return rep, err
+	}
+	var stats modelStats
+	var audit cardAudit
 	topCases, topOK, noneCases, noneOK, negCases, negOK := 0, 0, 0, 0, 0, 0
 	for i, c := range cases {
 		account := seed.User2ID
@@ -77,13 +86,22 @@ func RunProducts(ctx context.Context, o ProductOptions) (Report, error) {
 		if err != nil {
 			return rep, err
 		}
+		var o2 *meter
+		if o.Model != nil {
+			o2 = newMeter(o.Model.LLM)
+		}
+		runner := agent.NewRuleRunner(o.Model.deps(base, o2))
 		var last *capture
+		var traces []traceRec
+		caseStart := time.Now()
 		for j, msg := range append(append([]string{}, c.History...), c.Query) {
 			last, err = runOnce(ctx, st, runner, account, cs.SessionID, fmt.Sprintf("eval-%d-%d", i, j), msg)
 			if err != nil {
 				return rep, fmt.Errorf("%s: %w", c.ID, err)
 			}
+			traces = append(traces, last.traces...)
 		}
+		detail := stats.add(o2, time.Since(caseStart), traces)
 		rec := last.recommended()
 		var problems []string
 		if c.ExpectTop != "" {
@@ -127,8 +145,13 @@ func RunProducts(ctx context.Context, o ProductOptions) (Report, error) {
 				problems = append(problems, "回答应包含“"+want+"”")
 			}
 		}
-		rep.record(firstTag(c.Tags), Failure{ID: c.ID, Query: c.Query, Problems: problems, Got: rec})
+		if bad := audit.check(last.blocks, traces, visible); len(bad) > 0 {
+			detail["bad_cards"] = bad
+		}
+		rep.recordDetail(firstTag(c.Tags), Failure{ID: c.ID, Query: c.Query, Problems: problems, Got: rec}, detail)
 	}
+	stats.write(&rep, o.Model != nil)
+	audit.write(&rep)
 	if topCases > 0 {
 		rep.Metrics["top1_accuracy"] = round(float64(topOK) / float64(topCases))
 	}

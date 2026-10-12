@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/evelyn-kk/blink-shop/backend/src/rag"
@@ -186,10 +187,14 @@ func (p *pendingBlocks) action(target, label string, params map[string]string) {
 	p.actions = append(p.actions, blockAction(target, label, params))
 }
 
-// emit 按固定顺序输出全部块。
+// emit 按固定顺序输出全部块。对比意图下商品输出为对比表（与规则路径一致），只放用户点名的商品。
 func (p *pendingBlocks) emit(s *session) {
 	if len(p.products) > 0 {
-		s.block(blockProducts("为你找到的商品", p.products))
+		if cards := compareCards(s.plan, p.products); len(cards) >= 2 {
+			s.block(blockComparison(cards))
+		} else {
+			s.block(blockProducts("为你找到的商品", p.products))
+		}
 	}
 	if len(p.citations) > 0 {
 		s.block(blockCitations(p.citations))
@@ -220,4 +225,32 @@ func (p *pendingBlocks) emit(s *session) {
 	for _, a := range p.actions {
 		s.block(a)
 	}
+}
+
+// compareCards 在对比意图下从工具返回的商品里挑出要对比的：先按规划里的商品名逐个匹配（名称互相包含，忽略大小写和空白），
+// 点名匹配不到两件时取搜索结果的前三件。不是对比意图返回 nil。
+func compareCards(plan Plan, products []ProductCard) []ProductCard {
+	if plan.Intent != IntentProductCompare || len(products) < 2 {
+		return nil
+	}
+	var out []ProductCard
+	used := map[string]bool{}
+	for _, name := range plan.Names {
+		n := compact(name)
+		if n == "" {
+			continue
+		}
+		for _, c := range products {
+			cn := compact(c.Name)
+			if !used[c.ProductID] && (strings.Contains(cn, n) || strings.Contains(n, cn)) {
+				used[c.ProductID] = true
+				out = append(out, c)
+				break
+			}
+		}
+	}
+	if len(out) >= 2 {
+		return out
+	}
+	return products[:min(3, len(products))]
 }

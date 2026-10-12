@@ -62,6 +62,8 @@ type CaseResult struct {
 	ID     string `json:"id"`
 	Group  string `json:"group"`
 	Passed bool   `json:"passed"`
+	// Detail 是可选的逐条明细（模型调用、token、耗时、回退原因、有问题的商品卡），纯规则评测为空。
+	Detail map[string]any `json:"detail,omitempty"`
 }
 
 // Failure 是一条失败样本。
@@ -74,7 +76,10 @@ type Failure struct {
 }
 
 // record 记一条用例：f.Problems 为空即通过，否则作为失败样本记下。
-func (r *Report) record(group string, f Failure) {
+func (r *Report) record(group string, f Failure) { r.recordDetail(group, f, nil) }
+
+// recordDetail 同 record，并附上逐条明细。
+func (r *Report) recordDetail(group string, f Failure, detail map[string]any) {
 	if group == "" {
 		group = "default"
 	}
@@ -93,7 +98,7 @@ func (r *Report) record(group string, f Failure) {
 		r.Failures = append(r.Failures, f)
 	}
 	r.Groups[group] = g
-	r.Cases = append(r.Cases, CaseResult{ID: f.ID, Group: group, Passed: passed})
+	r.Cases = append(r.Cases, CaseResult{ID: f.ID, Group: group, Passed: passed, Detail: detail})
 }
 
 // finish 计算通过率和门槛结论；minPass 为 0 时要求全部通过。没有用例的报告算 failed（数据集读空不能当作通过）。

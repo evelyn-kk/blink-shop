@@ -2,9 +2,9 @@
 {"id": "ag_001", "group": "recommend", "query": "推荐一款通勤降噪耳机", "expect_intent": "product_search", "expect_blocks": ["product_list"], "expect_products": ["p_seed_earbuds"], "expect_tools": ["search_products"]}
 {"id": "ag_002", "group": "recommend", "query": "3000 以内拍照好的手机", "expect_intent": "product_search", "expect_products": ["p_seed_nova"], "forbidden_text": ["p_seed_vista"]}
 {"id": "ag_003", "group": "recommend", "query": "想买个护眼台灯给孩子学习用", "expect_intent": "product_search", "expect_products": ["p_seed_lamp"]}
-{"id": "ag_004", "group": "no_inventory", "query": "推荐一台洗衣机", "expect_intent": "product_search", "expect_no_products": true, "expect_text_any": ["没有找到", "暂时没有", "没找到"]}
+{"id": "ag_004", "group": "no_inventory", "query": "推荐一台洗衣机", "expect_intent": "product_search", "expect_no_products": true, "expect_text_any": ["没有找到", "暂时没有", "没找到", "没有搜到", "没搜到", "没有上架"]}
 {"id": "ag_005", "group": "no_inventory", "query": "有没有 50 块以内的降噪耳机", "expect_intent": "product_search", "expect_no_products": true}
-{"id": "ag_006", "group": "unavailable", "query": "推荐一款便携音箱", "forbidden_text": ["p_seed_speaker"], "expect_text_any": ["没有找到", "暂时没有", "没找到", "相近"], "expect_trace": ["retrieval/products/ok"]}
+{"id": "ag_006", "group": "unavailable", "query": "推荐一款便携音箱", "forbidden_text": ["p_seed_speaker"], "expect_text_any": ["没有找到", "暂时没有", "没找到", "没有搜到", "没搜到", "没有上架", "相近"], "expect_trace": ["retrieval/products/ok"]}
 {"id": "ag_007", "group": "unavailable", "query": "快充移动电源有吗", "forbidden_text": ["p_seed_powerbank"]}
 {"id": "ag_008", "group": "unavailable", "query": "Blink Nova 9 还有卖吗", "forbidden_text": ["p_seed_legacy"]}
 {"id": "ag_009", "group": "compare", "query": "对比 Blink Nova 12 和 Blink Vista Pro", "expect_intent": "product_compare", "expect_blocks": ["comparison"], "expect_products": ["p_seed_nova", "p_seed_vista"]}

@@ -367,3 +367,30 @@ func TestFilterFinalAndParseAction(t *testing.T) {
 	}
 	_ = time.Second
 }
+
+// 对比意图走模型时也输出对比表，只放点名的商品（真实模型评测发现：模型多搜了几次，原来会把所有搜到的商品都挂成商品卡、没有对比表）。
+func TestModelReactCompareEmitsComparison(t *testing.T) {
+	e := newEnv(t)
+	mock := &llm.Mock{}
+	e.withModel(mock, settings(false, true))
+	sid := e.newSession(t, seed.User2ID)
+	mock.Then(tool(ToolSearchProducts, `{"query":"Blink Nova 12"}`), tool(ToolSearchProducts, `{"query":"耳机"}`),
+		tool(ToolSearchProducts, `{"query":"Blink Vista Pro"}`), final("Nova 12 更便宜，Vista Pro 拍照更好。"))
+	r := e.run(t, seed.User2ID, sid, "对比 Blink Nova 12 和 Blink Vista Pro")
+	cmp := r.block(BlockComparison)
+	if cmp == nil || r.block(BlockProductList) != nil {
+		t.Fatalf("blocks: %v", r.blockTypes())
+	}
+	if got := strings.Join(productIDs(cmp), ","); got != "p_seed_nova,p_seed_vista" {
+		t.Fatalf("compared: %s", got)
+	}
+	// 不是对比意图：照常是商品卡
+	if compareCards(Plan{Intent: IntentProductSearch}, []ProductCard{{ProductID: "a"}, {ProductID: "b"}}) != nil {
+		t.Fatal("non-compare intent should not build a comparison")
+	}
+	// 点名匹配不到两件：取前三件
+	got := compareCards(Plan{Intent: IntentProductCompare, Names: []string{"不存在"}}, []ProductCard{{ProductID: "a"}, {ProductID: "b"}, {ProductID: "c"}, {ProductID: "d"}})
+	if len(got) != 3 {
+		t.Fatalf("fallback: %v", got)
+	}
+}

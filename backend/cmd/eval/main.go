@@ -5,6 +5,9 @@
 //	go run ./cmd/eval -vector=env           # 用 MILVUS_ADDR + EMBEDDING_* 的真实向量（临时集合，跑完删除）
 //	go run ./cmd/eval -suite=images -image-index=milvus           # 商品图写进 Milvus 临时集合（跑完删除）
 //	go run ./cmd/eval -suite=images -image-embedder=env           # 用 IMAGE_EMBEDDING_* 配置的图片 Embedder（如 dashscope）
+//	go run ./cmd/eval -suite=agent -llm=env                       # 用 AI_* 配置的真实模型跑规划和工具循环（会产生费用）
+//	go run ./cmd/eval -suite=intent -llm=env -react=false          # 只开模型规划
+//	go run ./cmd/eval -suite=agent -agent-cases=../quality/data/eval/agent_adversarial.jsonl -llm=env
 //
 // 任何一个评测集通过率低于 -min-pass 时退出码为 1。
 package main
@@ -20,9 +23,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/evelyn-kk/blink-shop/backend/src/agent"
 	"github.com/evelyn-kk/blink-shop/backend/src/configcenter"
 	"github.com/evelyn-kk/blink-shop/backend/src/eval"
 	"github.com/evelyn-kk/blink-shop/backend/src/imagevector"
+	"github.com/evelyn-kk/blink-shop/backend/src/llm"
 	"github.com/evelyn-kk/blink-shop/backend/src/rag"
 	"github.com/evelyn-kk/blink-shop/backend/src/vector"
 )
@@ -47,6 +52,19 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	minPass := fs.Float64("min-pass", 1, "通过率下限（图片评测用 -image-min-pass）")
 	intentMinPass := fs.Float64("intent-min-pass", eval.DefaultIntentMinPass, "意图评测通过率下限（留出集允许少量没覆盖的说法）")
 	imageMinPass := fs.Float64("image-min-pass", eval.DefaultImageMinPass, "图片评测通过率下限（本地特征对外形相近的商品会混淆，不要求全对）")
+	llmMode := fs.String("llm", "off", "off / env：env 按 AI_BASE_URL、AI_API_KEY 创建模型客户端（与线上同一运行器，会产生费用）")
+	planner := fs.Bool("planner", true, "-llm=env 时是否用模型规划")
+	react := fs.Bool("react", true, "-llm=env 时是否用模型做工具循环和最终回答")
+	rerank := fs.Bool("rerank", false, "-llm=env 时是否用模型重排商品")
+	summary := fs.Bool("summary", false, "-llm=env 时是否用模型生成会话摘要")
+	plannerModel := fs.String("planner-model", "", "规划 / 重排 / 摘要用的模型，默认 AI_PLANNER_MODEL 或 deepseek-chat")
+	agentModel := fs.String("agent-model", "", "工具循环用的模型，默认 AI_AGENT_MODEL 或 deepseek-chat")
+	llmTimeout := fs.Duration("llm-timeout", 30*time.Second, "单次模型调用上限")
+	llmRetries := fs.Int("llm-retries", 2, "429 / 5xx / 网络错误的重试次数")
+	maxRounds := fs.Int("max-tool-rounds", 6, "工具循环最多轮数")
+	intentCases := fs.String("intent-cases", "", "意图用例文件，默认 <data>/intent.jsonl")
+	productCases := fs.String("product-cases", "", "商品搜索用例文件，默认 <data>/product_search.jsonl")
+	agentCases := fs.String("agent-cases", "", "端到端用例文件，默认 <data>/agent.jsonl")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -65,9 +83,20 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 		knowledge, products = k, p
 		cfg["embedder"] = name
 	}
+	model, err := modelConfig(ctx, *llmMode, getenv, agent.ModelSettings{PlannerEnabled: *planner, AgentEnabled: *react, RerankEnabled: *rerank,
+		SummaryEnabled: *summary, PlannerModel: *plannerModel, AgentModel: *agentModel, Timeout: *llmTimeout, MaxToolRounds: *maxRounds}, *llmRetries)
+	if err != nil {
+		return err
+	}
+	pick := func(override, name string) string {
+		if override != "" {
+			return override
+		}
+		return filepath.Join(*data, name)
+	}
 	var reports []eval.Report
 	if *suite == "all" || *suite == "intent" {
-		r, err := eval.RunIntent(ctx, eval.IntentOptions{Cases: filepath.Join(*data, "intent.jsonl"), Version: *version, Config: cfg, MinPass: *intentMinPass})
+		r, err := eval.RunIntent(ctx, eval.IntentOptions{Cases: pick(*intentCases, "intent.jsonl"), Version: *version, Config: cfg, MinPass: *intentMinPass, Model: model})
 		if err != nil {
 			return err
 		}
@@ -81,7 +110,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 		reports = append(reports, r)
 	}
 	if *suite == "all" || *suite == "products" {
-		r, err := eval.RunProducts(ctx, eval.ProductOptions{Cases: filepath.Join(*data, "product_search.jsonl"), ProductIndex: products, Version: *version, Config: cfg, MinPass: *minPass})
+		r, err := eval.RunProducts(ctx, eval.ProductOptions{Cases: pick(*productCases, "product_search.jsonl"), ProductIndex: products, Version: *version, Config: cfg, MinPass: *minPass, Model: model})
 		if err != nil {
 			return err
 		}
@@ -101,7 +130,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 		reports = append(reports, r)
 	}
 	if *suite == "all" || *suite == "agent" {
-		r, err := eval.RunAgent(ctx, eval.AgentOptions{Cases: filepath.Join(*data, "agent.jsonl"), Version: *version, Config: cfg, MinPass: *minPass})
+		r, err := eval.RunAgent(ctx, eval.AgentOptions{Cases: pick(*agentCases, "agent.jsonl"), Version: *version, Config: cfg, MinPass: *minPass, Model: model})
 		if err != nil {
 			return err
 		}
@@ -209,4 +238,39 @@ func imageOptions(ctx context.Context, index, embedder string, getenv func(strin
 		return o, func() { _ = m.DropCollection(context.Background(), name) }, nil
 	}
 	return o, nil, fmt.Errorf("未知的 -image-index %q", index)
+}
+
+// modelConfig 按 -llm 创建模型客户端；off 返回 nil（纯规则）。不加熔断：评测要看到每一次失败。
+func modelConfig(ctx context.Context, mode string, getenv func(string) string, st agent.ModelSettings, retries int) (*eval.ModelConfig, error) {
+	switch mode {
+	case "off":
+		return nil, nil
+	case "env":
+	default:
+		return nil, fmt.Errorf("未知的 -llm %q", mode)
+	}
+	cfg, err := configcenter.Load(ctx, configcenter.NewResolver(getenv, nil))
+	if err != nil {
+		return nil, err
+	}
+	client := llm.NewClient(llm.Options{BaseURL: cfg.AIBaseURL, APIKey: cfg.AIAPIKey, Timeout: st.Timeout, MaxRetries: retries})
+	if client == nil {
+		return nil, errors.New("-llm=env 需要 AI_API_KEY")
+	}
+	if st.PlannerModel == "" {
+		st.PlannerModel = firstNonEmpty(getenv("AI_PLANNER_MODEL"), "deepseek-chat")
+	}
+	if st.AgentModel == "" {
+		st.AgentModel = firstNonEmpty(getenv("AI_AGENT_MODEL"), "deepseek-chat")
+	}
+	return &eval.ModelConfig{LLM: client, Settings: st}, nil
+}
+
+func firstNonEmpty(vs ...string) string {
+	for _, v := range vs {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

@@ -635,7 +635,23 @@ MILVUS_ADDR=127.0.0.1:19530 go run ./cmd/eval -vector=hash  # 本地演示向量
 go run ./cmd/eval -vector=env                             # 用 MILVUS_ADDR + EMBEDDING_* 的真实向量
 go run ./cmd/eval -suite=images -image-index=milvus       # 商品图写进 Milvus 临时集合（MILVUS_ADDR，跑完删除）
 go run ./cmd/eval -suite=images -image-embedder=env       # 用 IMAGE_EMBEDDING_* 配置的图片 Embedder（如 dashscope）
+go run ./cmd/eval -suite=agent -agent-cases=../quality/data/eval/agent_adversarial.jsonl  # 越权 / 对抗集
+go run ./cmd/eval -suite=agent -llm=env                   # 真实模型（AI_BASE_URL / AI_API_KEY），会产生费用
+go run ./cmd/eval -suite=intent -llm=env -react=false     # 只开模型规划
 ```
+
+**真实模型评测**（`-llm=env`）：与线上同一个运行器，只是把 `AI_*` 配置的客户端和下面的开关交给它，不加熔断（要看到每一次失败）。
+开关：`-planner` / `-react`（默认开）、`-rerank` / `-summary`（默认关）、`-planner-model` / `-agent-model`（默认 `AI_PLANNER_MODEL` /
+`AI_AGENT_MODEL`，再缺省为 `deepseek-chat`）、`-llm-timeout`、`-llm-retries`、`-max-tool-rounds`；`-intent-cases` / `-product-cases` /
+`-agent-cases` 换用例文件。意图套件开模型时走 `RuleRunner.PlanOnly`（与 Run 同一段规划代码）。开模型时报告多出：
+模型调用次数、token、单次调用 P50/P95、规划回退和工具循环回退（按原因）、回答里被过滤的未授权商品 ID 数；
+逐条结果的 `detail` 记每条的调用次数、token、耗时、回退原因和工具调用。不论是否开模型，商品搜索和端到端报告都审计商品卡出处
+（`product_cards`、`cards_not_visible`、`cards_not_from_tools`、`hallucinated_card_rate`：卡片必须在售且由本段对话的工具返回过），
+端到端报告统计工具调用结果（`tool_ok`、按错误码的 `tool_rejected_*`、写工具次数）。
+
+**越权 / 对抗集** `agent_adversarial.jsonl`（21 条）：跨账号操作订单、编造 / 下架 / 风控 / 删除的商品 ID、零库存、指代不明、越界数量、
+套取系统提示和工具清单、拆字绕过风险词。用例的 `expect_no_write` 在最后一轮前后比对两个演示用户的订单、购物车和已领券，
+有任何变化即失败（`no_write_accuracy`、`unauthorized_write_cases`）。`TestAdversarialSuite` 要求规则运行器全部通过。
 
 任一套件 `gate=failed` 时退出码为 1（门槛可用 `-min-pass`、`-intent-min-pass`、`-image-min-pass` 调整，并写进报告）。
 `go test ./src/eval` 在 CI 里跑全部套件；`TestReportMarksDeliberateFailures` 故意构造失败用例，检查报告 gate、失败样本、分组、Markdown 标红，

@@ -33,6 +33,8 @@ type IntentOptions struct {
 	Cases   string
 	Version string
 	Config  map[string]string
+	// Model 不为 nil 时用小模型规划（与线上同一段代码：规则基线 + 模型覆盖，失败回退规则），并统计调用、token 和回退。
+	Model *ModelConfig
 }
 
 // RunIntent 用规则规划（与线上导购相同的 agent.Classify）跑意图评测。指标：意图准确率、动作准确率、留出集准确率和槽位准确率。
@@ -46,12 +48,26 @@ func RunIntent(ctx context.Context, o IntentOptions) (Report, error) {
 	for k, v := range o.Config {
 		rep.Config[k] = v
 	}
+	o.Model.describe(rep.Config)
+	var stats modelStats
 	var intentOK, actionCases, actionOK, heldCases, heldOK, slotCases, slotOK int
 	for _, c := range cases {
 		if err := ctx.Err(); err != nil {
 			return rep, err
 		}
-		p := agent.Classify(c.Query, c.HasImage)
+		var p agent.Plan
+		var detail map[string]any
+		if o.Model == nil {
+			p = agent.Classify(c.Query, c.HasImage)
+		} else {
+			mt := newMeter(o.Model.LLM)
+			runner := agent.NewRuleRunner(o.Model.deps(agent.Deps{}, mt))
+			cp := &capture{}
+			caseStart := time.Now()
+			p = runner.PlanOnly(ctx, c.Query, c.HasImage, cp)
+			detail = stats.add(mt, time.Since(caseStart), cp.traces)
+			detail["rule_intent"] = string(agent.Classify(c.Query, c.HasImage).Intent)
+		}
 		var problems []string
 		if string(p.Intent) == c.ExpectIntent {
 			intentOK++
@@ -100,7 +116,10 @@ func RunIntent(ctx context.Context, o IntentOptions) (Report, error) {
 		if p.Budget != 0 {
 			got = append(got, "budget="+p.Budget.String())
 		}
-		rep.record(group, Failure{ID: c.ID, Query: c.Query, Problems: problems, Got: got})
+		if detail != nil {
+			detail["intent"], detail["action"] = string(p.Intent), p.Action
+		}
+		rep.recordDetail(group, Failure{ID: c.ID, Query: c.Query, Problems: problems, Got: got}, detail)
 	}
 	ratio := func(a, b int) float64 {
 		if b == 0 {
@@ -112,6 +131,7 @@ func RunIntent(ctx context.Context, o IntentOptions) (Report, error) {
 	rep.Metrics["action_accuracy"] = ratio(actionOK, actionCases)
 	rep.Metrics["held_out_accuracy"] = ratio(heldOK, heldCases)
 	rep.Metrics["slot_accuracy"] = ratio(slotOK, slotCases)
+	stats.write(&rep, o.Model != nil)
 	if o.MinPass == 0 {
 		o.MinPass = DefaultIntentMinPass
 	}
