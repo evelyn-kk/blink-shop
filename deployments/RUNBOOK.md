@@ -35,8 +35,11 @@
      # 重复以上两步直到旧实例都换掉
      ```
      nginx 的上游按 Docker DNS 每 10 秒重新解析，下线实例的请求连不上时自动换下一个实例（`proxy_next_upstream` 默认 error / timeout，
-     连接都没建立的写请求也会换）。下线期间 API 的响应都带 `Connection: close`，nginx 的上游空闲连接 4 秒过期（`keepalive_timeout 4s`），
-     所以 `SHUTDOWN_DRAIN` 必须大于 4 秒（默认模板 5s）：否则 API 关闭时 nginx 可能正用一条被关掉的长连接发写请求，返回 502。
+     连接都没建立的写请求也会换）。**已知残留**：开源 nginx 不看 `/ready`，下线实例在 `SHUTDOWN_DRAIN` 期间仍会收到新连接；进程关闭监听时，
+     已完成握手、还在内核队列里没被接受的连接会被重置，nginx 已经把请求发出去，GET 会换实例重试，写请求返回 502。
+     2026-10-12 演练（3 实例、32 线程持续 POST、替换 1 个实例，每次约 10 万个写请求）：10 次里 6 次各出现 1 个 502。
+     试过“下线期间响应带 Connection: close + nginx 上游空闲连接 4 秒过期”，5 次对 5 次没有差别，已撤回。
+     要做到 0：用会按 `/ready` 摘除实例的负载均衡（云 LB、Kubernetes Service、Traefik / Envoy），或在发 SIGTERM 前先把实例从上游摘掉。
      演练记录见 `docs/10-release-readiness.md`。回滚同样按实例逐个替换成上一版本镜像。
 6. **发布后 15 分钟**：看 5xx 比例、接口 P95、结算成功率、导购失败率、熔断状态；任何一项告警就按“回滚”处理。
 
